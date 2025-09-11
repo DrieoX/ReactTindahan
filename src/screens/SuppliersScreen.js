@@ -1,106 +1,179 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '../db';
-import { useLocation } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 
-export default function SuppliersScreen({ userMode }) {
+export default function ResupplyScreen({ userMode }) {
   const location = useLocation();
+  const navigate = useNavigate();
   const mode = userMode || location.state?.userMode || 'client';
 
+  const [products, setProducts] = useState([]);
   const [suppliers, setSuppliers] = useState([]);
-  const [name, setName] = useState('');
-  const [contact, setContact] = useState('');
-  const [address, setAddress] = useState('');
-  const [editingId, setEditingId] = useState(null);
+  const [selectedProductId, setSelectedProductId] = useState(null);
+  const [selectedSupplierId, setSelectedSupplierId] = useState(null);
+  const [quantity, setQuantity] = useState('');
+  const [unitCost, setUnitCost] = useState('');
+  const [threshold, setThreshold] = useState('');
+  const [expirationDate, setExpirationDate] = useState('');
 
   useEffect(() => {
-    fetchSuppliers();
+    fetchData();
   }, []);
 
-  const fetchSuppliers = async () => {
+  const fetchData = async () => {
     try {
-      const list = await db.suppliers.toArray();
-      setSuppliers(list);
+      const prodRes = await db.products.toArray();
+      const supRes = await db.suppliers.toArray();
+      setProducts(prodRes);
+      setSuppliers(supRes);
     } catch (err) {
-      console.error('Error fetching suppliers:', err);
+      console.error('Error fetching products or suppliers:', err);
     }
   };
 
-  const handleSave = async () => {
-    if (!name.trim()) return alert('Name is required.');
+  const handleResupply = async () => {
+    if (!selectedProductId || !selectedSupplierId || !quantity || !unitCost || !expirationDate || !threshold) {
+      alert('Please fill out all fields.');
+      return;
+    }
+
     try {
-      if (editingId) {
-        await db.suppliers.update(editingId, { name, contact_info: contact, address });
-      } else {
-        await db.suppliers.add({ name, contact_info: contact, address });
+      const productId = parseInt(selectedProductId);
+      const supplierId = parseInt(selectedSupplierId);
+
+      // Insert into Resupplied_items
+      await db.resupplied_items.add({
+        product_id: productId,
+        supplier_id: supplierId,
+        quantity: parseInt(quantity),
+        unit_cost: parseFloat(unitCost),
+        resupply_date: new Date().toISOString().split('T')[0],
+        expiration_date: expirationDate,
+      });
+
+      // Ensure product has supplier_id linked
+      const existingProduct = await db.products.get(productId);
+      if (existingProduct && (!existingProduct.supplier_id || existingProduct.supplier_id !== supplierId)) {
+        await db.products.update(productId, { supplier_id: supplierId });
       }
-      setName('');
-      setContact('');
-      setAddress('');
-      setEditingId(null);
-      fetchSuppliers();
+
+      // Ensure product exists in Inventory
+      const existingInv = await db.inventory.where({ product_id: productId }).first();
+
+      if (!existingInv) {
+        await db.inventory.add({
+          product_id: productId,
+          supplier_id: supplierId,
+          quantity: 0,
+          expiration_date: expirationDate,
+          threshold: parseInt(threshold),
+        });
+      }
+
+      // Update Inventory quantity
+      await db.inventory.where({ product_id: productId }).modify((inv) => {
+        inv.quantity += parseInt(quantity);
+        inv.expiration_date = expirationDate;
+        inv.threshold = parseInt(threshold);
+        inv.supplier_id = supplierId;
+      });
+
+      alert('Product resupplied successfully.');
+      setQuantity('');
+      setUnitCost('');
+      setThreshold('');
+      setExpirationDate('');
+      setSelectedProductId(null);
+      setSelectedSupplierId(null);
+
+      fetchData();
     } catch (err) {
-      console.error('Error saving supplier:', err);
+      console.error('Error during resupply:', err);
+      alert('Failed to resupply product.');
     }
   };
 
-  const handleEdit = (supplier) => {
-    setEditingId(supplier.supplier_id);
-    setName(supplier.name);
-    setContact(supplier.contact_info);
-    setAddress(supplier.address);
-  };
-
-  const handleDelete = async (id) => {
-    if (!window.confirm('Are you sure you want to delete this supplier?')) return;
-    try {
-      await db.suppliers.delete(id);
-      fetchSuppliers();
-    } catch (err) {
-      console.error('Error deleting supplier:', err);
-    }
-  };
+  // Filter products by selected supplier
+  const filteredProducts = selectedSupplierId
+    ? products.filter((prod) => prod.supplier_id === parseInt(selectedSupplierId) || !prod.supplier_id)
+    : [];
 
   return (
     <div style={styles.container}>
-      <h1 style={styles.pageTitle}>Suppliers Management</h1>
-      <p style={styles.pageSubtitle}>Manage product suppliers and contact information</p>
+      <h2 style={styles.pageTitle}>Resupply Inventory</h2>
+      <p style={styles.pageSubtitle}>Add new stock to your inventory</p>
 
-      {/* Form Section */}
       <div style={styles.formContainer}>
-        <h3 style={styles.formHeader}>{editingId ? 'Edit Supplier' : 'Add New Supplier'}</h3>
-        <input placeholder="Supplier Name" value={name} onChange={(e) => setName(e.target.value)} style={styles.input} />
-        <input placeholder="Contact Information" value={contact} onChange={(e) => setContact(e.target.value)} style={styles.input} />
-        <input placeholder="Address" value={address} onChange={(e) => setAddress(e.target.value)} style={styles.input} />
-        <button onClick={handleSave} style={styles.saveButton}>
-          {editingId ? 'Update Supplier' : 'Add Supplier'}
-        </button>
-      </div>
+        <label style={styles.label}>Supplier</label>
+        <select
+          style={styles.pickerContainer}
+          value={selectedSupplierId || ''}
+          onChange={(e) => {
+            setSelectedSupplierId(e.target.value);
+            setSelectedProductId(null); // reset product selection when supplier changes
+          }}
+        >
+          <option value="">Select Supplier</option>
+          {suppliers.map((sup) => (
+            <option key={sup.supplier_id} value={sup.supplier_id}>
+              {sup.name}
+            </option>
+          ))}
+        </select>
 
-      {/* Suppliers List */}
-      <div style={styles.listContainer}>
-        <h3 style={styles.sectionHeader}>Suppliers List</h3>
-        {suppliers.length === 0 ? (
-          <div style={styles.emptyState}>
-            <p style={styles.emptyText}>No suppliers found</p>
-            <p style={styles.emptySubText}>Add suppliers to get started</p>
-          </div>
-        ) : (
-          suppliers.map((item) => (
-            <div key={item.supplier_id} style={styles.supplierCard}>
-              <p style={styles.supplierName}>{item.name}</p>
-              {item.contact_info && <p style={styles.supplierDetail}>Contact: {item.contact_info}</p>}
-              {item.address && <p style={styles.supplierDetail}>Address: {item.address}</p>}
-              <div style={styles.actionButtons}>
-                <button onClick={() => handleEdit(item)} style={styles.editButton}>Edit</button>
-                <button onClick={() => handleDelete(item.supplier_id)} style={styles.deleteButton}>Delete</button>
-              </div>
-            </div>
-          ))
-        )}
+        <label style={styles.label}>Product</label>
+        <select
+          style={styles.pickerContainer}
+          value={selectedProductId || ''}
+          onChange={(e) => setSelectedProductId(e.target.value)}
+          disabled={!selectedSupplierId}
+        >
+          <option value="">Select Product</option>
+          {filteredProducts.map((prod) => (
+            <option key={prod.product_id} value={prod.product_id}>
+              {prod.name}
+            </option>
+          ))}
+        </select>
+
+        <input
+          type="number"
+          placeholder="Quantity"
+          value={quantity}
+          onChange={(e) => setQuantity(e.target.value)}
+          style={styles.input}
+        />
+        <input
+          type="number"
+          placeholder="Unit Cost"
+          value={unitCost}
+          onChange={(e) => setUnitCost(e.target.value)}
+          style={styles.input}
+        />
+        <input
+          type="number"
+          placeholder="Threshold Quantity"
+          value={threshold}
+          onChange={(e) => setThreshold(e.target.value)}
+          style={styles.input}
+        />
+
+        <label style={styles.label}>Expiration Date</label>
+        <input
+          type="date"
+          value={expirationDate}
+          onChange={(e) => setExpirationDate(e.target.value)}
+          style={styles.input}
+        />
+
+        <button style={styles.submitButton} onClick={handleResupply}>
+          Submit Resupply
+        </button>
       </div>
     </div>
   );
 }
+
 
 const styles = {
   container: {

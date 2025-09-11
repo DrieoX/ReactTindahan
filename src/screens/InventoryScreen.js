@@ -8,7 +8,7 @@ export default function InventoryScreen({ userMode }) {
   const [suppliers, setSuppliers] = useState([]);
   const [showAddModal, setShowAddModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
-  const [newItem, setNewItem] = useState({ name: '', sku: '', description: '', unit_price: '', supplier_id: null });
+  const [newItem, setNewItem] = useState({ name: '', sku: '', description: '', unit_price: '' });
   const [editingItem, setEditingItem] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
 
@@ -21,14 +21,17 @@ export default function InventoryScreen({ userMode }) {
     try {
       const products = await db.products.toArray();
       const inventoryData = await db.inventory.toArray();
+      const supplierList = await db.suppliers.toArray();
 
-      // merge products with inventory
       const items = products.map((p) => {
         const inv = inventoryData.find((i) => i.product_id === p.product_id) || {};
+        const supplier = supplierList.find((s) => s.supplier_id === inv.supplier_id);
         return {
           ...p,
           quantity: inv.quantity || 0,
           expiration_date: inv.expiration_date || null,
+          threshold: inv.threshold || 0,
+          supplier_name: supplier ? supplier.name : 'N/A',
         };
       });
 
@@ -48,7 +51,7 @@ export default function InventoryScreen({ userMode }) {
   };
 
   const handleAddItem = async () => {
-    if (!newItem.name || !newItem.unit_price || !newItem.supplier_id)
+    if (!newItem.name || !newItem.unit_price)
       return alert('Please fill out all required fields.');
     try {
       const existing = await db.products.where('name').equals(newItem.name).first();
@@ -59,11 +62,11 @@ export default function InventoryScreen({ userMode }) {
         name: newItem.name,
         description: newItem.description,
         unit_price: parseFloat(newItem.unit_price),
-        supplier_id: parseInt(newItem.supplier_id),
+        supplier_id: null, // ❌ Supplier not chosen here
       });
 
       setShowAddModal(false);
-      setNewItem({ name: '', sku: '', description: '', unit_price: '', supplier_id: null });
+      setNewItem({ name: '', sku: '', description: '', unit_price: '' });
       fetchInventory();
     } catch (err) {
       console.error('Error adding product:', err);
@@ -82,7 +85,7 @@ export default function InventoryScreen({ userMode }) {
         name: editingItem.name,
         description: editingItem.description,
         unit_price: parseFloat(editingItem.unit_price),
-        supplier_id: parseInt(editingItem.supplier_id),
+        // ❌ supplier_id excluded here — handled only by resupply
       });
 
       setShowEditModal(false);
@@ -90,6 +93,22 @@ export default function InventoryScreen({ userMode }) {
       fetchInventory();
     } catch (err) {
       console.error('Error saving product edit:', err);
+    }
+  };
+
+  const handleDeleteItem = async () => {
+    if (!editingItem) return;
+    if (!window.confirm(`Are you sure you want to delete "${editingItem.name}"?`)) return;
+
+    try {
+      await db.products.delete(editingItem.product_id);
+      await db.inventory.where('product_id').equals(editingItem.product_id).delete();
+
+      setShowEditModal(false);
+      setEditingItem(null);
+      fetchInventory();
+    } catch (err) {
+      console.error('Error deleting product:', err);
     }
   };
 
@@ -102,7 +121,7 @@ export default function InventoryScreen({ userMode }) {
   const expiredCount = inventory.filter(
     (item) => item.expiration_date && new Date(item.expiration_date) < new Date()
   ).length;
-  const lowStockCount = inventory.filter((item) => item.quantity < 10).length;
+  const lowStockCount = inventory.filter((item) => item.quantity < (item.threshold || 10)).length;
 
   return (
     <div style={styles.container}>
@@ -123,7 +142,7 @@ export default function InventoryScreen({ userMode }) {
 
       <input
         style={styles.searchInput}
-        placeholder="Search products by name, SKU, or supplier..."
+        placeholder="Search products by name, SKU..."
         value={searchQuery}
         onChange={(e) => setSearchQuery(e.target.value)}
       />
@@ -138,6 +157,7 @@ export default function InventoryScreen({ userMode }) {
               <th style={{ width: 80 }}>Price</th>
               <th style={{ width: 80 }}>Stock</th>
               <th style={{ width: 120 }}>Expiry Date</th>
+              <th style={{ width: 120 }}>Supplier</th>
               <th style={{ width: 100 }}>Status</th>
               <th style={{ width: 100 }}>Actions</th>
             </tr>
@@ -149,7 +169,7 @@ export default function InventoryScreen({ userMode }) {
               if (item.expiration_date && new Date(item.expiration_date) < new Date()) {
                 status = 'Expired';
                 statusStyle = styles.statusExpired;
-              } else if (item.quantity < 10) {
+              } else if (item.quantity < (item.threshold || 10)) {
                 status = 'Low Stock';
                 statusStyle = styles.statusLowStock;
               }
@@ -160,6 +180,7 @@ export default function InventoryScreen({ userMode }) {
                   <td style={{ width: 80 }}>₱{item.unit_price || '0.00'}</td>
                   <td style={{ width: 80 }}>{item.quantity || 0}</td>
                   <td style={{ width: 120 }}>{item.expiration_date || 'N/A'}</td>
+                  <td style={{ width: 120 }}>{item.supplier_name || 'N/A'}</td>
                   <td style={{ width: 100, ...statusStyle }}>{status}</td>
                   <td style={{ width: 100 }}>
                     <button style={styles.editButton} onClick={() => handleEditItem(item)}>
@@ -185,17 +206,18 @@ export default function InventoryScreen({ userMode }) {
             setShowEditModal(false);
           }}
           onSubmit={showAddModal ? handleAddItem : handleSaveEdit}
+          onDelete={showEditModal ? handleDeleteItem : null}
           item={showAddModal ? newItem : editingItem}
           setItem={showAddModal ? setNewItem : setEditingItem}
-          suppliers={suppliers}
           title={showAddModal ? 'Add New Product' : 'Edit Product'}
+          isEdit={showEditModal}
         />
       )}
     </div>
   );
 }
 
-function ProductModal({ visible, onClose, onSubmit, item, setItem, suppliers, title }) {
+function ProductModal({ visible, onClose, onSubmit, onDelete, item, setItem, title, isEdit }) {
   if (!visible) return null;
   return (
     <div style={styles.modalOverlay}>
@@ -227,23 +249,16 @@ function ProductModal({ visible, onClose, onSubmit, item, setItem, suppliers, ti
           onChange={(e) => setItem({ ...item, unit_price: e.target.value })}
           style={styles.input}
         />
-        <label style={styles.pickerLabel}>Select Supplier:</label>
-        <select
-          style={styles.pickerContainer}
-          value={item?.supplier_id || ''}
-          onChange={(e) => setItem({ ...item, supplier_id: parseInt(e.target.value) })}
-        >
-          <option value="">Select Supplier</option>
-          {suppliers.map((sup) => (
-            <option key={sup.supplier_id} value={sup.supplier_id}>
-              {sup.name}
-            </option>
-          ))}
-        </select>
+
         <div style={styles.modalButtons}>
           <button style={styles.submitButton} onClick={onSubmit}>
             Submit
           </button>
+          {isEdit && (
+            <button style={styles.deleteButton} onClick={onDelete}>
+              Delete
+            </button>
+          )}
           <button style={styles.cancelButton} onClick={onClose}>
             Cancel
           </button>
@@ -341,6 +356,17 @@ const styles = {
     fontWeight: 600,
     width: '100%',
     maxWidth: '400px',
+  },
+
+  deleteButton: {
+    backgroundColor: '#ef4444',
+    color: '#fff',
+    border: 'none',
+    padding: '0.9rem',
+    borderRadius: 12,
+    cursor: 'pointer',
+    flex: 1,
+    fontSize: 'clamp(14px, 1.2vw, 16px)',
   },
 
   modalOverlay: {

@@ -13,7 +13,7 @@ import MainLayout from './components/MainLayout';
 
 import { db } from './db';
 
-// 🔹 Client stack (no extra nav)
+// 🔹 Client stack
 function ClientStack({ handleLogout, userMode }) {
   return (
     <MainLayout userMode={userMode} handleLogout={handleLogout}>
@@ -27,7 +27,7 @@ function ClientStack({ handleLogout, userMode }) {
   );
 }
 
-// 🔹 Server stack (no extra nav)
+// 🔹 Server stack
 function ServerStack({ handleLogout, userMode }) {
   return (
     <MainLayout userMode={userMode} handleLogout={handleLogout}>
@@ -76,8 +76,10 @@ export default function App() {
 
   const handleLogout = () => {
     setUserMode(null);
+    localStorage.removeItem('user');
     localStorage.removeItem('userMode');
-    window.location.href = '/';
+    sessionStorage.clear();
+    window.location.href = '/'; // force reset to login
   };
 
   return (
@@ -87,10 +89,12 @@ export default function App() {
       ) : userMode === 'client' ? (
         <ClientStack handleLogout={handleLogout} userMode={userMode} />
       ) : (
-        <AuthStack setUserMode={(mode) => {
-          setUserMode(mode);
-          localStorage.setItem('userMode', mode);
-        }} />
+        <AuthStack
+          setUserMode={(mode) => {
+            setUserMode(mode);
+            localStorage.setItem('userMode', mode);
+          }}
+        />
       )}
     </Router>
   );

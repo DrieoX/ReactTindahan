@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 
 const SIDEBAR_WIDTH = 200;
 
-export default function MainLayout({ children, userMode }) {
+export default function MainLayout({ children, userMode, handleLogout }) {
   const navigate = useNavigate();
   const [sidebarVisible, setSidebarVisible] = useState(false);
 
@@ -23,12 +23,6 @@ export default function MainLayout({ children, userMode }) {
     );
   }
 
-  const handleLogout = () => {
-    localStorage.removeItem('user');
-    localStorage.removeItem('userMode');
-    navigate('/');
-  };
-
   return (
     <div style={styles.container}>
       {/* Sidebar */}
@@ -43,7 +37,7 @@ export default function MainLayout({ children, userMode }) {
             key={item.name}
             onClick={() => {
               navigate(`/${item.name.toLowerCase()}`);
-              setSidebarVisible(false); // auto-close on nav
+              setSidebarVisible(false);
             }}
             style={styles.menuButton}
           >
@@ -71,6 +65,8 @@ export default function MainLayout({ children, userMode }) {
     </div>
   );
 }
+
+
 
 const styles = {
   container: {
