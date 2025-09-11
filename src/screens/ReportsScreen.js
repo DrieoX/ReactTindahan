@@ -3,18 +3,17 @@ import { db } from '../db';
 
 export default function ReportsScreen({ userMode }) {
   const [report, setReport] = useState([]);
+  const [resupplyReport, setResupplyReport] = useState([]);
   const mode = userMode || 'client'; // default client if not passed
 
   useEffect(() => {
     fetchReport();
+    fetchResupplyReport();
   }, []);
 
   const fetchReport = async () => {
     try {
-      const salesData = await db.sale_items
-        .toArray();
-
-      // Join manually (since Dexie doesn’t support joins directly)
+      const salesData = await db.sale_items.toArray();
       const sales = await db.sales.toArray();
       const products = await db.products.toArray();
 
@@ -31,7 +30,32 @@ export default function ReportsScreen({ userMode }) {
 
       setReport(enriched);
     } catch (err) {
-      console.error("Error fetching report:", err);
+      console.error("Error fetching sales report:", err);
+    }
+  };
+
+  const fetchResupplyReport = async () => {
+    try {
+      const resuppliedItems = await db.resupplied_items.toArray();
+      const products = await db.products.toArray();
+      const suppliers = await db.suppliers.toArray();
+
+      const enriched = resuppliedItems.map(item => {
+        const product = products.find(p => p.product_id === item.product_id);
+        const supplier = suppliers.find(s => s.supplier_id === item.supplier_id);
+        return {
+          resupply_date: item.resupply_date,
+          product_name: product?.name,
+          supplier_name: supplier?.name,
+          quantity: item.quantity,
+          unit_cost: item.unit_cost,
+          expiration_date: item.expiration_date || 'N/A'
+        };
+      }).sort((a, b) => new Date(b.resupply_date) - new Date(a.resupply_date));
+
+      setResupplyReport(enriched);
+    } catch (err) {
+      console.error("Error fetching resupply report:", err);
     }
   };
 
@@ -44,13 +68,17 @@ export default function ReportsScreen({ userMode }) {
 
       <div style={styles.metricsContainer}>
         <div style={styles.metricCard}>
-          <p style={styles.metricValue}>₱0.00</p>
+          <p style={styles.metricValue}>
+            ₱{report.reduce((sum, r) => sum + (r.amount || 0), 0).toFixed(2)}
+          </p>
           <p style={styles.metricLabel}>Total Revenue</p>
           <p style={styles.metricSubLabel}>Today</p>
         </div>
 
         <div style={styles.metricCard}>
-          <p style={styles.metricValue}>₱0.00</p>
+          <p style={styles.metricValue}>
+            ₱{report.length > 0 ? (report.reduce((sum, r) => sum + (r.amount || 0), 0) / report.length).toFixed(2) : '0.00'}
+          </p>
           <p style={styles.metricLabel}>Avg. Transaction</p>
           <p style={styles.metricSubLabel}>Today</p>
         </div>
@@ -79,13 +107,25 @@ export default function ReportsScreen({ userMode }) {
       </div>
 
       <div style={styles.section}>
-        <h3 style={styles.sectionHeader}>Top Selling Products</h3>
-        <div style={styles.placeholderCard}>
-          <p style={styles.placeholderText}>No sales data available</p>
-          <p style={styles.placeholderSubText}>
-            Top selling products will appear here
-          </p>
-        </div>
+        <h3 style={styles.sectionHeader}>Resupply History</h3>
+        {resupplyReport.length === 0 ? (
+          <div style={styles.placeholderCard}>
+            <p style={styles.placeholderText}>No resupply data available</p>
+            <p style={styles.placeholderSubText}>
+              Resupply history will appear here once items are restocked
+            </p>
+          </div>
+        ) : (
+          resupplyReport.map((item, index) => (
+            <div key={index} style={styles.reportItem}>
+              <p style={styles.reportDate}>{item.resupply_date}</p>
+              <p style={styles.reportName}>{item.product_name}</p>
+              <p style={styles.reportDetails}>
+                Supplier: {item.supplier_name}, Qty: {item.quantity}, Unit Cost: ₱{item.unit_cost}, Expiry: {item.expiration_date}
+              </p>
+            </div>
+          ))
+        )}
       </div>
     </div>
   );

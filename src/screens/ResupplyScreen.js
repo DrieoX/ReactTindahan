@@ -1,10 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '../db';
-import { useLocation, useNavigate } from 'react-router-dom';
+import { useLocation } from 'react-router-dom';
 
 export default function ResupplyScreen({ userMode }) {
   const location = useLocation();
-  const navigate = useNavigate();
   const mode = userMode || location.state?.userMode || 'client';
 
   const [products, setProducts] = useState([]);
@@ -38,36 +37,38 @@ export default function ResupplyScreen({ userMode }) {
     }
 
     try {
-      // Insert into Resupplied_items
+      // Insert into resupplied_items
       await db.resupplied_items.add({
         product_id: parseInt(selectedProductId),
         supplier_id: parseInt(selectedSupplierId),
+        user_id: 1, // set your user id here if needed
         quantity: parseInt(quantity),
         unit_cost: parseFloat(unitCost),
         resupply_date: new Date().toISOString().split('T')[0],
         expiration_date: expirationDate,
       });
 
-      // Ensure product exists in Inventory
-      const existingInv = await db.inventory
-        .where({ product_id: parseInt(selectedProductId) })
-        .first();
+      // Update inventory
+      const existingInv = await db.inventory.where({ product_id: parseInt(selectedProductId) }).first();
 
       if (!existingInv) {
+        // If inventory record does not exist, create it
         await db.inventory.add({
           product_id: parseInt(selectedProductId),
-          quantity: 0,
+          supplier_id: parseInt(selectedSupplierId),
+          quantity: parseInt(quantity),
           expiration_date: expirationDate,
           threshold: parseInt(threshold),
         });
+      } else {
+        // Update existing inventory record
+        await db.inventory.where({ product_id: parseInt(selectedProductId) }).modify(inv => {
+          inv.quantity += parseInt(quantity);  // ✅ Add to live stock
+          inv.expiration_date = expirationDate;
+          inv.threshold = parseInt(threshold);
+          inv.supplier_id = parseInt(selectedSupplierId);
+        });
       }
-
-      // Update Inventory quantity
-      await db.inventory.where({ product_id: parseInt(selectedProductId) }).modify((inv) => {
-        inv.quantity += parseInt(quantity);
-        inv.expiration_date = expirationDate;
-        inv.threshold = parseInt(threshold);
-      });
 
       alert('Product resupplied successfully.');
       setQuantity('');
@@ -149,6 +150,7 @@ export default function ResupplyScreen({ userMode }) {
     </div>
   );
 }
+
 const styles = {
   container: {
     padding: 'clamp(12px, 4vw, 30px)',
