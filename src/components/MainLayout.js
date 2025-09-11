@@ -79,8 +79,6 @@ const styles = {
     position: 'relative',
     minHeight: '100vh',
   },
-
-  // Top Navigation Bar
   topBar: {
     position: 'fixed',
     top: 0,
@@ -93,10 +91,8 @@ const styles = {
     padding: '0 16px',
     backgroundColor: '#f9fafb',
     boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
-    zIndex: 100,
+    zIndex: 5,
   },
-
-  // Sidebar (Desktop)
   sidebar: {
     position: 'fixed',
     top: 50,
@@ -104,19 +100,9 @@ const styles = {
     width: SIDEBAR_WIDTH,
     backgroundColor: '#f0f0f0',
     padding: '20px 12px',
-    transition: 'transform 0.3s ease-in-out',
-    zIndex: 90,
+    transition: 'left 0.3s',
+    zIndex: 10,
   },
-
-  // Sidebar (Mobile - hidden by default, slide in)
-  sidebarHidden: {
-    transform: 'translateX(-100%)',
-  },
-  sidebarVisible: {
-    transform: 'translateX(0)',
-  },
-
-  // Sidebar buttons
   menuButton: {
     display: 'block',
     width: '100%',
@@ -136,10 +122,7 @@ const styles = {
     background: 'none',
     border: 'none',
     cursor: 'pointer',
-    marginBottom: 12,
   },
-
-  // Logout button
   logoutButton: {
     fontSize: 14,
     fontWeight: 600,
@@ -149,21 +132,11 @@ const styles = {
     borderRadius: 6,
     padding: '6px 12px',
     cursor: 'pointer',
-    marginTop: 20,
   },
-
-  // Main content
   mainContent: {
     flex: 1,
     padding: 20,
     marginTop: 50,
     marginLeft: SIDEBAR_WIDTH,
-    transition: 'margin-left 0.3s ease-in-out',
-  },
-
-  // On small screens, no fixed sidebar
-  mainContentFull: {
-    marginLeft: 0,
   },
 };
-
