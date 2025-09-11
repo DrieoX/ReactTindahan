@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 
 const SIDEBAR_WIDTH = 200;
 
@@ -7,7 +7,7 @@ export default function MainLayout({ children, userMode }) {
   const navigate = useNavigate();
   const [sidebarVisible, setSidebarVisible] = useState(false);
 
-  const mode = (userMode || 'client').toLowerCase();
+  const mode = userMode ? userMode.toLowerCase() : 'client';
 
   const menuItems = [
     { name: 'Dashboard', label: 'Home' },
@@ -23,14 +23,28 @@ export default function MainLayout({ children, userMode }) {
     );
   }
 
+  const handleLogout = () => {
+    localStorage.removeItem('user');
+    localStorage.removeItem('userMode');
+    navigate('/');
+  };
+
   return (
     <div style={styles.container}>
       {/* Sidebar */}
-      <div style={{ ...styles.sidebar, left: sidebarVisible ? 0 : -SIDEBAR_WIDTH }}>
+      <div
+        style={{
+          ...styles.sidebar,
+          left: sidebarVisible ? 0 : -SIDEBAR_WIDTH,
+        }}
+      >
         {menuItems.map((item) => (
           <button
             key={item.name}
-            onClick={() => navigate(`/${item.name.toLowerCase()}`)}
+            onClick={() => {
+              navigate(`/${item.name.toLowerCase()}`);
+              setSidebarVisible(false); // auto-close on nav
+            }}
             style={styles.menuButton}
           >
             {item.label}
@@ -40,8 +54,15 @@ export default function MainLayout({ children, userMode }) {
 
       {/* Top bar */}
       <div style={styles.topBar}>
-        <button onClick={() => setSidebarVisible(!sidebarVisible)} style={styles.menuTitle}>
-          Menu
+        <button
+          onClick={() => setSidebarVisible(!sidebarVisible)}
+          style={styles.menuTitle}
+        >
+          ☰ Menu
+        </button>
+
+        <button onClick={handleLogout} style={styles.logoutButton}>
+          Logout
         </button>
       </div>
 
@@ -52,7 +73,14 @@ export default function MainLayout({ children, userMode }) {
 }
 
 const styles = {
-  container: { display: 'flex', flexDirection: 'row', position: 'relative', minHeight: '100vh' },
+  container: {
+    display: 'flex',
+    flexDirection: 'row',
+    position: 'relative',
+    minHeight: '100vh',
+  },
+
+  // Top Navigation Bar
   topBar: {
     position: 'fixed',
     top: 0,
@@ -61,11 +89,14 @@ const styles = {
     height: 50,
     display: 'flex',
     alignItems: 'center',
+    justifyContent: 'space-between',
     padding: '0 16px',
     backgroundColor: '#f9fafb',
     boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
-    zIndex: 5,
+    zIndex: 100,
   },
+
+  // Sidebar (Desktop)
   sidebar: {
     position: 'fixed',
     top: 50,
@@ -73,9 +104,19 @@ const styles = {
     width: SIDEBAR_WIDTH,
     backgroundColor: '#f0f0f0',
     padding: '20px 12px',
-    transition: 'left 0.3s',
-    zIndex: 10,
+    transition: 'transform 0.3s ease-in-out',
+    zIndex: 90,
   },
+
+  // Sidebar (Mobile - hidden by default, slide in)
+  sidebarHidden: {
+    transform: 'translateX(-100%)',
+  },
+  sidebarVisible: {
+    transform: 'translateX(0)',
+  },
+
+  // Sidebar buttons
   menuButton: {
     display: 'block',
     width: '100%',
@@ -95,11 +136,34 @@ const styles = {
     background: 'none',
     border: 'none',
     cursor: 'pointer',
+    marginBottom: 12,
   },
+
+  // Logout button
+  logoutButton: {
+    fontSize: 14,
+    fontWeight: 600,
+    color: '#fff',
+    backgroundColor: '#ef4444',
+    border: 'none',
+    borderRadius: 6,
+    padding: '6px 12px',
+    cursor: 'pointer',
+    marginTop: 20,
+  },
+
+  // Main content
   mainContent: {
     flex: 1,
     padding: 20,
     marginTop: 50,
     marginLeft: SIDEBAR_WIDTH,
+    transition: 'margin-left 0.3s ease-in-out',
+  },
+
+  // On small screens, no fixed sidebar
+  mainContentFull: {
+    marginLeft: 0,
   },
 };
+

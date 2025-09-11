@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '../db';
-import MainLayout from '../components/MainLayout';
 import { useLocation } from 'react-router-dom';
 
 export default function SuppliersScreen({ userMode }) {
@@ -30,17 +29,9 @@ export default function SuppliersScreen({ userMode }) {
     if (!name.trim()) return alert('Name is required.');
     try {
       if (editingId) {
-        await db.suppliers.update(editingId, {
-          name,
-          contact_info: contact,
-          address,
-        });
+        await db.suppliers.update(editingId, { name, contact_info: contact, address });
       } else {
-        await db.suppliers.add({
-          name,
-          contact_info: contact,
-          address,
-        });
+        await db.suppliers.add({ name, contact_info: contact, address });
       }
       setName('');
       setContact('');
@@ -70,191 +61,182 @@ export default function SuppliersScreen({ userMode }) {
   };
 
   return (
-    <MainLayout userMode={mode.toLowerCase()}>
-      <div style={styles.container}>
-        <h1 style={styles.pageTitle}>Suppliers Management</h1>
-        <p style={styles.pageSubtitle}>Manage product suppliers and contact information</p>
+    <div style={styles.container}>
+      <h1 style={styles.pageTitle}>Suppliers Management</h1>
+      <p style={styles.pageSubtitle}>Manage product suppliers and contact information</p>
 
-        {/* Form Section */}
-        <div style={styles.formContainer}>
-          <h3 style={styles.formHeader}>{editingId ? 'Edit Supplier' : 'Add New Supplier'}</h3>
-          <input
-            placeholder="Supplier Name"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            style={styles.input}
-          />
-          <input
-            placeholder="Contact Information"
-            value={contact}
-            onChange={(e) => setContact(e.target.value)}
-            style={styles.input}
-          />
-          <input
-            placeholder="Address"
-            value={address}
-            onChange={(e) => setAddress(e.target.value)}
-            style={styles.input}
-          />
-          <button onClick={handleSave} style={styles.saveButton}>
-            {editingId ? 'Update Supplier' : 'Add Supplier'}
-          </button>
-        </div>
-
-        {/* Suppliers List */}
-        <div style={styles.listContainer}>
-          <h3 style={styles.sectionHeader}>Suppliers List</h3>
-          {suppliers.length === 0 ? (
-            <div style={styles.emptyState}>
-              <p style={styles.emptyText}>No suppliers found</p>
-              <p style={styles.emptySubText}>Add suppliers to get started</p>
-            </div>
-          ) : (
-            suppliers.map((item) => (
-              <div key={item.supplier_id} style={styles.supplierCard}>
-                <p style={styles.supplierName}>{item.name}</p>
-                {item.contact_info && (
-                  <p style={styles.supplierDetail}>Contact: {item.contact_info}</p>
-                )}
-                {item.address && (
-                  <p style={styles.supplierDetail}>Address: {item.address}</p>
-                )}
-                <div style={styles.actionButtons}>
-                  <button
-                    onClick={() => handleEdit(item)}
-                    style={styles.editButton}
-                  >
-                    Edit
-                  </button>
-                  <button
-                    onClick={() => handleDelete(item.supplier_id)}
-                    style={styles.deleteButton}
-                  >
-                    Delete
-                  </button>
-                </div>
-              </div>
-            ))
-          )}
-        </div>
+      {/* Form Section */}
+      <div style={styles.formContainer}>
+        <h3 style={styles.formHeader}>{editingId ? 'Edit Supplier' : 'Add New Supplier'}</h3>
+        <input placeholder="Supplier Name" value={name} onChange={(e) => setName(e.target.value)} style={styles.input} />
+        <input placeholder="Contact Information" value={contact} onChange={(e) => setContact(e.target.value)} style={styles.input} />
+        <input placeholder="Address" value={address} onChange={(e) => setAddress(e.target.value)} style={styles.input} />
+        <button onClick={handleSave} style={styles.saveButton}>
+          {editingId ? 'Update Supplier' : 'Add Supplier'}
+        </button>
       </div>
-    </MainLayout>
+
+      {/* Suppliers List */}
+      <div style={styles.listContainer}>
+        <h3 style={styles.sectionHeader}>Suppliers List</h3>
+        {suppliers.length === 0 ? (
+          <div style={styles.emptyState}>
+            <p style={styles.emptyText}>No suppliers found</p>
+            <p style={styles.emptySubText}>Add suppliers to get started</p>
+          </div>
+        ) : (
+          suppliers.map((item) => (
+            <div key={item.supplier_id} style={styles.supplierCard}>
+              <p style={styles.supplierName}>{item.name}</p>
+              {item.contact_info && <p style={styles.supplierDetail}>Contact: {item.contact_info}</p>}
+              {item.address && <p style={styles.supplierDetail}>Address: {item.address}</p>}
+              <div style={styles.actionButtons}>
+                <button onClick={() => handleEdit(item)} style={styles.editButton}>Edit</button>
+                <button onClick={() => handleDelete(item.supplier_id)} style={styles.deleteButton}>Delete</button>
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+    </div>
   );
 }
 
 const styles = {
   container: {
-    padding: 30,
+    padding: 'clamp(12px, 4vw, 30px)',
     backgroundColor: '#F8FAFC',
     minHeight: '100vh',
   },
+
   pageTitle: {
-    fontSize: 24,
+    fontSize: 'clamp(18px, 2vw, 24px)',
     fontWeight: 'bold',
     color: '#1E293B',
-    marginBottom: 4,
+    marginBottom: 'clamp(2px, 0.5vw, 4px)',
   },
+
   pageSubtitle: {
-    fontSize: 16,
+    fontSize: 'clamp(14px, 1.5vw, 16px)',
     fontWeight: 500,
     color: '#64748B',
-    marginBottom: 24,
+    marginBottom: 'clamp(12px, 2vw, 24px)',
   },
+
   formContainer: {
     backgroundColor: '#fff',
-    padding: 20,
-    borderRadius: 12,
-    marginBottom: 24,
+    padding: 'clamp(14px, 3vw, 20px)',
+    borderRadius: '12px',
+    marginBottom: 'clamp(16px, 2vw, 24px)',
     boxShadow: '0 2px 10px rgba(0,0,0,0.05)',
   },
+
   formHeader: {
-    fontSize: 18,
+    fontSize: 'clamp(16px, 1.8vw, 18px)',
     fontWeight: 600,
-    marginBottom: 16,
+    marginBottom: 'clamp(12px, 2vw, 16px)',
     color: '#1E293B',
   },
+
   input: {
     width: '100%',
-    padding: 14,
-    borderRadius: 12,
+    padding: 'clamp(10px, 2.5vw, 14px)',
+    borderRadius: '12px',
     border: '1px solid #E5E7EB',
-    marginBottom: 16,
-    fontSize: 16,
+    marginBottom: 'clamp(12px, 2vw, 16px)',
+    fontSize: 'clamp(14px, 1.5vw, 16px)',
     backgroundColor: '#F9FAFB',
   },
+
   saveButton: {
     backgroundColor: '#3B82F6',
     color: '#fff',
-    padding: 16,
-    borderRadius: 12,
+    padding: 'clamp(12px, 3vw, 16px)',
+    borderRadius: '12px',
     width: '100%',
     border: 'none',
-    fontSize: 16,
+    fontSize: 'clamp(14px, 1.5vw, 16px)',
     fontWeight: 600,
     cursor: 'pointer',
   },
+
   listContainer: {
-    marginBottom: 24,
+    marginBottom: 'clamp(16px, 2vw, 24px)',
   },
+
   sectionHeader: {
-    fontSize: 18,
+    fontSize: 'clamp(16px, 1.8vw, 18px)',
     fontWeight: 600,
-    marginBottom: 16,
+    marginBottom: 'clamp(12px, 2vw, 16px)',
     color: '#1E293B',
   },
+
   emptyState: {
     backgroundColor: '#fff',
-    padding: 20,
-    borderRadius: 12,
+    padding: 'clamp(14px, 3vw, 20px)',
+    borderRadius: '12px',
     textAlign: 'center',
     boxShadow: '0 2px 10px rgba(0,0,0,0.05)',
   },
+
   emptyText: {
-    fontSize: 16,
+    fontSize: 'clamp(14px, 1.5vw, 16px)',
     color: '#64748B',
-    marginBottom: 4,
+    marginBottom: 'clamp(4px, 1vw, 8px)',
   },
+
   emptySubText: {
-    fontSize: 14,
+    fontSize: 'clamp(12px, 1.2vw, 14px)',
     color: '#9CA3AF',
   },
+
   supplierCard: {
     backgroundColor: '#fff',
-    padding: 20,
-    borderRadius: 12,
-    marginBottom: 12,
+    padding: 'clamp(14px, 3vw, 20px)',
+    borderRadius: '12px',
+    marginBottom: '12px',
     boxShadow: '0 2px 10px rgba(0,0,0,0.05)',
   },
+
   supplierName: {
-    fontSize: 16,
+    fontSize: 'clamp(14px, 1.5vw, 16px)',
     fontWeight: 'bold',
     color: '#1E293B',
-    marginBottom: 8,
+    marginBottom: '8px',
   },
+
   supplierDetail: {
-    fontSize: 14,
+    fontSize: 'clamp(12px, 1.2vw, 14px)',
     color: '#64748B',
-    marginBottom: 4,
+    marginBottom: '4px',
   },
+
   actionButtons: {
     display: 'flex',
-    gap: 12,
-    marginTop: 12,
+    flexWrap: 'wrap',
+    gap: 'clamp(8px, 2vw, 12px)',
+    marginTop: 'clamp(8px, 2vw, 12px)',
   },
+
   editButton: {
     backgroundColor: '#3B82F6',
     color: '#fff',
-    padding: '8px 16px',
-    borderRadius: 12,
+    padding: 'clamp(6px, 2vw, 8px) clamp(12px, 3vw, 16px)',
+    borderRadius: '12px',
     border: 'none',
     cursor: 'pointer',
+    flex: '1 1 auto',
+    minWidth: '100px',
   },
+
   deleteButton: {
     backgroundColor: '#EF4444',
     color: '#fff',
-    padding: '8px 16px',
-    borderRadius: 12,
+    padding: 'clamp(6px, 2vw, 8px) clamp(12px, 3vw, 16px)',
+    borderRadius: '12px',
     border: 'none',
     cursor: 'pointer',
+    flex: '1 1 auto',
+    minWidth: '100px',
   },
 };

@@ -1,6 +1,5 @@
 import React, { useEffect, useState } from 'react';
 import { db } from '../db';
-import MainLayout from '../components/MainLayout';
 
 export default function InventoryScreen({ userMode }) {
   const mode = userMode || 'client';
@@ -106,95 +105,93 @@ export default function InventoryScreen({ userMode }) {
   const lowStockCount = inventory.filter((item) => item.quantity < 10).length;
 
   return (
-    <MainLayout userMode={mode.toLowerCase()}>
-      <div style={styles.container}>
-        <h1 style={styles.pageTitle}>Inventory Management</h1>
-        <p style={styles.pageSubtitle}>Manage products, track stock levels & expiration dates</p>
+    <div style={styles.container}>
+      <h1 style={styles.pageTitle}>Inventory Management</h1>
+      <p style={styles.pageSubtitle}>Manage products, track stock levels & expiration dates</p>
 
-        {(expiredCount > 0 || lowStockCount > 0) && (
-          <div style={styles.attentionContainer}>
-            <strong style={styles.attentionHeader}>Attention Required</strong>
-            {expiredCount > 0 && (
-              <div style={styles.attentionText}>{expiredCount} product(s) expired</div>
-            )}
-            {lowStockCount > 0 && (
-              <div style={styles.attentionText}>{lowStockCount} product(s) low in stock</div>
-            )}
-          </div>
-        )}
-
-        <input
-          style={styles.searchInput}
-          placeholder="Search products by name, SKU, or supplier..."
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-        />
-
-        <h3 style={styles.sectionHeader}>Products</h3>
-        <div style={styles.tableWrapper}>
-          <table style={styles.table}>
-            <thead>
-              <tr style={styles.tableHeader}>
-                <th style={{ width: 150 }}>Product</th>
-                <th style={{ width: 100 }}>SKU</th>
-                <th style={{ width: 80 }}>Price</th>
-                <th style={{ width: 80 }}>Stock</th>
-                <th style={{ width: 120 }}>Expiry Date</th>
-                <th style={{ width: 100 }}>Status</th>
-                <th style={{ width: 100 }}>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredInventory.map((item) => {
-                let status = 'Good';
-                let statusStyle = styles.statusGood;
-                if (item.expiration_date && new Date(item.expiration_date) < new Date()) {
-                  status = 'Expired';
-                  statusStyle = styles.statusExpired;
-                } else if (item.quantity < 10) {
-                  status = 'Low Stock';
-                  statusStyle = styles.statusLowStock;
-                }
-                return (
-                  <tr key={item.product_id} style={styles.tableRow}>
-                    <td style={{ width: 150, fontWeight: 'bold' }}>{item.name}</td>
-                    <td style={{ width: 100 }}>{item.sku || 'N/A'}</td>
-                    <td style={{ width: 80 }}>₱{item.unit_price || '0.00'}</td>
-                    <td style={{ width: 80 }}>{item.quantity || 0}</td>
-                    <td style={{ width: 120 }}>{item.expiration_date || 'N/A'}</td>
-                    <td style={{ width: 100, ...statusStyle }}>{status}</td>
-                    <td style={{ width: 100 }}>
-                      <button style={styles.editButton} onClick={() => handleEditItem(item)}>
-                        Edit
-                      </button>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+      {(expiredCount > 0 || lowStockCount > 0) && (
+        <div style={styles.attentionContainer}>
+          <strong style={styles.attentionHeader}>Attention Required</strong>
+          {expiredCount > 0 && (
+            <div style={styles.attentionText}>{expiredCount} product(s) expired</div>
+          )}
+          {lowStockCount > 0 && (
+            <div style={styles.attentionText}>{lowStockCount} product(s) low in stock</div>
+          )}
         </div>
+      )}
 
-        <button style={styles.addButton} onClick={() => setShowAddModal(true)}>
-          Add New Product
-        </button>
+      <input
+        style={styles.searchInput}
+        placeholder="Search products by name, SKU, or supplier..."
+        value={searchQuery}
+        onChange={(e) => setSearchQuery(e.target.value)}
+      />
 
-        {(showAddModal || showEditModal) && (
-          <ProductModal
-            visible={showAddModal || showEditModal}
-            onClose={() => {
-              setShowAddModal(false);
-              setShowEditModal(false);
-            }}
-            onSubmit={showAddModal ? handleAddItem : handleSaveEdit}
-            item={showAddModal ? newItem : editingItem}
-            setItem={showAddModal ? setNewItem : setEditingItem}
-            suppliers={suppliers}
-            title={showAddModal ? 'Add New Product' : 'Edit Product'}
-          />
-        )}
+      <h3 style={styles.sectionHeader}>Products</h3>
+      <div style={styles.tableWrapper}>
+        <table style={styles.table}>
+          <thead>
+            <tr style={styles.tableHeader}>
+              <th style={{ width: 150 }}>Product</th>
+              <th style={{ width: 100 }}>SKU</th>
+              <th style={{ width: 80 }}>Price</th>
+              <th style={{ width: 80 }}>Stock</th>
+              <th style={{ width: 120 }}>Expiry Date</th>
+              <th style={{ width: 100 }}>Status</th>
+              <th style={{ width: 100 }}>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filteredInventory.map((item) => {
+              let status = 'Good';
+              let statusStyle = styles.statusGood;
+              if (item.expiration_date && new Date(item.expiration_date) < new Date()) {
+                status = 'Expired';
+                statusStyle = styles.statusExpired;
+              } else if (item.quantity < 10) {
+                status = 'Low Stock';
+                statusStyle = styles.statusLowStock;
+              }
+              return (
+                <tr key={item.product_id} style={styles.tableRow}>
+                  <td style={{ width: 150, fontWeight: 'bold' }}>{item.name}</td>
+                  <td style={{ width: 100 }}>{item.sku || 'N/A'}</td>
+                  <td style={{ width: 80 }}>₱{item.unit_price || '0.00'}</td>
+                  <td style={{ width: 80 }}>{item.quantity || 0}</td>
+                  <td style={{ width: 120 }}>{item.expiration_date || 'N/A'}</td>
+                  <td style={{ width: 100, ...statusStyle }}>{status}</td>
+                  <td style={{ width: 100 }}>
+                    <button style={styles.editButton} onClick={() => handleEditItem(item)}>
+                      Edit
+                    </button>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
       </div>
-    </MainLayout>
+
+      <button style={styles.addButton} onClick={() => setShowAddModal(true)}>
+        Add New Product
+      </button>
+
+      {(showAddModal || showEditModal) && (
+        <ProductModal
+          visible={showAddModal || showEditModal}
+          onClose={() => {
+            setShowAddModal(false);
+            setShowEditModal(false);
+          }}
+          onSubmit={showAddModal ? handleAddItem : handleSaveEdit}
+          item={showAddModal ? newItem : editingItem}
+          setItem={showAddModal ? setNewItem : setEditingItem}
+          suppliers={suppliers}
+          title={showAddModal ? 'Add New Product' : 'Edit Product'}
+        />
+      )}
+    </div>
   );
 }
 
@@ -257,35 +254,71 @@ function ProductModal({ visible, onClose, onSubmit, item, setItem, suppliers, ti
 }
 
 const styles = {
-  container: { padding: 30, backgroundColor: '#F8FAFC', minHeight: '100vh' },
-  pageTitle: { fontSize: 24, fontWeight: 'bold', color: '#1E293B', marginBottom: 4 },
-  pageSubtitle: { fontSize: 16, fontWeight: 500, color: '#64748B', marginBottom: 16 },
+  container: { 
+    padding: '5vw', // adapts padding to screen width
+    backgroundColor: '#F8FAFC',
+    minHeight: '100vh',
+  },
+  pageTitle: { 
+    fontSize: 'clamp(20px, 2vw, 28px)', // scales with screen size
+    fontWeight: 'bold',
+    color: '#1E293B',
+    marginBottom: 4,
+  },
+  pageSubtitle: { 
+    fontSize: 'clamp(14px, 1.5vw, 18px)',
+    fontWeight: 500, 
+    color: '#64748B',
+    marginBottom: 16,
+  },
   attentionContainer: {
     backgroundColor: '#fef3c7',
-    padding: 14,
+    padding: '1rem',
     borderRadius: 12,
     marginBottom: 16,
     borderLeft: '4px solid #f59e0b',
   },
-  attentionHeader: { fontSize: 16, fontWeight: 600, marginBottom: 4, color: '#92400e' },
-  attentionText: { fontSize: 14, color: '#92400e' },
+  attentionHeader: { 
+    fontSize: 'clamp(14px, 1.5vw, 18px)', 
+    fontWeight: 600, 
+    marginBottom: 4, 
+    color: '#92400e' 
+  },
+  attentionText: { fontSize: 'clamp(12px, 1.3vw, 16px)', color: '#92400e' },
+  
   searchInput: {
     borderWidth: 1,
     borderColor: '#d1d5db',
     borderRadius: 12,
-    padding: 14,
+    padding: '0.8rem',
     marginBottom: 20,
     backgroundColor: '#fff',
     width: '100%',
+    fontSize: 'clamp(14px, 1.2vw, 16px)',
   },
-  sectionHeader: { fontSize: 18, fontWeight: 600, marginBottom: 12, color: '#374151' },
+
+  sectionHeader: { 
+    fontSize: 'clamp(16px, 1.5vw, 20px)', 
+    fontWeight: 600, 
+    marginBottom: 12, 
+    color: '#374151' 
+  },
+
   tableWrapper: { overflowX: 'auto', marginBottom: 16 },
-  table: { borderCollapse: 'collapse', width: '100%', border: '1px solid #d1d5db', borderRadius: 12 },
-  tableHeader: { backgroundColor: '#f3f4f6', textAlign: 'left', fontSize: 12, color: '#374151' },
+  table: { 
+    borderCollapse: 'collapse', 
+    width: '100%', 
+    border: '1px solid #d1d5db', 
+    borderRadius: 12,
+    fontSize: 'clamp(12px, 1.2vw, 14px)',
+  },
+  tableHeader: { backgroundColor: '#f3f4f6', textAlign: 'left', color: '#374151' },
   tableRow: { borderBottom: '1px solid #e5e7eb' },
+
   statusExpired: { color: '#dc2626', fontWeight: 600 },
   statusLowStock: { color: '#ea580c', fontWeight: 600 },
   statusGood: { color: '#16a34a', fontWeight: 600 },
+
   editButton: {
     backgroundColor: '#3B82F6',
     color: '#fff',
@@ -293,18 +326,23 @@ const styles = {
     padding: '6px 12px',
     borderRadius: 8,
     cursor: 'pointer',
+    fontSize: 'clamp(12px, 1.2vw, 14px)',
   },
+
   addButton: {
     backgroundColor: '#3B82F6',
     color: '#fff',
-    padding: 16,
+    padding: '1rem',
     borderRadius: 12,
     cursor: 'pointer',
     marginBottom: 20,
     border: 'none',
-    fontSize: 16,
+    fontSize: 'clamp(14px, 1.5vw, 18px)',
     fontWeight: 600,
+    width: '100%',
+    maxWidth: '400px',
   },
+
   modalOverlay: {
     position: 'fixed',
     top: 0,
@@ -316,50 +354,65 @@ const styles = {
     justifyContent: 'center',
     alignItems: 'center',
     zIndex: 1000,
+    padding: '1rem',
   },
   modalContainer: {
     backgroundColor: '#F8FAFC',
-    padding: 30,
+    padding: 'clamp(16px, 3vw, 30px)',
     borderRadius: 12,
-    width: '400px',
+    width: '90%',
+    maxWidth: '500px',
     maxHeight: '90vh',
     overflowY: 'auto',
   },
-  modalHeader: { fontSize: 20, fontWeight: 'bold', marginBottom: 16, color: '#1E293B' },
+  modalHeader: { 
+    fontSize: 'clamp(18px, 2vw, 24px)', 
+    fontWeight: 'bold', 
+    marginBottom: 16, 
+    color: '#1E293B' 
+  },
+
   input: {
     width: '100%',
-    padding: 14,
+    padding: '0.8rem',
     borderRadius: 12,
     border: '1px solid #d1d5db',
     marginBottom: 16,
     backgroundColor: '#fff',
+    fontSize: 'clamp(14px, 1.2vw, 16px)',
   },
-  pickerLabel: { fontSize: 16, marginBottom: 8, color: '#374151' },
+
+  pickerLabel: { fontSize: 'clamp(14px, 1.2vw, 16px)', marginBottom: 8, color: '#374151' },
   pickerContainer: {
     width: '100%',
-    padding: 14,
+    padding: '0.8rem',
     borderRadius: 12,
     border: '1px solid #d1d5db',
     marginBottom: 16,
     backgroundColor: '#fff',
+    fontSize: 'clamp(14px, 1.2vw, 16px)',
   },
-  modalButtons: { display: 'flex', justifyContent: 'space-between', gap: 8 },
+
+  modalButtons: { display: 'flex', flexDirection: 'row', gap: '0.5rem' },
   submitButton: {
     backgroundColor: '#3B82F6',
     color: '#fff',
     border: 'none',
-    padding: 14,
+    padding: '0.9rem',
     borderRadius: 12,
     cursor: 'pointer',
     flex: 1,
+    fontSize: 'clamp(14px, 1.2vw, 16px)',
   },
   cancelButton: {
     backgroundColor: '#EF4444',
     color: '#fff',
     border: 'none',
-    padding: 14,
+    padding: '0.9rem',
     borderRadius: 12,
     cursor: 'pointer',
     flex: 1,
+    fontSize: 'clamp(14px, 1.2vw, 16px)',
   },
 };
+

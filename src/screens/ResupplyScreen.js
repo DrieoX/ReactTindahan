@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '../db';
-import MainLayout from '../components/MainLayout';
 import { useLocation, useNavigate } from 'react-router-dom';
 
 export default function ResupplyScreen({ userMode }) {
@@ -25,7 +24,6 @@ export default function ResupplyScreen({ userMode }) {
     try {
       const prodRes = await db.products.toArray();
       const supRes = await db.suppliers.toArray();
-
       setProducts(prodRes);
       setSuppliers(supRes);
     } catch (err) {
@@ -84,136 +82,138 @@ export default function ResupplyScreen({ userMode }) {
     }
   };
 
-  const handleDateChange = (e) => {
-    setExpirationDate(e.target.value);
-  };
-
   return (
-    <MainLayout userMode={mode.toLowerCase()}>
-      <div style={styles.container}>
-        <h2 style={styles.pageTitle}>Resupply Inventory</h2>
-        <p style={styles.pageSubtitle}>Add new stock to your inventory</p>
+    <div style={styles.container}>
+      <h2 style={styles.pageTitle}>Resupply Inventory</h2>
+      <p style={styles.pageSubtitle}>Add new stock to your inventory</p>
 
-        <div style={styles.formContainer}>
-          <label style={styles.label}>Supplier</label>
-          <select
-            style={styles.pickerContainer}
-            value={selectedSupplierId || ''}
-            onChange={(e) => setSelectedSupplierId(e.target.value)}
-          >
-            <option value="">Select Supplier</option>
-            {suppliers.map((sup) => (
-              <option key={sup.supplier_id} value={sup.supplier_id}>{sup.name}</option>
-            ))}
-          </select>
+      <div style={styles.formContainer}>
+        <label style={styles.label}>Supplier</label>
+        <select
+          style={styles.pickerContainer}
+          value={selectedSupplierId || ''}
+          onChange={(e) => setSelectedSupplierId(e.target.value)}
+        >
+          <option value="">Select Supplier</option>
+          {suppliers.map((sup) => (
+            <option key={sup.supplier_id} value={sup.supplier_id}>{sup.name}</option>
+          ))}
+        </select>
 
-          <label style={styles.label}>Product</label>
-          <select
-            style={styles.pickerContainer}
-            value={selectedProductId || ''}
-            onChange={(e) => setSelectedProductId(e.target.value)}
-          >
-            <option value="">Select Product</option>
-            {products.map((prod) => (
-              <option key={prod.product_id} value={prod.product_id}>{prod.name}</option>
-            ))}
-          </select>
+        <label style={styles.label}>Product</label>
+        <select
+          style={styles.pickerContainer}
+          value={selectedProductId || ''}
+          onChange={(e) => setSelectedProductId(e.target.value)}
+        >
+          <option value="">Select Product</option>
+          {products.map((prod) => (
+            <option key={prod.product_id} value={prod.product_id}>{prod.name}</option>
+          ))}
+        </select>
 
-          <input
-            type="number"
-            placeholder="Quantity"
-            value={quantity}
-            onChange={(e) => setQuantity(e.target.value)}
-            style={styles.input}
-          />
-          <input
-            type="number"
-            placeholder="Unit Cost"
-            value={unitCost}
-            onChange={(e) => setUnitCost(e.target.value)}
-            style={styles.input}
-          />
-          <input
-            type="number"
-            placeholder="Threshold Quantity"
-            value={threshold}
-            onChange={(e) => setThreshold(e.target.value)}
-            style={styles.input}
-          />
+        <input
+          type="number"
+          placeholder="Quantity"
+          value={quantity}
+          onChange={(e) => setQuantity(e.target.value)}
+          style={styles.input}
+        />
+        <input
+          type="number"
+          placeholder="Unit Cost"
+          value={unitCost}
+          onChange={(e) => setUnitCost(e.target.value)}
+          style={styles.input}
+        />
+        <input
+          type="number"
+          placeholder="Threshold Quantity"
+          value={threshold}
+          onChange={(e) => setThreshold(e.target.value)}
+          style={styles.input}
+        />
 
-          <label style={styles.label}>Expiration Date</label>
-          <input
-            type="date"
-            value={expirationDate}
-            onChange={handleDateChange}
-            style={styles.input}
-          />
+        <label style={styles.label}>Expiration Date</label>
+        <input
+          type="date"
+          value={expirationDate}
+          onChange={(e) => setExpirationDate(e.target.value)}
+          style={styles.input}
+        />
 
-          <button style={styles.submitButton} onClick={handleResupply}>
-            Submit Resupply
-          </button>
-        </div>
+        <button style={styles.submitButton} onClick={handleResupply}>
+          Submit Resupply
+        </button>
       </div>
-    </MainLayout>
+    </div>
   );
 }
-
 const styles = {
   container: {
-    padding: '30px',
+    padding: 'clamp(12px, 4vw, 30px)',
     backgroundColor: '#F8FAFC',
   },
+
   pageTitle: {
-    fontSize: '24px',
+    fontSize: 'clamp(18px, 2vw, 24px)',
     fontWeight: 'bold',
     color: '#1E293B',
-    marginBottom: '4px',
+    marginBottom: 'clamp(2px, 0.5vw, 4px)',
   },
+
   pageSubtitle: {
-    fontSize: '16px',
+    fontSize: 'clamp(14px, 1.5vw, 16px)',
     fontWeight: '500',
     color: '#64748B',
-    marginBottom: '20px',
+    marginBottom: 'clamp(12px, 2vw, 20px)',
   },
+
   formContainer: {
     backgroundColor: '#FFFFFF',
-    padding: '20px',
+    padding: 'clamp(12px, 3vw, 20px)',
     borderRadius: '12px',
     border: '1px solid #E5E7EB',
-    marginBottom: '30px',
+    marginBottom: 'clamp(16px, 3vw, 30px)',
   },
+
   label: {
-    fontSize: '16px',
+    fontSize: 'clamp(14px, 1.5vw, 16px)',
     fontWeight: '600',
     color: '#1E293B',
-    marginBottom: '8px',
+    marginBottom: 'clamp(6px, 1vw, 8px)',
     display: 'block',
   },
+
   pickerContainer: {
     width: '100%',
-    padding: '10px',
-    marginBottom: '16px',
+    padding: 'clamp(8px, 2vw, 10px)',
+    marginBottom: 'clamp(12px, 2vw, 16px)',
     borderRadius: '8px',
     border: '1px solid #D1D5DB',
     backgroundColor: '#F9FAFB',
   },
+
   input: {
     width: '100%',
-    padding: '14px',
-    marginBottom: '16px',
-    fontSize: '16px',
+    padding: 'clamp(10px, 2.5vw, 14px)',
+    marginBottom: 'clamp(12px, 2vw, 16px)',
+    fontSize: 'clamp(14px, 1.5vw, 16px)',
     borderRadius: '8px',
     border: '1px solid #D1D5DB',
     backgroundColor: '#F9FAFB',
   },
+
   submitButton: {
     backgroundColor: '#3B82F6',
-    padding: '16px',
+    padding: 'clamp(12px, 3vw, 16px)',
     borderRadius: '8px',
     color: '#FFFFFF',
-    fontSize: '16px',
+    fontSize: 'clamp(14px, 1.5vw, 16px)',
     fontWeight: '600',
     cursor: 'pointer',
     border: 'none',
+    width: '100%', // full-width button on mobile
+    maxWidth: '300px', // prevent giant buttons on desktop
   },
 };

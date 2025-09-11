@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { BrowserRouter as Router, Routes, Route, Link } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 
 import LoginScreen from './screens/LoginScreen';
 import SignupScreen from './screens/SignUpScreen';
@@ -13,27 +13,10 @@ import MainLayout from './components/MainLayout';
 
 import { db } from './db';
 
-// 🔹 Logout button
-const LogoutButton = ({ handleLogout }) => (
-  <button
-    onClick={handleLogout}
-    style={{ marginLeft: 15, color: 'red', fontWeight: 'bold', cursor: 'pointer' }}
-  >
-    Logout
-  </button>
-);
-
-// 🔹 Client stack
+// 🔹 Client stack (no extra nav)
 function ClientStack({ handleLogout, userMode }) {
   return (
-    <MainLayout userMode={userMode}>
-      <nav style={{ marginBottom: 20 }}>
-        <Link to="/dashboard">Dashboard</Link> |{' '}
-        <Link to="/inventory">Inventory</Link> |{' '}
-        <Link to="/resupply">Resupply</Link> |{' '}
-        <Link to="/suppliers">Suppliers</Link>
-        <LogoutButton handleLogout={handleLogout} />
-      </nav>
+    <MainLayout userMode={userMode} handleLogout={handleLogout}>
       <Routes>
         <Route path="/dashboard" element={<DashboardScreen />} />
         <Route path="/inventory" element={<InventoryScreen />} />
@@ -44,19 +27,10 @@ function ClientStack({ handleLogout, userMode }) {
   );
 }
 
-// 🔹 Server stack
+// 🔹 Server stack (no extra nav)
 function ServerStack({ handleLogout, userMode }) {
   return (
-    <MainLayout userMode={userMode}>
-      <nav style={{ marginBottom: 20 }}>
-        <Link to="/dashboard">Dashboard</Link> |{' '}
-        <Link to="/inventory">Inventory</Link> |{' '}
-        <Link to="/resupply">Resupply</Link> |{' '}
-        <Link to="/sales">Sales</Link> |{' '}
-        <Link to="/reports">Reports</Link> |{' '}
-        <Link to="/suppliers">Suppliers</Link>
-        <LogoutButton handleLogout={handleLogout} />
-      </nav>
+    <MainLayout userMode={userMode} handleLogout={handleLogout}>
       <Routes>
         <Route path="/dashboard" element={<DashboardScreen />} />
         <Route path="/inventory" element={<InventoryScreen />} />
@@ -80,23 +54,30 @@ function AuthStack({ setUserMode }) {
 }
 
 export default function App() {
-  const [userMode, setUserMode] = useState(null); // server | client | null
+  const [userMode, setUserMode] = useState(null);
 
   useEffect(() => {
     const initDB = async () => {
       try {
-        await db.open(); // Dexie auto initializes tables
+        await db.open();
         console.log('✅ Database initialized');
       } catch (err) {
         console.error('❌ Error initializing DB:', err);
       }
     };
     initDB();
+
+    // Restore login session
+    const savedMode = localStorage.getItem('userMode');
+    if (savedMode) {
+      setUserMode(savedMode);
+    }
   }, []);
 
   const handleLogout = () => {
     setUserMode(null);
-    window.location.href = '/'; // redirect to login
+    localStorage.removeItem('userMode');
+    window.location.href = '/';
   };
 
   return (
@@ -106,7 +87,10 @@ export default function App() {
       ) : userMode === 'client' ? (
         <ClientStack handleLogout={handleLogout} userMode={userMode} />
       ) : (
-        <AuthStack setUserMode={setUserMode} />
+        <AuthStack setUserMode={(mode) => {
+          setUserMode(mode);
+          localStorage.setItem('userMode', mode);
+        }} />
       )}
     </Router>
   );
