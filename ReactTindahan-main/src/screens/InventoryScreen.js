@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react'; 
 import { db } from '../db';
 
 export default function InventoryScreen({ userMode }) {
@@ -15,7 +15,6 @@ export default function InventoryScreen({ userMode }) {
     description: '', 
     unit_price: '', 
     unit: 'pieces',
-    barcode: '',
     expiration_date: ''
   });
   const [editingItem, setEditingItem] = useState(null);
@@ -53,13 +52,13 @@ export default function InventoryScreen({ userMode }) {
                 quantity: invRecord.quantity,
                 expiration_date: invRecord.expiration_date || 'N/A',
                 threshold: invRecord.threshold || 0,
-                unit_cost: 0, // optional, could pull from latest resupply
+                unit_cost: 0, // optional
               }]
             : [],
         };
       });
 
-      // Calculate stats
+      // Stats
       const totalProducts = items.length;
       const lowStock = items.filter(item => item.quantity <= (item.threshold || 5)).length;
       const today = new Date();
@@ -91,8 +90,8 @@ export default function InventoryScreen({ userMode }) {
     if (!newItem.name || !newItem.unit_price)
       return alert('Please fill out all required fields.');
     try {
-      const existing = await db.products.where('name').equals(newItem.name).first();
-      if (existing) return alert('A product with this name already exists.');
+      const existing = await db.products.where('sku').equals(newItem.sku).first();
+      if (existing) return alert('A product with this SKU already exists.');
 
       await db.products.add({
         sku: newItem.sku || null,
@@ -100,7 +99,6 @@ export default function InventoryScreen({ userMode }) {
         description: newItem.description,
         unit_price: parseFloat(newItem.unit_price),
         unit: newItem.unit,
-        barcode: newItem.barcode,
         expiration_date: newItem.expiration_date
       });
 
@@ -111,7 +109,6 @@ export default function InventoryScreen({ userMode }) {
         description: '', 
         unit_price: '', 
         unit: 'pieces',
-        barcode: '',
         expiration_date: ''
       });
       fetchInventory();
@@ -133,7 +130,6 @@ export default function InventoryScreen({ userMode }) {
         description: editingItem.description,
         unit_price: parseFloat(editingItem.unit_price),
         unit: editingItem.unit,
-        barcode: editingItem.barcode,
         expiration_date: editingItem.expiration_date
       });
 
@@ -172,7 +168,6 @@ export default function InventoryScreen({ userMode }) {
     const q = searchQuery.toLowerCase();
     if (item.name.toLowerCase().includes(q)) return true;
     if (item.sku && item.sku.toLowerCase().includes(q)) return true;
-    if (item.barcode && item.barcode.toLowerCase().includes(q)) return true;
     if (item.suppliers.some((s) => s.name.toLowerCase().includes(q))) return true;
     return false;
   });
@@ -188,7 +183,7 @@ export default function InventoryScreen({ userMode }) {
         <div style={styles.headerActions}>
           <input
             style={styles.searchInput}
-            placeholder="Search inventory, barcode or suppliers..."
+            placeholder="Search inventory or suppliers..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
           />
@@ -222,7 +217,6 @@ export default function InventoryScreen({ userMode }) {
         <div style={styles.sectionHeader}>
           <h2 style={styles.sectionTitle}>Products</h2>
           <div style={styles.sectionActions}>
-            <button style={styles.secondaryButton}>Scan Barcode</button>
             <button style={styles.primaryButton} onClick={() => setShowAddModal(true)}>
               Add New Item
             </button>
@@ -234,10 +228,10 @@ export default function InventoryScreen({ userMode }) {
             <thead>
               <tr style={styles.tableHeader}>
                 <th style={styles.tableCell}>PRODUCT</th>
+                <th style={styles.tableCell}>SKU</th>
                 <th style={styles.tableCell}>UNIT</th>
                 <th style={styles.tableCell}>PRICE</th>
                 <th style={styles.tableCell}>STOCK</th>
-                <th style={styles.tableCell}>BARCODE</th>
                 <th style={styles.tableCell}>SUPPLIERS</th>
               </tr>
             </thead>
@@ -248,15 +242,12 @@ export default function InventoryScreen({ userMode }) {
                     <td style={styles.tableCell}>
                       <div style={styles.productInfo}>
                         <div style={styles.productName}>{item.name}</div>
-                        <div style={styles.productId}>ID: {item.sku || 'N/A'}</div>
                       </div>
                     </td>
-                    <td style={styles.tableCell}>
-                      {item.unit || 'pieces'}
-                    </td>
+                    <td style={styles.tableCell}>{item.sku || 'N/A'}</td>
+                    <td style={styles.tableCell}>{item.unit || 'pieces'}</td>
                     <td style={styles.tableCell}>₱{item.unit_price || '0.00'}</td>
                     <td style={styles.tableCell}>{item.quantity || 0}</td>
-                    <td style={styles.tableCell}>{item.barcode || 'N/A'}</td>
                     <td style={styles.tableCell}>
                       <div style={styles.actionButtons}>
                         <button 
@@ -324,7 +315,7 @@ function ProductModal({ visible, onClose, onSubmit, onDelete, item, setItem, tit
         <h2 style={styles.modalHeader}>{title}</h2>
         <div style={styles.modalContent}>
           <div style={styles.inputGroup}>
-            <label style={styles.inputLabel}>SKU</label>
+            <label style={styles.inputLabel}>SKU *</label>
             <input
               placeholder="Enter product SKU"
               value={item?.sku || ''}
@@ -372,15 +363,6 @@ function ProductModal({ visible, onClose, onSubmit, onDelete, item, setItem, tit
               value={item?.unit_price?.toString() || ''}
               type="number"
               onChange={(e) => setItem({ ...item, unit_price: e.target.value })}
-              style={styles.input}
-            />
-          </div>
-          <div style={styles.inputGroup}>
-            <label style={styles.inputLabel}>Barcode</label>
-            <input
-              placeholder="Enter barcode"
-              value={item?.barcode || ''}
-              onChange={(e) => setItem({ ...item, barcode: e.target.value })}
               style={styles.input}
             />
           </div>
@@ -473,6 +455,7 @@ function SupplierModal({ suppliers, onClose }) {
     </div>
   );
 }
+
 
 const styles = {
   container: { 

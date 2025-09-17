@@ -5,11 +5,32 @@ export default function POSScreen({ userMode }) {
   const [barcode, setBarcode] = useState('');
   const [cart, setCart] = useState([]);
   const [products, setProducts] = useState([]);
+  const [cashGiven, setCashGiven] = useState('');
   const mode = userMode || 'client';
 
   useEffect(() => {
     loadProducts();
-  }, []);
+
+    // ✅ Automatically capture scanner input globally
+    const handleGlobalScan = (e) => {
+      if (e.key === 'Enter' && barcode.trim()) {
+        const product = products.find(p => p.sku === barcode.trim());
+        if (product) {
+          addToCart(product, 1);
+          setBarcode('');
+        } else {
+          alert('Product not found for scanned code!');
+          setBarcode('');
+        }
+      } else if (e.key.length === 1) {
+        // Collect characters typed by scanner
+        setBarcode(prev => prev + e.key);
+      }
+    };
+
+    window.addEventListener('keydown', handleGlobalScan);
+    return () => window.removeEventListener('keydown', handleGlobalScan);
+  }, [barcode, products]);
 
   const loadProducts = async () => {
     try {
@@ -20,9 +41,11 @@ export default function POSScreen({ userMode }) {
         const inv = inventoryData.find(i => i.product_id === p.product_id);
         return {
           id: p.product_id,
+          sku: p.sku,
           name: p.name,
           price: parseFloat(p.unit_price) || 0,
           stock: inv?.quantity || 0,
+          baseUnit: p.base_unit || "unit"
         };
       });
 
@@ -32,22 +55,23 @@ export default function POSScreen({ userMode }) {
     }
   };
 
-  const addToCart = (product) => {
+  const addToCart = (product, qty = 1) => {
+    if (!product) return;
     const existing = cart.find(item => item.id === product.id);
     if (existing) {
-      if (existing.quantity + 1 > product.stock) return alert('Not enough stock!');
+      if (existing.quantity + qty > product.stock) return alert('Not enough stock!');
       setCart(cart.map(item =>
-        item.id === product.id ? { ...item, quantity: item.quantity + 1 } : item
+        item.id === product.id ? { ...item, quantity: item.quantity + qty } : item
       ));
     } else {
-      if (product.stock < 1) return alert('Not enough stock!');
-      setCart([...cart, { ...product, quantity: 1 }]);
+      if (product.stock < qty) return alert('Not enough stock!');
+      setCart([...cart, { ...product, quantity: qty }]);
     }
   };
 
   const updateQuantity = (id, qty) => {
     const product = products.find(p => p.id === id);
-    if (qty < 0) return; // prevent negative quantities
+    if (qty < 0) return;
     if (qty > product.stock) {
       alert('Not enough stock!');
     } else {
@@ -69,10 +93,11 @@ export default function POSScreen({ userMode }) {
   const handlePayment = async () => {
     if (cart.length === 0) return alert('Cart is empty!');
 
-    // Warn if any item has quantity 0
-    const zeroQtyItems = cart.filter(item => item.quantity === 0);
-    if (zeroQtyItems.length > 0) {
-      return alert('Some items have zero quantity. Adjust before completing payment.');
+    const total = calculateTotal();
+    const given = parseFloat(cashGiven) || 0;
+
+    if (given < total) {
+      return alert(`Payment insufficient! Short by ₱${(total - given).toFixed(2)}`);
     }
 
     try {
@@ -86,17 +111,19 @@ export default function POSScreen({ userMode }) {
           product_id: item.id,
           quantity: item.quantity,
           amount,
+          total_amount: total
         });
 
-        // Update inventory live stock
         await db.inventory.where({ product_id: item.id }).modify(inv => {
           inv.quantity -= item.quantity;
           if (inv.quantity < 0) inv.quantity = 0;
         });
       }
 
+      const change = (given - total).toFixed(2);
       setCart([]);
-      alert('Payment completed successfully!');
+      setCashGiven('');
+      alert(`Payment completed! Change: ₱${change}`);
       loadProducts();
     } catch (err) {
       console.error('Error handling payment:', err);
@@ -105,12 +132,12 @@ export default function POSScreen({ userMode }) {
 
   return (
     <div style={styles.container}>
-      {/* Barcode Input */}
+      {/* Barcode Input (Fallback only) */}
       <div style={styles.section}>
-        <h3 style={styles.sectionTitle}>Scan or Enter Product Code</h3>
+        <h3 style={styles.sectionTitle}>Scan Product (SKU)</h3>
         <input
           style={styles.input}
-          placeholder="Scan or type barcode"
+          placeholder="If scanner unavailable, type SKU here"
           value={barcode}
           onChange={(e) => setBarcode(e.target.value)}
         />
@@ -123,8 +150,13 @@ export default function POSScreen({ userMode }) {
           {products.map(p => (
             <div key={p.id} style={styles.productCard}>
               <div>{p.name}</div>
-              <div style={{ color: '#64748B', marginBottom: 8 }}>Stock: {p.stock}</div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div style={{ color: '#64748B' }}>
+                Stock: {p.stock} {p.baseUnit}
+              </div>
+              <div style={{ marginTop: 4, fontSize: 12, color: '#94A3B8' }}>
+                SKU: {p.sku}
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 6 }}>
                 <strong>P{p.price.toFixed(2)}</strong>
                 <button style={styles.addButton} onClick={() => addToCart(p)}>+ Add</button>
               </div>
@@ -147,7 +179,9 @@ export default function POSScreen({ userMode }) {
               <div key={item.id} style={styles.cartItem}>
                 <div>
                   <div style={{ fontWeight: 500 }}>{item.name}</div>
-                  <div style={{ color: '#64748B' }}>P{item.price.toFixed(2)}</div>
+                  <div style={{ color: '#64748B' }}>
+                    P{item.price.toFixed(2)} | Stock: {item.stock} {item.baseUnit}
+                  </div>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                   <button onClick={() => updateQuantity(item.id, item.quantity - 1)}>-</button>
@@ -167,8 +201,26 @@ export default function POSScreen({ userMode }) {
                 </div>
               </div>
             ))}
+
+            {/* Payment Section */}
             <div style={{ marginTop: 16 }}>
               <div>Total: P{calculateTotal().toFixed(2)}</div>
+              <div style={{ marginTop: 8 }}>
+                <input
+                  type="number"
+                  placeholder="Cash given"
+                  value={cashGiven}
+                  onChange={(e) => setCashGiven(e.target.value)}
+                  style={{ width: 150, padding: 4, marginRight: 8 }}
+                />
+                {cashGiven && (
+                  <span>
+                    {parseFloat(cashGiven) >= calculateTotal()
+                      ? `Change: ₱${(parseFloat(cashGiven) - calculateTotal()).toFixed(2)}`
+                      : `Short: ₱${(calculateTotal() - parseFloat(cashGiven)).toFixed(2)}`}
+                  </span>
+                )}
+              </div>
               <button style={styles.completePaymentButton} onClick={handlePayment}>
                 Complete Payment
               </button>
@@ -179,6 +231,8 @@ export default function POSScreen({ userMode }) {
     </div>
   );
 }
+
+
 
 const styles = {
   container: {

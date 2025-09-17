@@ -37,22 +37,19 @@ export default function ResupplyScreen({ userMode }) {
     }
 
     try {
-      // Insert into resupplied_items
       await db.resupplied_items.add({
         product_id: parseInt(selectedProductId),
         supplier_id: parseInt(selectedSupplierId),
-        user_id: 1, // set your user id here if needed
+        user_id: 1,
         quantity: parseInt(quantity),
         unit_cost: parseFloat(unitCost),
         resupply_date: new Date().toISOString().split('T')[0],
         expiration_date: expirationDate,
       });
 
-      // Update inventory
       const existingInv = await db.inventory.where({ product_id: parseInt(selectedProductId) }).first();
 
       if (!existingInv) {
-        // If inventory record does not exist, create it
         await db.inventory.add({
           product_id: parseInt(selectedProductId),
           supplier_id: parseInt(selectedSupplierId),
@@ -61,9 +58,8 @@ export default function ResupplyScreen({ userMode }) {
           threshold: parseInt(threshold),
         });
       } else {
-        // Update existing inventory record
         await db.inventory.where({ product_id: parseInt(selectedProductId) }).modify(inv => {
-          inv.quantity += parseInt(quantity);  // ✅ Add to live stock
+          inv.quantity += parseInt(quantity);
           inv.expiration_date = expirationDate;
           inv.threshold = parseInt(threshold);
           inv.supplier_id = parseInt(selectedSupplierId);
@@ -101,7 +97,7 @@ export default function ResupplyScreen({ userMode }) {
           ))}
         </select>
 
-        <label style={styles.label}>Product</label>
+        <label style={styles.label}>Product (with SKU)</label>
         <select
           style={styles.pickerContainer}
           value={selectedProductId || ''}
@@ -109,7 +105,9 @@ export default function ResupplyScreen({ userMode }) {
         >
           <option value="">Select Product</option>
           {products.map((prod) => (
-            <option key={prod.product_id} value={prod.product_id}>{prod.name}</option>
+            <option key={prod.product_id} value={prod.product_id}>
+              {prod.name} {prod.sku ? `(SKU: ${prod.sku})` : ''}
+            </option>
           ))}
         </select>
 

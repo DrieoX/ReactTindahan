@@ -86,7 +86,7 @@ export default function SignupScreen() {
 
       <p style={styles.footer}>
         Already have an account?{' '}
-        <span style={styles.link} onClick={() => navigate('/login')}>
+        <span style={styles.link} onClick={() => navigate('/')}>
           Sign in here
         </span>
       </p>
