@@ -12,12 +12,45 @@ export default function ResupplyScreen({ userMode }) {
   const [selectedSupplierId, setSelectedSupplierId] = useState(null);
   const [quantity, setQuantity] = useState('');
   const [unitCost, setUnitCost] = useState('');
-  const [threshold, setThreshold] = useState('');
   const [expirationDate, setExpirationDate] = useState('');
+
+  const [resupplyItems, setResupplyItems] = useState([]); // multiple items
+  const [scannedCode, setScannedCode] = useState('');
+  const [noExpiry, setNoExpiry] = useState(false);
 
   useEffect(() => {
     fetchData();
+
+    // Barcode scanner listener
+    let buffer = '';
+    let timer;
+    const handleKeyDown = (e) => {
+      if (timer) clearTimeout(timer);
+
+      if (e.key === 'Enter') {
+        if (buffer.length > 0) {
+          setScannedCode(buffer);
+          buffer = '';
+        }
+      } else {
+        buffer += e.key;
+        timer = setTimeout(() => (buffer = ''), 200); // reset if delay >200ms
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
+
+  useEffect(() => {
+    if (scannedCode) {
+      const matchedProduct = products.find((p) => p.sku === scannedCode);
+      if (matchedProduct) {
+        setSelectedProductId(matchedProduct.product_id);
+      }
+      setScannedCode('');
+    }
+  }, [scannedCode, products]);
 
   const fetchData = async () => {
     try {
@@ -30,52 +63,94 @@ export default function ResupplyScreen({ userMode }) {
     }
   };
 
+  const addResupplyItem = () => {
+    if (!selectedProductId || !selectedSupplierId || !quantity || !unitCost) {
+      alert('Please fill out all fields before adding.');
+      return;
+    }
+    if (!noExpiry && !expirationDate) {
+      alert('Please provide an expiration date or mark No Expiry.');
+      return;
+    }
+
+    const newItem = {
+      product_id: parseInt(selectedProductId),
+      supplier_id: parseInt(selectedSupplierId),
+      quantity: parseInt(quantity),
+      unit_cost: parseFloat(unitCost),
+      expiration_date: noExpiry ? '' : expirationDate,
+    };
+
+    setResupplyItems([...resupplyItems, newItem]);
+
+    // reset input fields
+    setQuantity('');
+    setUnitCost('');
+    setExpirationDate('');
+    setSelectedProductId(null);
+    setNoExpiry(false);
+  };
+
   const handleResupply = async () => {
-    if (!selectedProductId || !selectedSupplierId || !quantity || !unitCost || !expirationDate || !threshold) {
-      alert('Please fill out all fields.');
+    if (resupplyItems.length === 0) {
+      alert('No items added for resupply.');
       return;
     }
 
     try {
-      await db.resupplied_items.add({
-        product_id: parseInt(selectedProductId),
-        supplier_id: parseInt(selectedSupplierId),
-        user_id: 1,
-        quantity: parseInt(quantity),
-        unit_cost: parseFloat(unitCost),
-        resupply_date: new Date().toISOString().split('T')[0],
-        expiration_date: expirationDate,
-      });
+      for (const item of resupplyItems) {
+        const newResupply = {
+          ...item,
+          user_id: 1,
+          resupply_date: new Date().toISOString().split('T')[0],
+        };
 
-      const existingInv = await db.inventory.where({ product_id: parseInt(selectedProductId) }).first();
+        await db.resupplied_items.add(newResupply);
 
-      if (!existingInv) {
-        await db.inventory.add({
-          product_id: parseInt(selectedProductId),
-          supplier_id: parseInt(selectedSupplierId),
-          quantity: parseInt(quantity),
-          expiration_date: expirationDate,
-          threshold: parseInt(threshold),
-        });
-      } else {
-        await db.inventory.where({ product_id: parseInt(selectedProductId) }).modify(inv => {
-          inv.quantity += parseInt(quantity);
-          inv.expiration_date = expirationDate;
-          inv.threshold = parseInt(threshold);
-          inv.supplier_id = parseInt(selectedSupplierId);
+        const existingInv = await db.inventory.where({ product_id: item.product_id }).first();
+        let newBalance = item.quantity;
+
+        if (!existingInv) {
+          await db.inventory.add({
+            product_id: item.product_id,
+            supplier_id: item.supplier_id,
+            quantity: item.quantity,
+            expiration_date: item.expiration_date,
+          });
+        } else {
+          await db.inventory.where({ product_id: item.product_id }).modify(inv => {
+            inv.quantity += item.quantity;
+            inv.expiration_date = item.expiration_date;
+            inv.supplier_id = item.supplier_id;
+            newBalance = inv.quantity;
+          });
+        }
+
+       const prod = await db.products.get(item.product_id);
+await db.stock_card.add({
+  product_id: item.product_id,
+  supplier_id: item.supplier_id,
+  user_id: 1, // or logged-in user_id
+  quantity: item.quantity,
+  unit_cost: item.unit_cost,
+  unit_price: prod?.unit_price || 0,
+  resupply_date: newResupply.resupply_date,
+  expiration_date: item.expiration_date,
+});
+
+        // Push resupply to API
+        await fetch('http://localhost:5000/api/resupply', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(newResupply),
         });
       }
 
-      alert('Product resupplied successfully.');
-      setQuantity('');
-      setUnitCost('');
-      setThreshold('');
-      setExpirationDate('');
-      setSelectedProductId(null);
-      setSelectedSupplierId(null);
+      alert('Products resupplied successfully.');
+      setResupplyItems([]);
     } catch (err) {
       console.error('Error during resupply:', err);
-      alert('Failed to resupply product.');
+      alert('Failed to resupply product(s).');
     }
   };
 
@@ -97,7 +172,7 @@ export default function ResupplyScreen({ userMode }) {
           ))}
         </select>
 
-        <label style={styles.label}>Product (with SKU)</label>
+        <label style={styles.label}>Product (with SKU / Barcode)</label>
         <select
           style={styles.pickerContainer}
           value={selectedProductId || ''}
@@ -125,29 +200,59 @@ export default function ResupplyScreen({ userMode }) {
           onChange={(e) => setUnitCost(e.target.value)}
           style={styles.input}
         />
-        <input
-          type="number"
-          placeholder="Threshold Quantity"
-          value={threshold}
-          onChange={(e) => setThreshold(e.target.value)}
-          style={styles.input}
-        />
 
         <label style={styles.label}>Expiration Date</label>
-        <input
-          type="date"
-          value={expirationDate}
-          onChange={(e) => setExpirationDate(e.target.value)}
-          style={styles.input}
-        />
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <input
+            type="date"
+            value={expirationDate}
+            onChange={(e) => setExpirationDate(e.target.value)}
+            style={styles.input}
+            disabled={noExpiry} // disable if "No Expiry" is checked
+          />
+          <label style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+            <input
+              type="checkbox"
+              checked={noExpiry}
+              onChange={(e) => {
+                if (e.target.checked) {
+                  setExpirationDate('');
+                }
+                setNoExpiry(e.target.checked);
+              }}
+            />
+            No Expiry
+          </label>
+        </div>
 
-        <button style={styles.submitButton} onClick={handleResupply}>
-          Submit Resupply
+        <button style={styles.submitButton} onClick={addResupplyItem}>
+          Add Item
         </button>
       </div>
+
+      {resupplyItems.length > 0 && (
+        <div style={styles.listContainer}>
+          <h3>Items to Resupply</h3>
+          <ul>
+            {resupplyItems.map((item, idx) => {
+              const prod = products.find((p) => p.product_id === item.product_id);
+              return (
+                <li key={idx}>
+                  {prod ? prod.name : 'Unknown Product'} - Qty: {item.quantity}, Unit Cost: {item.unit_cost}, Exp: {item.expiration_date}
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      )}
+
+      <button style={styles.submitButton} onClick={handleResupply}>
+        Submit All Resupplies
+      </button>
     </div>
   );
 }
+
 
 const styles = {
   container: {

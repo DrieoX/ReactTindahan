@@ -12,10 +12,9 @@ export default function InventoryScreen({ userMode }) {
   const [newItem, setNewItem] = useState({ 
     name: '', 
     sku: '', 
-    description: '', 
     unit_price: '', 
     unit: 'pieces',
-    expiration_date: ''
+    threshold: 5,
   });
   const [editingItem, setEditingItem] = useState(null);
   const [supplierDetails, setSupplierDetails] = useState([]);
@@ -27,10 +26,24 @@ export default function InventoryScreen({ userMode }) {
     inventoryValue: 0
   });
 
+  const [barcode, setBarcode] = useState('');
+
   useEffect(() => {
     fetchInventory();
     fetchSuppliers();
-  }, []);
+
+    const handleGlobalScan = (e) => {
+      if (e.key === 'Enter' && barcode.trim()) {
+        setSearchQuery(barcode.trim());
+        setBarcode('');
+      } else if (e.key.length === 1) {
+        setBarcode(prev => prev + e.key);
+      }
+    };
+
+    window.addEventListener('keydown', handleGlobalScan);
+    return () => window.removeEventListener('keydown', handleGlobalScan);
+  }, [barcode]);
 
   const fetchInventory = async () => {
     try {
@@ -45,20 +58,19 @@ export default function InventoryScreen({ userMode }) {
         return {
           ...p,
           quantity: invQuantity,
+          threshold: invRecord?.threshold || p.threshold || 5,
           suppliers: invRecord
             ? [{
                 supplier_id: invRecord.supplier_id,
                 name: (supplierList.find(s => s.supplier_id === invRecord.supplier_id)?.name) || 'N/A',
                 quantity: invRecord.quantity,
                 expiration_date: invRecord.expiration_date || 'N/A',
-                threshold: invRecord.threshold || 0,
-                unit_cost: 0, // optional
+                unit_cost: 0, 
               }]
             : [],
         };
       });
 
-      // Stats
       const totalProducts = items.length;
       const lowStock = items.filter(item => item.quantity <= (item.threshold || 5)).length;
       const today = new Date();
@@ -93,23 +105,27 @@ export default function InventoryScreen({ userMode }) {
       const existing = await db.products.where('sku').equals(newItem.sku).first();
       if (existing) return alert('A product with this SKU already exists.');
 
-      await db.products.add({
+      const productId = await db.products.add({
         sku: newItem.sku || null,
         name: newItem.name,
-        description: newItem.description,
         unit_price: parseFloat(newItem.unit_price),
-        unit: newItem.unit,
-        expiration_date: newItem.expiration_date
+        unit: newItem.unit
+      });
+
+      await db.inventory.add({
+        product_id: productId,
+        supplier_id: null,
+        quantity: 0,
+        threshold: parseInt(newItem.threshold) || 5,
       });
 
       setShowAddModal(false);
       setNewItem({ 
         name: '', 
         sku: '', 
-        description: '', 
         unit_price: '', 
         unit: 'pieces',
-        expiration_date: ''
+        threshold: 5
       });
       fetchInventory();
     } catch (err) {
@@ -127,10 +143,12 @@ export default function InventoryScreen({ userMode }) {
       await db.products.update(editingItem.product_id, {
         sku: editingItem.sku,
         name: editingItem.name,
-        description: editingItem.description,
         unit_price: parseFloat(editingItem.unit_price),
-        unit: editingItem.unit,
-        expiration_date: editingItem.expiration_date
+        unit: editingItem.unit
+      });
+
+      await db.inventory.where({ product_id: editingItem.product_id }).modify(inv => {
+        inv.threshold = parseInt(editingItem.threshold) || 5;
       });
 
       setShowEditModal(false);
@@ -158,12 +176,37 @@ export default function InventoryScreen({ userMode }) {
     }
   };
 
-  const handleSupplierDetails = (item) => {
-    setSupplierDetails(item.suppliers);
-    setShowSupplierModal(true);
+  const handleSupplierDetails = async (item) => {
+    try {
+      const stockRecords = await db.stock_card
+        .where('product_id')
+        .equals(item.product_id)
+        .toArray();
+
+      const supplierInfo = await Promise.all(stockRecords.map(async (record) => {
+        const supplier = record.supplier_id 
+          ? await db.suppliers.get(record.supplier_id) 
+          : null;
+        return {
+          name: supplier?.name || 'N/A',
+          resupply_date: record.resupply_date || 'N/A',
+          quantity: record.quantity || 0,
+          unit: item.unit || 'pcs',
+          unit_cost: record.unit_cost || 0,
+          unit_price: record.unit_price || item.unit_price || 0,
+          expiration_date: record.expiration_date || 'N/A',
+          transaction_type: record.transaction_type || 'N/A',
+          running_balance: record.running_balance ?? null,
+        };
+      }));
+
+      setSupplierDetails(supplierInfo);
+      setShowSupplierModal(true);
+    } catch (err) {
+      console.error('Error fetching supplier details:', err);
+    }
   };
 
-  // search by supplier, name, or sku
   const filteredInventory = inventory.filter((item) => {
     const q = searchQuery.toLowerCase();
     if (item.name.toLowerCase().includes(q)) return true;
@@ -174,7 +217,7 @@ export default function InventoryScreen({ userMode }) {
 
   return (
     <div style={styles.container}>
-      {/* Header Section */}
+      {/* Header */}
       <div style={styles.header}>
         <div>
           <h1 style={styles.pageTitle}>Inventory Management</h1>
@@ -190,7 +233,7 @@ export default function InventoryScreen({ userMode }) {
         </div>
       </div>
 
-      {/* Stats Cards */}
+      {/* Stats */}
       <div style={styles.statsContainer}>
         <div style={styles.statCard}>
           <h3 style={styles.statTitle}>Total Products</h3>
@@ -199,12 +242,10 @@ export default function InventoryScreen({ userMode }) {
         <div style={{...styles.statCard, backgroundColor: '#fffbeb', borderColor: '#f59e0b'}}>
           <h3 style={styles.statTitle}>Low Stock Items</h3>
           <p style={{...styles.statValue, color: '#b45309'}}>{stats.lowStock}</p>
-          <p style={styles.statChange}>{stats.lowStock > 0 ? `${stats.lowStock} items need to be restocked` : 'No low stock items'}</p>
         </div>
         <div style={{...styles.statCard, backgroundColor: '#fef2f2', borderColor: '#ef4444'}}>
           <h3 style={styles.statTitle}>Expiring Soon</h3>
           <p style={{...styles.statValue, color: '#dc2626'}}>{stats.expiringSoon}</p>
-          <p style={styles.statChange}>{stats.expiringSoon > 0 ? `${stats.expiringSoon} items expiring within 7 days` : 'No items expiring soon'}</p>
         </div>
         <div style={{...styles.statCard, backgroundColor: '#f0f9ff', borderColor: '#0ea5e9'}}>
           <h3 style={styles.statTitle}>Inventory Value</h3>
@@ -212,7 +253,7 @@ export default function InventoryScreen({ userMode }) {
         </div>
       </div>
 
-      {/* Products Section */}
+      {/* Products */}
       <div style={styles.productsSection}>
         <div style={styles.sectionHeader}>
           <h2 style={styles.sectionTitle}>Products</h2>
@@ -232,51 +273,24 @@ export default function InventoryScreen({ userMode }) {
                 <th style={styles.tableCell}>UNIT</th>
                 <th style={styles.tableCell}>PRICE</th>
                 <th style={styles.tableCell}>STOCK</th>
-                <th style={styles.tableCell}>SUPPLIERS</th>
+                <th style={styles.tableCell}>THRESHOLD</th>
+                <th style={styles.tableCell}>ACTIONS</th>
               </tr>
             </thead>
             <tbody>
               {filteredInventory.map((item) => (
-                <React.Fragment key={item.product_id}>
-                  <tr style={styles.tableRow}>
-                    <td style={styles.tableCell}>
-                      <div style={styles.productInfo}>
-                        <div style={styles.productName}>{item.name}</div>
-                      </div>
-                    </td>
-                    <td style={styles.tableCell}>{item.sku || 'N/A'}</td>
-                    <td style={styles.tableCell}>{item.unit || 'pieces'}</td>
-                    <td style={styles.tableCell}>₱{item.unit_price || '0.00'}</td>
-                    <td style={styles.tableCell}>{item.quantity || 0}</td>
-                    <td style={styles.tableCell}>
-                      <div style={styles.actionButtons}>
-                        <button 
-                          style={styles.editButton} 
-                          onClick={() => handleEditItem(item)}
-                        >
-                          Edit
-                        </button>
-                        <button 
-                          style={styles.viewButton} 
-                          onClick={() => handleSupplierDetails(item)}
-                        >
-                          View
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                  <tr style={styles.detailsRow}>
-                    <td colSpan="6" style={styles.detailsCell}>
-                      <div style={styles.productDetails}>
-                        <span>Cost: ₱{(item.unit_price * 0.8).toFixed(2)}</span>
-                        <span>Reorder at: {item.threshold || 5}</span>
-                        {item.expiration_date && (
-                          <span>Expires: {new Date(item.expiration_date).toLocaleDateString()}</span>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                </React.Fragment>
+                <tr key={item.product_id} style={styles.tableRow}>
+                  <td style={styles.tableCell}>{item.name}</td>
+                  <td style={styles.tableCell}>{item.sku || 'N/A'}</td>
+                  <td style={styles.tableCell}>{item.unit || 'pieces'}</td>
+                  <td style={styles.tableCell}>₱{item.unit_price || '0.00'}</td>
+                  <td style={styles.tableCell}>{item.quantity || 0}</td>
+                  <td style={styles.tableCell}>{item.threshold || 5}</td>
+                  <td style={styles.tableCell}>
+                    <button style={styles.editButton} onClick={() => handleEditItem(item)}>Edit</button>
+                    <button style={styles.viewButton} onClick={() => handleSupplierDetails(item)}>View</button>
+                  </td>
+                </tr>
               ))}
             </tbody>
           </table>
@@ -333,15 +347,6 @@ function ProductModal({ visible, onClose, onSubmit, onDelete, item, setItem, tit
             />
           </div>
           <div style={styles.inputGroup}>
-            <label style={styles.inputLabel}>Description</label>
-            <textarea
-              placeholder="Enter product description"
-              value={item?.description || ''}
-              onChange={(e) => setItem({ ...item, description: e.target.value })}
-              style={{...styles.input, minHeight: '80px'}}
-            />
-          </div>
-          <div style={styles.inputGroup}>
             <label style={styles.inputLabel}>Unit *</label>
             <select 
               style={styles.input}
@@ -367,28 +372,14 @@ function ProductModal({ visible, onClose, onSubmit, onDelete, item, setItem, tit
             />
           </div>
           <div style={styles.inputGroup}>
-            <label style={styles.inputLabel}>Expiration Date</label>
+            <label style={styles.inputLabel}>Threshold *</label>
             <input
-              type="date"
-              value={item?.expiration_date || ''}
-              onChange={(e) => setItem({ ...item, expiration_date: e.target.value })}
+              placeholder="5"
+              value={item?.threshold?.toString() || ''}
+              type="number"
+              onChange={(e) => setItem({ ...item, threshold: e.target.value })}
               style={styles.input}
             />
-          </div>
-          <div style={styles.inputGroup}>
-            <label style={styles.inputLabel}>Category</label>
-            <select 
-              style={styles.input}
-              value={item?.category || ''}
-              onChange={(e) => setItem({ ...item, category: e.target.value })}
-            >
-              <option value="">Select category</option>
-              <option value="Grains">Grains</option>
-              <option value="Dairy">Dairy</option>
-              <option value="Bakery">Bakery</option>
-              <option value="Canned Goods">Canned Goods</option>
-              <option value="Beverages">Beverages</option>
-            </select>
           </div>
         </div>
 
@@ -414,35 +405,38 @@ function SupplierModal({ suppliers, onClose }) {
   return (
     <div style={styles.modalOverlay}>
       <div style={styles.modalContainer}>
-        <h2 style={styles.modalHeader}>Supplier Details</h2>
+        <h2 style={styles.modalHeader}>Stock Card</h2>
         <div style={styles.modalContent}>
           {suppliers.length === 0 ? (
-            <p style={styles.noDataText}>No supplier information available</p>
+            <p style={styles.noDataText}>No stock card records available</p>
           ) : (
-            <div style={styles.supplierDetails}>
-              {suppliers.map((s, idx) => (
-                <div key={idx} style={styles.supplierDetailCard}>
-                  <h4 style={styles.supplierName}>{s.name}</h4>
-                  <div style={styles.supplierDetailGrid}>
-                    <div style={styles.detailItem}>
-                      <span style={styles.detailLabel}>Quantity Supplied:</span>
-                      <span style={styles.detailValue}>{s.quantity}</span>
-                    </div>
-                    <div style={styles.detailItem}>
-                      <span style={styles.detailLabel}>Unit Cost:</span>
-                      <span style={styles.detailValue}>₱{s.unit_cost || '0.00'}</span>
-                    </div>
-                    <div style={styles.detailItem}>
-                      <span style={styles.detailLabel}>Expiration Date:</span>
-                      <span style={styles.detailValue}>{s.expiration_date || 'N/A'}</span>
-                    </div>
-                    <div style={styles.detailItem}>
-                      <span style={styles.detailLabel}>Reorder Threshold:</span>
-                      <span style={styles.detailValue}>{s.threshold || 0}</span>
-                    </div>
-                  </div>
-                </div>
-              ))}
+            <div style={styles.tableContainer}>
+              <table style={styles.table}>
+                <thead>
+                  <tr style={styles.tableHeader}>
+                    <th style={styles.tableCell}>Supplier</th>
+                    <th style={styles.tableCell}>Transaction Date</th>
+                    <th style={styles.tableCell}>Stock-in</th>
+                    <th style={styles.tableCell}>Units</th>
+                    <th style={styles.tableCell}>Expiry Date</th>
+                    <th style={styles.tableCell}>Unit Cost</th>
+                    <th style={styles.tableCell}>Unit Price</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {suppliers.map((s, idx) => (
+                    <tr key={idx} style={styles.tableRow}>
+                      <td style={styles.tableCell}>{s.name}</td>
+                      <td style={styles.tableCell}>{s.resupply_date || 'N/A'}</td>
+                      <td style={styles.tableCell}>{s.quantity}</td>
+                      <td style={styles.tableCell}>{s.unit}</td>
+                      <td style={styles.tableCell}>{s.expiration_date || 'N/A'}</td>
+                      <td style={styles.tableCell}>₱{(s.unit_cost || 0).toFixed(2)}</td>
+                      <td style={styles.tableCell}>₱{(s.unit_price || 0).toFixed(2)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           )}
         </div>

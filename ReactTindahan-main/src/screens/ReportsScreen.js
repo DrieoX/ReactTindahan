@@ -1,6 +1,18 @@
 import React, { useEffect, useState } from 'react';
 import { db } from '../db';
 
+export const addReport = async (report) => {
+  // Save to Dexie
+  await db.backup.add(report);
+
+  // Push to API (so other clients / Expo can see updates)
+  await fetch('http://localhost:5000/api/reports', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(report),
+  });
+};
+
 export default function ReportsScreen({ userMode }) {
   const [report, setReport] = useState([]);
   const [resupplyReport, setResupplyReport] = useState([]);
@@ -11,6 +23,7 @@ export default function ReportsScreen({ userMode }) {
     fetchResupplyReport();
   }, []);
 
+  // 🔹 Pull reports directly from Dexie (local)
   const fetchReport = async () => {
     try {
       const salesData = await db.sale_items.toArray();
@@ -34,6 +47,7 @@ export default function ReportsScreen({ userMode }) {
     }
   };
 
+  // 🔹 Pull resupply reports from Dexie (local)
   const fetchResupplyReport = async () => {
     try {
       const resuppliedItems = await db.resupplied_items.toArray();
@@ -162,6 +176,7 @@ export default function ReportsScreen({ userMode }) {
     </div>
   );
 }
+
 
 const styles = {
   container: {

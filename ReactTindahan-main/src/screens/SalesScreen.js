@@ -233,7 +233,6 @@ export default function POSScreen({ userMode }) {
 }
 
 
-
 const styles = {
   container: {
     flex: 1,
