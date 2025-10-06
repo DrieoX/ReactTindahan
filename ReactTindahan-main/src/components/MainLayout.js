@@ -46,6 +46,14 @@ export default function MainLayout({ children, userMode, handleLogout }) {
         ))}
       </div>
 
+      {/* Overlay when sidebar is open */}
+      {sidebarVisible && (
+        <div
+          style={styles.overlay}
+          onClick={() => setSidebarVisible(false)}
+        />
+      )}
+
       {/* Top bar */}
       <div style={styles.topBar}>
         <button
@@ -66,8 +74,6 @@ export default function MainLayout({ children, userMode, handleLogout }) {
   );
 }
 
-
-
 const styles = {
   container: {
     display: 'flex',
@@ -87,7 +93,7 @@ const styles = {
     padding: '0 16px',
     backgroundColor: '#f9fafb',
     boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
-    zIndex: 5,
+    zIndex: 20,
   },
   sidebar: {
     position: 'fixed',
@@ -96,8 +102,18 @@ const styles = {
     width: SIDEBAR_WIDTH,
     backgroundColor: '#f0f0f0',
     padding: '20px 12px',
-    transition: 'left 0.3s',
-    zIndex: 10,
+    transition: 'left 0.3s ease',
+    zIndex: 30,
+    boxShadow: '2px 0 5px rgba(0,0,0,0.2)',
+  },
+  overlay: {
+    position: 'fixed',
+    top: 50,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.3)',
+    zIndex: 25,
   },
   menuButton: {
     display: 'block',
@@ -133,6 +149,8 @@ const styles = {
     flex: 1,
     padding: 20,
     marginTop: 50,
-    marginLeft: SIDEBAR_WIDTH,
+    width: '100%',
+    height: 'calc(100vh - 50px)',
+    overflowY: 'auto',
   },
 };

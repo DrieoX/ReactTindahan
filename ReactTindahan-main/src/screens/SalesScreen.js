@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { db } from '../db';
 
 export default function POSScreen({ userMode }) {
@@ -7,12 +7,15 @@ export default function POSScreen({ userMode }) {
   const [products, setProducts] = useState([]);
   const [cashGiven, setCashGiven] = useState('');
   const mode = userMode || 'client';
+  const inputRef = useRef(null);
 
   useEffect(() => {
     loadProducts();
 
-    // ✅ Automatically capture scanner input globally
+    // ✅ Automatically capture scanner input globally, unless typing manually
     const handleGlobalScan = (e) => {
+      if (document.activeElement === inputRef.current) return; // ignore if typing manually
+
       if (e.key === 'Enter' && barcode.trim()) {
         const product = products.find(p => p.sku === barcode.trim());
         if (product) {
@@ -132,46 +135,37 @@ export default function POSScreen({ userMode }) {
 
   return (
     <div style={styles.container}>
-      {/* Barcode Input (Fallback only) */}
+      {/* Barcode Input (Manual fallback only) */}
       <div style={styles.section}>
         <h3 style={styles.sectionTitle}>Scan Product (SKU)</h3>
         <input
+          ref={inputRef}
           style={styles.input}
           placeholder="If scanner unavailable, type SKU here"
           value={barcode}
           onChange={(e) => setBarcode(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && barcode.trim()) {
+              const product = products.find(p => p.sku === barcode.trim());
+              if (product) {
+                addToCart(product, 1);
+                setBarcode('');
+              } else {
+                alert('Product not found for scanned code!');
+                setBarcode('');
+              }
+            }
+          }}
         />
       </div>
 
-      {/* Quick Add Products */}
+      {/* POS Section (formerly Shopping Cart) */}
       <div style={styles.section}>
-        <h3 style={styles.sectionTitle}>Quick Add Products</h3>
-        <div style={styles.productsGrid}>
-          {products.map(p => (
-            <div key={p.id} style={styles.productCard}>
-              <div>{p.name}</div>
-              <div style={{ color: '#64748B' }}>
-                Stock: {p.stock} {p.baseUnit}
-              </div>
-              <div style={{ marginTop: 4, fontSize: 12, color: '#94A3B8' }}>
-                SKU: {p.sku}
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 6 }}>
-                <strong>P{p.price.toFixed(2)}</strong>
-                <button style={styles.addButton} onClick={() => addToCart(p)}>+ Add</button>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* Shopping Cart */}
-      <div style={styles.section}>
-        <h3 style={styles.sectionTitle}>Shopping Cart</h3>
+        <h3 style={styles.sectionTitle}>Point of Sale</h3>
         {cart.length === 0 ? (
           <div style={styles.cartEmpty}>
             <span style={{ fontSize: 48, color: '#9CA3AF' }}>🛒</span>
-            <div style={styles.cartText}>Cart is empty</div>
+            <div style={styles.cartText}>No items scanned</div>
           </div>
         ) : (
           <div style={styles.cartContainer}>

@@ -6,14 +6,17 @@ export default function InventoryScreen({ userMode }) {
 
   const [inventory, setInventory] = useState([]);
   const [suppliers, setSuppliers] = useState([]);
+  const [categories, setCategories] = useState([]);
   const [showAddModal, setShowAddModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [showSupplierModal, setShowSupplierModal] = useState(false);
+  const [showCategoryModal, setShowCategoryModal] = useState(false); // new
   const [newItem, setNewItem] = useState({ 
     name: '', 
     sku: '', 
     unit_price: '', 
-    unit: 'pieces',
+    base_unit: 'pcs',
+    category_id: null,
     threshold: 5,
   });
   const [editingItem, setEditingItem] = useState(null);
@@ -25,12 +28,17 @@ export default function InventoryScreen({ userMode }) {
     expiringSoon: 0,
     inventoryValue: 0
   });
+  const [showLowStockOnly, setShowLowStockOnly] = useState(false);
 
   const [barcode, setBarcode] = useState('');
+  const [newCategoryName, setNewCategoryName] = useState(''); // new
+  const [editingCategory, setEditingCategory] = useState(null); // new
 
   useEffect(() => {
+    prepopulateCategories(); // Add basic categories if empty
     fetchInventory();
     fetchSuppliers();
+    fetchCategories();
 
     const handleGlobalScan = (e) => {
       if (e.key === 'Enter' && barcode.trim()) {
@@ -44,6 +52,45 @@ export default function InventoryScreen({ userMode }) {
     window.addEventListener('keydown', handleGlobalScan);
     return () => window.removeEventListener('keydown', handleGlobalScan);
   }, [barcode]);
+
+  // --- Prepopulate basic grocery categories ---
+  const prepopulateCategories = async () => {
+    try {
+      const count = await db.categories.count();
+      if (count === 0) {
+        const defaultCategories = [
+          'Beverages',
+          'Bakery',
+          'Dairy & Eggs',
+          'Meat & Poultry',
+          'Seafood',
+          'Fruits',
+          'Vegetables',
+          'Pantry & Dry Goods',
+          'Snacks & Confectionery',
+          'Frozen Foods',
+          'Canned & Packaged Foods',
+          'Condiments & Spices',
+          'Baking Supplies',
+          'Household & Cleaning',
+          'Personal Care'
+        ];
+        await Promise.all(defaultCategories.map(name => db.categories.add({ name })));
+        fetchCategories();
+      }
+    } catch (err) {
+      console.error('Error prepopulating categories:', err);
+    }
+  };
+
+  const fetchCategories = async () => {
+    try {
+      const list = await db.categories.toArray();
+      setCategories(list);
+    } catch (err) {
+      console.error('Error fetching categories:', err);
+    }
+  };
 
   const fetchInventory = async () => {
     try {
@@ -60,13 +107,13 @@ export default function InventoryScreen({ userMode }) {
           quantity: invQuantity,
           threshold: invRecord?.threshold || p.threshold || 5,
           suppliers: invRecord
-            ? [{
+            ? [ {
                 supplier_id: invRecord.supplier_id,
                 name: (supplierList.find(s => s.supplier_id === invRecord.supplier_id)?.name) || 'N/A',
                 quantity: invRecord.quantity,
                 expiration_date: invRecord.expiration_date || 'N/A',
                 unit_cost: 0, 
-              }]
+              } ]
             : [],
         };
       });
@@ -98,9 +145,11 @@ export default function InventoryScreen({ userMode }) {
     }
   };
 
+  // --- Product handlers ---
   const handleAddItem = async () => {
-    if (!newItem.name || !newItem.unit_price)
+    if (!newItem.name || !newItem.unit_price || !newItem.base_unit)
       return alert('Please fill out all required fields.');
+
     try {
       const existing = await db.products.where('sku').equals(newItem.sku).first();
       if (existing) return alert('A product with this SKU already exists.');
@@ -109,7 +158,8 @@ export default function InventoryScreen({ userMode }) {
         sku: newItem.sku || null,
         name: newItem.name,
         unit_price: parseFloat(newItem.unit_price),
-        unit: newItem.unit
+        base_unit: newItem.base_unit,
+        category_id: newItem.category_id || null,
       });
 
       await db.inventory.add({
@@ -124,8 +174,9 @@ export default function InventoryScreen({ userMode }) {
         name: '', 
         sku: '', 
         unit_price: '', 
-        unit: 'pieces',
-        threshold: 5
+        base_unit: 'pcs',
+        category_id: null,
+        threshold: 5,
       });
       fetchInventory();
     } catch (err) {
@@ -144,7 +195,8 @@ export default function InventoryScreen({ userMode }) {
         sku: editingItem.sku,
         name: editingItem.name,
         unit_price: parseFloat(editingItem.unit_price),
-        unit: editingItem.unit
+        base_unit: editingItem.base_unit,
+        category_id: editingItem.category_id || null,
       });
 
       await db.inventory.where({ product_id: editingItem.product_id }).modify(inv => {
@@ -191,7 +243,7 @@ export default function InventoryScreen({ userMode }) {
           name: supplier?.name || 'N/A',
           resupply_date: record.resupply_date || 'N/A',
           quantity: record.quantity || 0,
-          unit: item.unit || 'pcs',
+          unit: item.base_unit || 'pcs',
           unit_cost: record.unit_cost || 0,
           unit_price: record.unit_price || item.unit_price || 0,
           expiration_date: record.expiration_date || 'N/A',
@@ -207,7 +259,50 @@ export default function InventoryScreen({ userMode }) {
     }
   };
 
+  // --- Category handlers ---
+  const handleAddCategory = async () => {
+    if (!newCategoryName.trim()) return alert("Enter a category name.");
+    try {
+      await db.categories.add({ name: newCategoryName.trim() });
+      setNewCategoryName('');
+      setShowCategoryModal(false);
+      fetchCategories();
+    } catch (err) {
+      console.error("Error adding category:", err);
+    }
+  };
+
+  const handleEditCategory = (category) => {
+    setEditingCategory(category);
+    setNewCategoryName(category.name);
+    setShowCategoryModal(true);
+  };
+
+  const handleSaveCategory = async () => {
+    if (!newCategoryName.trim()) return alert("Enter a category name.");
+    try {
+      await db.categories.update(editingCategory.category_id, { name: newCategoryName.trim() });
+      setEditingCategory(null);
+      setNewCategoryName('');
+      setShowCategoryModal(false);
+      fetchCategories();
+    } catch (err) {
+      console.error("Error editing category:", err);
+    }
+  };
+
+  const handleDeleteCategory = async (category) => {
+    if (!window.confirm(`Are you sure you want to delete category "${category.name}"?`)) return;
+    try {
+      await db.categories.delete(category.category_id);
+      fetchCategories();
+    } catch (err) {
+      console.error("Error deleting category:", err);
+    }
+  };
+
   const filteredInventory = inventory.filter((item) => {
+    if (showLowStockOnly) return item.quantity <= (item.threshold || 5);
     const q = searchQuery.toLowerCase();
     if (item.name.toLowerCase().includes(q)) return true;
     if (item.sku && item.sku.toLowerCase().includes(q)) return true;
@@ -239,9 +334,15 @@ export default function InventoryScreen({ userMode }) {
           <h3 style={styles.statTitle}>Total Products</h3>
           <p style={styles.statValue}>{stats.totalProducts}</p>
         </div>
-        <div style={{...styles.statCard, backgroundColor: '#fffbeb', borderColor: '#f59e0b'}}>
+        <div
+          style={{...styles.statCard, backgroundColor: '#fffbeb', borderColor: '#f59e0b', cursor: 'pointer'}}
+          onClick={() => setShowLowStockOnly(!showLowStockOnly)}
+        >
           <h3 style={styles.statTitle}>Low Stock Items</h3>
           <p style={{...styles.statValue, color: '#b45309'}}>{stats.lowStock}</p>
+          <p style={{fontSize: '0.9rem', color: '#92400e'}}>
+            {showLowStockOnly ? 'Showing Low Stock' : 'Click to View'}
+          </p>
         </div>
         <div style={{...styles.statCard, backgroundColor: '#fef2f2', borderColor: '#ef4444'}}>
           <h3 style={styles.statTitle}>Expiring Soon</h3>
@@ -261,6 +362,9 @@ export default function InventoryScreen({ userMode }) {
             <button style={styles.primaryButton} onClick={() => setShowAddModal(true)}>
               Add New Item
             </button>
+            <button style={styles.secondaryButton} onClick={() => { setEditingCategory(null); setNewCategoryName(''); setShowCategoryModal(true); }}>
+              Add Category
+            </button>
           </div>
         </div>
 
@@ -269,6 +373,7 @@ export default function InventoryScreen({ userMode }) {
             <thead>
               <tr style={styles.tableHeader}>
                 <th style={styles.tableCell}>PRODUCT</th>
+                <th style={styles.tableCell}>CATEGORY</th>
                 <th style={styles.tableCell}>SKU</th>
                 <th style={styles.tableCell}>UNIT</th>
                 <th style={styles.tableCell}>PRICE</th>
@@ -281,8 +386,9 @@ export default function InventoryScreen({ userMode }) {
               {filteredInventory.map((item) => (
                 <tr key={item.product_id} style={styles.tableRow}>
                   <td style={styles.tableCell}>{item.name}</td>
+                  <td style={styles.tableCell}>{categories.find(c => c.category_id === item.category_id)?.name || 'N/A'}</td>
                   <td style={styles.tableCell}>{item.sku || 'N/A'}</td>
-                  <td style={styles.tableCell}>{item.unit || 'pieces'}</td>
+                  <td style={styles.tableCell}>{item.base_unit || 'pcs'}</td>
                   <td style={styles.tableCell}>₱{item.unit_price || '0.00'}</td>
                   <td style={styles.tableCell}>{item.quantity || 0}</td>
                   <td style={styles.tableCell}>{item.threshold || 5}</td>
@@ -309,6 +415,7 @@ export default function InventoryScreen({ userMode }) {
           onDelete={showEditModal ? handleDeleteItem : null}
           item={showAddModal ? newItem : editingItem}
           setItem={showAddModal ? setNewItem : setEditingItem}
+          categories={categories}
           title={showAddModal ? 'Add New Product' : 'Edit Product'}
           isEdit={showEditModal}
         />
@@ -317,12 +424,44 @@ export default function InventoryScreen({ userMode }) {
       {showSupplierModal && (
         <SupplierModal suppliers={supplierDetails} onClose={() => setShowSupplierModal(false)} />
       )}
+
+      {showCategoryModal && (
+        <CategoryModal 
+          visible={showCategoryModal} 
+          onClose={() => setShowCategoryModal(false)} 
+          newCategoryName={newCategoryName}
+          setNewCategoryName={setNewCategoryName}
+          onSubmit={editingCategory ? handleSaveCategory : handleAddCategory}
+          editingCategory={editingCategory}
+          onDelete={editingCategory ? handleDeleteCategory : null}
+          categories={categories} // pass categories for modal table
+          handleEditCategory={handleEditCategory} // edit from modal
+        />
+      )}
     </div>
   );
 }
 
-function ProductModal({ visible, onClose, onSubmit, onDelete, item, setItem, title, isEdit }) {
+function ProductModal({ visible, onClose, onSubmit, onDelete, item, setItem, title, isEdit, categories }) {
   if (!visible) return null;
+
+  const getUnitOptions = (base_unit) => {
+    switch(base_unit) {
+      case 'pcs':
+        return ['pcs', 'dozen', 'boxes', 'packs'];
+      case 'grams':
+      case 'kilos':
+        return ['grams', 'kilos'];
+      case 'ml':
+      case 'liters':
+        return ['ml', 'liters'];
+      default:
+        return [base_unit];
+    }
+  };
+
+  const unitOptions = getUnitOptions(item?.base_unit || 'pcs');
+
   return (
     <div style={styles.modalOverlay}>
       <div style={styles.modalContainer}>
@@ -347,18 +486,33 @@ function ProductModal({ visible, onClose, onSubmit, onDelete, item, setItem, tit
             />
           </div>
           <div style={styles.inputGroup}>
-            <label style={styles.inputLabel}>Unit *</label>
+            <label style={styles.inputLabel}>Category</label>
             <select 
               style={styles.input}
-              value={item?.unit || 'pieces'}
-              onChange={(e) => setItem({ ...item, unit: e.target.value })}
+              value={item?.category_id || ''}
+              onChange={(e) => setItem({ ...item, category_id: parseInt(e.target.value) })}
             >
-              <option value="pieces">Pieces</option>
+              <option value="">Select Category</option>
+              {categories.map(c => (
+                <option key={c.category_id} value={c.category_id}>{c.name}</option>
+              ))}
+            </select>
+          </div>
+          <div style={styles.inputGroup}>
+            <label style={styles.inputLabel}>Base Unit *</label>
+            <select 
+              style={styles.input}
+              value={item?.base_unit || 'pcs'}
+              onChange={(e) => setItem({ ...item, base_unit: e.target.value })}
+            >
+              <option value="pcs">Pieces</option>
               <option value="dozen">Dozen</option>
-              <option value="kilos">Kilos</option>
               <option value="grams">Grams</option>
-              <option value="packs">Packs</option>
+              <option value="kilos">Kilos</option>
+              <option value="ml">Milliliters</option>
+              <option value="liters">Liters</option>
               <option value="boxes">Boxes</option>
+              <option value="packs">Packs</option>
             </select>
           </div>
           <div style={styles.inputGroup}>
@@ -450,6 +604,59 @@ function SupplierModal({ suppliers, onClose }) {
   );
 }
 
+function CategoryModal({ visible, onClose, newCategoryName, setNewCategoryName, onSubmit, editingCategory, onDelete, categories, handleEditCategory }) {
+  if (!visible) return null;
+  return (
+    <div style={styles.modalOverlay}>
+      <div style={styles.modalContainer}>
+        <h2 style={styles.modalHeader}>{editingCategory ? 'Edit Category' : 'Add New Category'}</h2>
+        <div style={styles.modalContent}>
+          <div style={styles.inputGroup}>
+            <label style={styles.inputLabel}>Category Name</label>
+            <input 
+              style={styles.input} 
+              placeholder="Enter category name" 
+              value={newCategoryName} 
+              onChange={(e) => setNewCategoryName(e.target.value)}
+            />
+          </div>
+
+          <div style={{marginTop: '20px'}}>
+            <h3>Existing Categories</h3>
+            <div style={styles.tableContainer}>
+              <table style={styles.table}>
+                <thead>
+                  <tr style={styles.tableHeader}>
+                    <th style={styles.tableCell}>Category Name</th>
+                    <th style={styles.tableCell}>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {categories.map((c) => (
+                    <tr key={c.category_id} style={styles.tableRow}>
+                      <td style={styles.tableCell}>{c.name}</td>
+                      <td style={styles.tableCell}>
+                        <button style={styles.editButton} onClick={() => handleEditCategory(c)}>Edit</button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+        </div>
+        <div style={styles.modalButtons}>
+          {editingCategory && (
+            <button style={styles.deleteButton} onClick={() => onDelete(editingCategory)}>Delete</button>
+          )}
+          <button style={styles.cancelButton} onClick={onClose}>Cancel</button>
+          <button style={styles.submitButton} onClick={onSubmit}>{editingCategory ? 'Save Changes' : 'Add Category'}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 const styles = {
   container: { 

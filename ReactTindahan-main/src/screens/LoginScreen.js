@@ -11,13 +11,14 @@ export default function LoginScreen({ setUserMode }) {
   const handleLogin = async () => {
     const result = await loginUser(username, password);
     if (result.success) {
+      const normalizedMode = mode.toLowerCase();
       alert(`Welcome! Logged in as ${result.user.role} in ${mode} mode`);
 
-      // Save to localStorage
+      // ✅ Save to localStorage (persistent across refresh)
       localStorage.setItem("user", JSON.stringify(result.user));
-      localStorage.setItem("userMode", mode);
+      localStorage.setItem("userMode", normalizedMode);
 
-      setUserMode(mode.toLowerCase());
+      setUserMode(normalizedMode);
       navigate('/dashboard', { replace: true });
     } else {
       alert(result.error);

@@ -23,6 +23,18 @@ export default function ReportsScreen({ userMode }) {
     fetchResupplyReport();
   }, []);
 
+  // Helper: check if a date is today
+  const isToday = (dateStr) => {
+    if (!dateStr) return false;
+    const date = new Date(dateStr);
+    const today = new Date();
+    return (
+      date.getDate() === today.getDate() &&
+      date.getMonth() === today.getMonth() &&
+      date.getFullYear() === today.getFullYear()
+    );
+  };
+
   // 🔹 Pull reports directly from Dexie (local)
   const fetchReport = async () => {
     try {
@@ -30,14 +42,33 @@ export default function ReportsScreen({ userMode }) {
       const sales = await db.sales.toArray();
       const products = await db.products.toArray();
 
-      const enriched = salesData.map(item => {
-        const sale = sales.find(s => s.sales_id === item.sales_id);
-        const product = products.find(p => p.product_id === item.product_id);
+      // Filter to only today's sales
+      const todaysSales = sales.filter(s => isToday(s.sales_date));
+
+      // Group by sales_id
+      const groupedSales = {};
+      for (const item of salesData) {
+        if (todaysSales.find(s => s.sales_id === item.sales_id)) {
+          if (!groupedSales[item.sales_id]) groupedSales[item.sales_id] = [];
+          groupedSales[item.sales_id].push(item);
+        }
+      }
+
+      const enriched = Object.entries(groupedSales).map(([sales_id, items]) => {
+        const sale = todaysSales.find(s => s.sales_id === parseInt(sales_id));
+        const totalAmount = items.reduce((sum, i) => sum + (i.amount || 0), 0);
+        const productDetails = items.map(i => {
+          const product = products.find(p => p.product_id === i.product_id);
+          return {
+            name: product?.name || 'Unknown Product',
+            quantity: i.quantity,
+            amount: i.amount
+          };
+        });
         return {
           sales_date: sale?.sales_date,
-          name: product?.name,
-          quantity: item.quantity,
-          amount: item.amount
+          items: productDetails,
+          totalAmount
         };
       }).sort((a, b) => new Date(b.sales_date) - new Date(a.sales_date));
 
@@ -54,16 +85,34 @@ export default function ReportsScreen({ userMode }) {
       const products = await db.products.toArray();
       const suppliers = await db.suppliers.toArray();
 
-      const enriched = resuppliedItems.map(item => {
-        const product = products.find(p => p.product_id === item.product_id);
-        const supplier = suppliers.find(s => s.supplier_id === item.supplier_id);
+      // Filter to only today's resupplies
+      const todaysResupplies = resuppliedItems.filter(i => isToday(i.resupply_date));
+
+      // Group by resupply_date
+      const groupedResupplies = {};
+      for (const item of todaysResupplies) {
+        const key = item.resupply_date;
+        if (!groupedResupplies[key]) groupedResupplies[key] = [];
+        groupedResupplies[key].push(item);
+      }
+
+      const enriched = Object.entries(groupedResupplies).map(([date, items]) => {
+        const productDetails = items.map(i => {
+          const product = products.find(p => p.product_id === i.product_id);
+          const supplier = suppliers.find(s => s.supplier_id === i.supplier_id);
+          return {
+            product_name: product?.name || 'Unknown Product',
+            supplier_name: supplier?.name || 'Unknown Supplier',
+            quantity: i.quantity,
+            unit_cost: i.unit_cost,
+            expiration_date: i.expiration_date || 'N/A'
+          };
+        });
+        const totalItems = items.reduce((sum, i) => sum + (i.quantity || 0), 0);
         return {
-          resupply_date: item.resupply_date,
-          product_name: product?.name,
-          supplier_name: supplier?.name,
-          quantity: item.quantity,
-          unit_cost: item.unit_cost,
-          expiration_date: item.expiration_date || 'N/A'
+          resupply_date: date,
+          items: productDetails,
+          totalItems
         };
       }).sort((a, b) => new Date(b.resupply_date) - new Date(a.resupply_date));
 
@@ -84,7 +133,7 @@ export default function ReportsScreen({ userMode }) {
       <div style={styles.metricsContainer}>
         <div style={styles.metricCard}>
           <p style={styles.metricValue}>
-            ₱{report.reduce((sum, r) => sum + (r.amount || 0), 0).toFixed(2)}
+            ₱{report.reduce((sum, r) => sum + (r.totalAmount || 0), 0).toFixed(2)}
           </p>
           <p style={styles.metricLabel}>Total Revenue</p>
           <p style={styles.metricSubLabel}>Today</p>
@@ -92,7 +141,7 @@ export default function ReportsScreen({ userMode }) {
 
         <div style={styles.metricCard}>
           <p style={styles.metricValue}>
-            ₱{report.length > 0 ? (report.reduce((sum, r) => sum + (r.amount || 0), 0) / report.length).toFixed(2) : '0.00'}
+            ₱{report.length > 0 ? (report.reduce((sum, r) => sum + (r.totalAmount || 0), 0) / report.length).toFixed(2) : '0.00'}
           </p>
           <p style={styles.metricLabel}>Avg. Transaction</p>
           <p style={styles.metricSubLabel}>Today</p>
@@ -112,30 +161,33 @@ export default function ReportsScreen({ userMode }) {
               <h3 style={styles.sectionHeader}>Recent Sales</h3>
               <div style={styles.dateFilter}>
                 <span style={styles.dateLabel}>Date Range:</span>
-                <span style={styles.dateValue}>09/09/2025 - 09/16/2025</span>
+                <span style={styles.dateValue}>
+                  {new Date().toLocaleDateString()}
+                </span>
               </div>
             </div>
             
             {report.length === 0 ? (
               <div style={styles.placeholderCard}>
-                <p style={styles.placeholderText}>No sales in selected period</p>
+                <p style={styles.placeholderText}>No sales today</p>
                 <p style={styles.placeholderSubText}>
                   Sales data will appear here once you start making transactions
                 </p>
               </div>
             ) : (
               <div style={styles.reportList}>
-                {report.map((item, index) => (
+                {report.map((group, index) => (
                   <div key={index} style={styles.reportItem}>
                     <div style={styles.reportItemLeft}>
-                      <p style={styles.reportDate}>{item.sales_date}</p>
-                      <p style={styles.reportName}>{item.name}</p>
+                      <p style={styles.reportDate}>{group.sales_date}</p>
+                      {group.items.map((item, idx) => (
+                        <p key={idx} style={styles.reportName}>
+                          {item.name} — Qty: {item.quantity} — ₱{item.amount}
+                        </p>
+                      ))}
                     </div>
                     <div style={styles.reportItemRight}>
-                      <p style={styles.reportDetails}>
-                        Qty: {item.quantity}
-                      </p>
-                      <p style={styles.reportAmount}>₱{item.amount}</p>
+                      <p style={styles.reportAmount}>Total: ₱{group.totalAmount}</p>
                     </div>
                   </div>
                 ))}
@@ -149,23 +201,22 @@ export default function ReportsScreen({ userMode }) {
             <h3 style={styles.sectionHeader}>Resupply History</h3>
             {resupplyReport.length === 0 ? (
               <div style={styles.placeholderCard}>
-                <p style={styles.placeholderText}>No resupply data available</p>
+                <p style={styles.placeholderText}>No resupply data today</p>
                 <p style={styles.placeholderSubText}>
                   Resupply history will appear here once items are restocked
                 </p>
               </div>
             ) : (
               <div style={styles.reportList}>
-                {resupplyReport.map((item, index) => (
+                {resupplyReport.map((group, index) => (
                   <div key={index} style={styles.resupplyItem}>
-                    <p style={styles.reportDate}>{item.resupply_date}</p>
-                    <p style={styles.reportName}>{item.product_name}</p>
-                    <p style={styles.reportDetails}>
-                      Supplier: {item.supplier_name}, Qty: {item.quantity}
-                    </p>
-                    <p style={styles.reportDetails}>
-                      Unit Cost: ₱{item.unit_cost}, Expiry: {item.expiration_date}
-                    </p>
+                    <p style={styles.reportDate}>{group.resupply_date}</p>
+                    {group.items.map((item, idx) => (
+                      <p key={idx} style={styles.reportName}>
+                        {item.product_name} — {item.supplier_name} — Qty: {item.quantity}, ₱{item.unit_cost}, Exp: {item.expiration_date}
+                      </p>
+                    ))}
+                    <p style={styles.reportAmount}>Total Items: {group.totalItems}</p>
                   </div>
                 ))}
               </div>
@@ -176,7 +227,6 @@ export default function ReportsScreen({ userMode }) {
     </div>
   );
 }
-
 
 const styles = {
   container: {

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 
 import LoginScreen from './screens/LoginScreen';
 import SignupScreen from './screens/SignUpScreen';
@@ -13,6 +13,14 @@ import MainLayout from './components/MainLayout';
 
 import { db } from './db';
 
+// 🔒 Protected Route Middleware
+function ProtectedRoute({ element, userMode }) {
+  if (!userMode) {
+    return <Navigate to="/" replace />;
+  }
+  return element;
+}
+
 // 🔹 Client stack
 function ClientStack({ handleLogout, userMode }) {
   return (
@@ -22,6 +30,7 @@ function ClientStack({ handleLogout, userMode }) {
         <Route path="/inventory" element={<InventoryScreen />} />
         <Route path="/resupply" element={<ResupplyScreen />} />
         <Route path="/suppliers" element={<SuppliersScreen />} />
+        <Route path="*" element={<Navigate to="/dashboard" />} />
       </Routes>
     </MainLayout>
   );
@@ -38,6 +47,7 @@ function ServerStack({ handleLogout, userMode }) {
         <Route path="/sales" element={<SalesScreen />} />
         <Route path="/reports" element={<ReportsScreen />} />
         <Route path="/suppliers" element={<SuppliersScreen />} />
+        <Route path="*" element={<Navigate to="/dashboard" />} />
       </Routes>
     </MainLayout>
   );
@@ -49,29 +59,30 @@ function AuthStack({ setUserMode }) {
     <Routes>
       <Route path="/" element={<LoginScreen setUserMode={setUserMode} />} />
       <Route path="/signup" element={<SignupScreen />} />
+      <Route path="*" element={<Navigate to="/" />} />
     </Routes>
   );
 }
 
 export default function App() {
   const [userMode, setUserMode] = useState(null);
+  const [loading, setLoading] = useState(true); // ⏳ Prevent white screen
 
   useEffect(() => {
-    const initDB = async () => {
+    const init = async () => {
       try {
         await db.open();
         console.log('✅ Database initialized');
       } catch (err) {
         console.error('❌ Error initializing DB:', err);
       }
-    };
-    initDB();
 
-    // Restore login session
-    const savedMode = localStorage.getItem('userMode');
-    if (savedMode) {
-      setUserMode(savedMode);
-    }
+      const savedMode = localStorage.getItem('userMode');
+      if (savedMode) setUserMode(savedMode);
+      setLoading(false);
+    };
+
+    init();
   }, []);
 
   const handleLogout = () => {
@@ -79,23 +90,40 @@ export default function App() {
     localStorage.removeItem('user');
     localStorage.removeItem('userMode');
     sessionStorage.clear();
-    window.location.href = '/'; // force reset to login
+    window.location.href = '/'; // full reset
   };
+
+  if (loading) {
+    // Prevent blank flash
+    return (
+      <div style={{ textAlign: 'center', marginTop: '40vh', fontSize: 20 }}>
+        Loading SmartTindahan...
+      </div>
+    );
+  }
 
   return (
     <Router>
-      {userMode === 'server' ? (
-        <ServerStack handleLogout={handleLogout} userMode={userMode} />
-      ) : userMode === 'client' ? (
-        <ClientStack handleLogout={handleLogout} userMode={userMode} />
-      ) : (
-        <AuthStack
-          setUserMode={(mode) => {
-            setUserMode(mode);
-            localStorage.setItem('userMode', mode);
-          }}
-        />
-      )}
+      <Routes>
+        {!userMode ? (
+          // Not logged in
+          <>
+            <Route path="/*" element={<AuthStack setUserMode={setUserMode} />} />
+          </>
+        ) : userMode === 'server' ? (
+          // Server user, protected
+          <Route
+            path="/*"
+            element={<ProtectedRoute userMode={userMode} element={<ServerStack handleLogout={handleLogout} userMode={userMode} />} />}
+          />
+        ) : (
+          // Client user, protected
+          <Route
+            path="/*"
+            element={<ProtectedRoute userMode={userMode} element={<ClientStack handleLogout={handleLogout} userMode={userMode} />} />}
+          />
+        )}
+      </Routes>
     </Router>
   );
 }

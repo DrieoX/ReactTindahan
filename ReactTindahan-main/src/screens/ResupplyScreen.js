@@ -1,324 +1,511 @@
-import React, { useState, useEffect } from 'react';
-import { db } from '../db';
-import { useLocation } from 'react-router-dom';
+import React, { useState, useEffect, useRef } from "react";
+import { db } from "../db";
 
-export default function ResupplyScreen({ userMode }) {
-  const location = useLocation();
-  const mode = userMode || location.state?.userMode || 'client';
-
+export default function ResupplyScreen() {
+  const [barcode, setBarcode] = useState("");
   const [products, setProducts] = useState([]);
   const [suppliers, setSuppliers] = useState([]);
-  const [selectedProductId, setSelectedProductId] = useState(null);
-  const [selectedSupplierId, setSelectedSupplierId] = useState(null);
-  const [quantity, setQuantity] = useState('');
-  const [unitCost, setUnitCost] = useState('');
-  const [expirationDate, setExpirationDate] = useState('');
+  const [cart, setCart] = useState([]);
+  const [selectedSupplierId, setSelectedSupplierId] = useState("");
+  const [lowStockProducts, setLowStockProducts] = useState([]);
+  const inputRef = useRef(null);
 
-  const [resupplyItems, setResupplyItems] = useState([]); // multiple items
-  const [scannedCode, setScannedCode] = useState('');
-  const [noExpiry, setNoExpiry] = useState(false);
-
+  // ✅ Load data once
   useEffect(() => {
-    fetchData();
+    loadProductsAndSuppliers();
 
-    // Barcode scanner listener
-    let buffer = '';
-    let timer;
-    const handleKeyDown = (e) => {
-      if (timer) clearTimeout(timer);
+    const handleGlobalScan = (e) => {
+      if (document.activeElement === inputRef.current) return;
 
-      if (e.key === 'Enter') {
-        if (buffer.length > 0) {
-          setScannedCode(buffer);
-          buffer = '';
-        }
-      } else {
-        buffer += e.key;
-        timer = setTimeout(() => (buffer = ''), 200); // reset if delay >200ms
+      if (e.key === "Enter" && barcode.trim()) {
+        handleScan(barcode.trim());
+      } else if (e.key.length === 1) {
+        setBarcode((prev) => prev + e.key);
       }
     };
 
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, []);
+    window.addEventListener("keydown", handleGlobalScan);
+    return () => window.removeEventListener("keydown", handleGlobalScan);
+  }, [barcode, selectedSupplierId]);
 
-  useEffect(() => {
-    if (scannedCode) {
-      const matchedProduct = products.find((p) => p.sku === scannedCode);
-      if (matchedProduct) {
-        setSelectedProductId(matchedProduct.product_id);
-      }
-      setScannedCode('');
-    }
-  }, [scannedCode, products]);
-
-  const fetchData = async () => {
+  const loadProductsAndSuppliers = async () => {
     try {
       const prodRes = await db.products.toArray();
       const supRes = await db.suppliers.toArray();
-      setProducts(prodRes);
+      const inventoryData = await db.inventory.toArray();
+
+      const enrichedProducts = prodRes.map((p) => {
+        const inv = inventoryData.find((i) => i.product_id === p.product_id);
+        return {
+          id: p.product_id,
+          sku: p.sku,
+          name: p.name,
+          price: parseFloat(p.unit_price) || 0,
+          stock: inv?.quantity || 0,
+          baseUnit: p.base_unit || "pcs",
+          threshold: p.threshold || 5,
+        };
+      });
+
+      setProducts(enrichedProducts);
       setSuppliers(supRes);
+
+      const lowStock = enrichedProducts.filter((p) => p.stock <= p.threshold);
+      setLowStockProducts(lowStock);
     } catch (err) {
-      console.error('Error fetching products or suppliers:', err);
+      console.error("Error loading data:", err);
     }
   };
 
-  const addResupplyItem = () => {
-    if (!selectedProductId || !selectedSupplierId || !quantity || !unitCost) {
-      alert('Please fill out all fields before adding.');
-      return;
+  const handleScan = (code) => {
+    const product = products.find((p) => p.sku === code);
+    if (product) {
+      if (!selectedSupplierId) {
+        alert("⚠️ Please select a supplier before scanning.");
+        setBarcode("");
+        return;
+      }
+      addToCart(product, 1);
+    } else {
+      alert("❌ Product not found for scanned code!");
     }
-    if (!noExpiry && !expirationDate) {
-      alert('Please provide an expiration date or mark No Expiry.');
-      return;
+    setBarcode("");
+  };
+
+  const addToCart = (product, qty = 1) => {
+    if (!selectedSupplierId) return alert("Select a supplier first!");
+
+    const existing = cart.find(
+      (item) =>
+        item.id === product.id && item.supplier_id === parseInt(selectedSupplierId)
+    );
+
+    if (existing) {
+      setCart(
+        cart.map((item) =>
+          item.id === product.id && item.supplier_id === parseInt(selectedSupplierId)
+            ? { ...item, quantity: item.quantity + qty }
+            : item
+        )
+      );
+    } else {
+      setCart([
+        ...cart,
+        {
+          ...product,
+          quantity: qty,
+          supplier_id: parseInt(selectedSupplierId),
+          unitCost: 0,
+          unitType: product.baseUnit,
+          expirationDate: "",
+          noExpiry: false,
+        },
+      ]);
     }
+  };
 
-    const newItem = {
-      product_id: parseInt(selectedProductId),
-      supplier_id: parseInt(selectedSupplierId),
-      quantity: parseInt(quantity),
-      unit_cost: parseFloat(unitCost),
-      expiration_date: noExpiry ? '' : expirationDate,
-    };
+  const updateCartField = (id, supplier_id, field, value) => {
+    setCart(
+      cart.map((item) =>
+        item.id === id && item.supplier_id === supplier_id
+          ? { ...item, [field]: value }
+          : item
+      )
+    );
+  };
 
-    setResupplyItems([...resupplyItems, newItem]);
-
-    // reset input fields
-    setQuantity('');
-    setUnitCost('');
-    setExpirationDate('');
-    setSelectedProductId(null);
-    setNoExpiry(false);
+  const removeFromCart = (id, supplier_id) => {
+    setCart(cart.filter((item) => !(item.id === id && item.supplier_id === supplier_id)));
   };
 
   const handleResupply = async () => {
-    if (resupplyItems.length === 0) {
-      alert('No items added for resupply.');
-      return;
-    }
+    if (cart.length === 0) return alert("No products to resupply.");
 
     try {
-      for (const item of resupplyItems) {
-        const newResupply = {
-          ...item,
+      const today = new Date().toISOString().split("T")[0];
+
+      for (const item of cart) {
+        const resupplyData = {
+          product_id: item.id,
+          supplier_id: item.supplier_id,
+          quantity: item.quantity,
+          unit_cost: parseFloat(item.unitCost) || 0,
+          expiration_date: item.noExpiry ? "" : item.expirationDate || "",
+          unit_type: item.unitType,
           user_id: 1,
-          resupply_date: new Date().toISOString().split('T')[0],
+          resupply_date: today,
         };
 
-        await db.resupplied_items.add(newResupply);
+        await db.resupplied_items.add(resupplyData);
 
-        const existingInv = await db.inventory.where({ product_id: item.product_id }).first();
-        let newBalance = item.quantity;
+        const existingInv = await db.inventory
+          .where({ product_id: item.id })
+          .first();
 
         if (!existingInv) {
           await db.inventory.add({
-            product_id: item.product_id,
+            product_id: item.id,
             supplier_id: item.supplier_id,
             quantity: item.quantity,
-            expiration_date: item.expiration_date,
+            expiration_date: resupplyData.expiration_date,
           });
         } else {
-          await db.inventory.where({ product_id: item.product_id }).modify(inv => {
+          await db.inventory.where({ product_id: item.id }).modify((inv) => {
             inv.quantity += item.quantity;
-            inv.expiration_date = item.expiration_date;
             inv.supplier_id = item.supplier_id;
-            newBalance = inv.quantity;
+            inv.expiration_date = resupplyData.expiration_date;
           });
         }
 
-       const prod = await db.products.get(item.product_id);
-await db.stock_card.add({
-  product_id: item.product_id,
-  supplier_id: item.supplier_id,
-  user_id: 1, // or logged-in user_id
-  quantity: item.quantity,
-  unit_cost: item.unit_cost,
-  unit_price: prod?.unit_price || 0,
-  resupply_date: newResupply.resupply_date,
-  expiration_date: item.expiration_date,
-});
+        const prod = await db.products.get(item.id);
+        await db.stock_card.add({
+          product_id: item.id,
+          supplier_id: item.supplier_id,
+          user_id: 1,
+          quantity: item.quantity,
+          unit_cost: parseFloat(item.unitCost) || 0,
+          unit_price: prod?.unit_price || 0,
+          resupply_date: today,
+          expiration_date: resupplyData.expiration_date,
+          unit_type: item.unitType,
+          transaction_type: "RESUPPLY",
+        });
 
-        // Push resupply to API
-        await fetch('http://localhost:5000/api/resupply', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(newResupply),
+        await fetch("http://localhost:5000/api/resupply", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(resupplyData),
         });
       }
 
-      alert('Products resupplied successfully.');
-      setResupplyItems([]);
+      alert("✅ Resupply completed successfully!");
+      setCart([]);
+      setSelectedSupplierId("");
+      loadProductsAndSuppliers();
     } catch (err) {
-      console.error('Error during resupply:', err);
-      alert('Failed to resupply product(s).');
+      console.error("Error during resupply:", err);
+      alert("❌ Failed to resupply products.");
+    }
+  };
+
+  const unitOptions = (baseUnit) => {
+    switch (baseUnit) {
+      case "pcs":
+        return ["pieces", "dozen", "boxes", "packs"];
+      case "grams":
+      case "kilos":
+        return ["grams", "kilos"];
+      case "ml":
+      case "liters":
+        return ["ml", "liters"];
+      default:
+        return [baseUnit];
     }
   };
 
   return (
     <div style={styles.container}>
-      <h2 style={styles.pageTitle}>Resupply Inventory</h2>
-      <p style={styles.pageSubtitle}>Add new stock to your inventory</p>
+      <div style={styles.header}>
+        <h1 style={styles.title}>Resupply Inventory</h1>
+        <p style={styles.subtitle}>
+          Scan or add products to restock your inventory.
+        </p>
+      </div>
 
-      <div style={styles.formContainer}>
-        <label style={styles.label}>Supplier</label>
+      <div style={styles.formCard}>
+        <label style={styles.label}>Select Supplier *</label>
         <select
-          style={styles.pickerContainer}
-          value={selectedSupplierId || ''}
+          style={styles.input}
+          value={selectedSupplierId}
           onChange={(e) => setSelectedSupplierId(e.target.value)}
         >
           <option value="">Select Supplier</option>
-          {suppliers.map((sup) => (
-            <option key={sup.supplier_id} value={sup.supplier_id}>{sup.name}</option>
-          ))}
-        </select>
-
-        <label style={styles.label}>Product (with SKU / Barcode)</label>
-        <select
-          style={styles.pickerContainer}
-          value={selectedProductId || ''}
-          onChange={(e) => setSelectedProductId(e.target.value)}
-        >
-          <option value="">Select Product</option>
-          {products.map((prod) => (
-            <option key={prod.product_id} value={prod.product_id}>
-              {prod.name} {prod.sku ? `(SKU: ${prod.sku})` : ''}
+          {suppliers.map((s) => (
+            <option key={s.supplier_id} value={s.supplier_id}>
+              {s.name}
             </option>
           ))}
         </select>
 
         <input
-          type="number"
-          placeholder="Quantity"
-          value={quantity}
-          onChange={(e) => setQuantity(e.target.value)}
+          ref={inputRef}
           style={styles.input}
+          placeholder="Scan or enter product SKU"
+          value={barcode}
+          onChange={(e) => setBarcode(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && handleScan(barcode.trim())}
         />
-        <input
-          type="number"
-          placeholder="Unit Cost"
-          value={unitCost}
-          onChange={(e) => setUnitCost(e.target.value)}
-          style={styles.input}
-        />
-
-        <label style={styles.label}>Expiration Date</label>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <input
-            type="date"
-            value={expirationDate}
-            onChange={(e) => setExpirationDate(e.target.value)}
-            style={styles.input}
-            disabled={noExpiry} // disable if "No Expiry" is checked
-          />
-          <label style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
-            <input
-              type="checkbox"
-              checked={noExpiry}
-              onChange={(e) => {
-                if (e.target.checked) {
-                  setExpirationDate('');
-                }
-                setNoExpiry(e.target.checked);
-              }}
-            />
-            No Expiry
-          </label>
-        </div>
-
-        <button style={styles.submitButton} onClick={addResupplyItem}>
-          Add Item
-        </button>
       </div>
 
-      {resupplyItems.length > 0 && (
-        <div style={styles.listContainer}>
-          <h3>Items to Resupply</h3>
-          <ul>
-            {resupplyItems.map((item, idx) => {
-              const prod = products.find((p) => p.product_id === item.product_id);
-              return (
-                <li key={idx}>
-                  {prod ? prod.name : 'Unknown Product'} - Qty: {item.quantity}, Unit Cost: {item.unit_cost}, Exp: {item.expiration_date}
-                </li>
-              );
-            })}
-          </ul>
+      {/* Low Stock Section */}
+      {lowStockProducts.length > 0 && (
+        <div style={styles.lowStockCard}>
+          <h3>⚠️ Low Stock Products</h3>
+          {lowStockProducts.map((p) => (
+            <div
+              key={p.id}
+              style={styles.lowStockItem}
+              onClick={() => addToCart(p, 1)}
+            >
+              {p.name} | Stock: {p.stock} {p.baseUnit}
+            </div>
+          ))}
         </div>
       )}
 
-      <button style={styles.submitButton} onClick={handleResupply}>
-        Submit All Resupplies
-      </button>
+      {/* Cart Section */}
+      <div style={styles.cartCard}>
+        <h3 style={{ marginBottom: 10 }}>Resupply List</h3>
+        {cart.length === 0 ? (
+          <div style={styles.emptyCart}>
+            <span style={{ fontSize: 48, color: "#9CA3AF" }}>📦</span>
+            <div>No products added yet</div>
+          </div>
+        ) : (
+          cart.map((item) => (
+            <div key={`${item.id}-${item.supplier_id}`} style={styles.cartItem}>
+              <div style={styles.itemInfo}>
+                <div style={styles.itemTitle}>{item.name}</div>
+                <div style={styles.itemMeta}>
+                  SKU: {item.sku} | Stock: {item.stock} {item.baseUnit}
+                  <br />
+                  Supplier:{" "}
+                  {suppliers.find((s) => s.supplier_id === item.supplier_id)?.name}
+                </div>
+              </div>
+
+              <div style={styles.itemControls}>
+                <label style={styles.fieldLabel}>Quantity</label>
+                <div style={styles.qtyRow}>
+                  <button
+                    onClick={() =>
+                      updateCartField(
+                        item.id,
+                        item.supplier_id,
+                        "quantity",
+                        Math.max(item.quantity - 1, 1)
+                      )
+                    }
+                    style={styles.qtyBtn}
+                  >
+                    −
+                  </button>
+                  <input
+                    type="number"
+                    value={item.quantity}
+                    style={styles.qtyInput}
+                    onChange={(e) =>
+                      updateCartField(
+                        item.id,
+                        item.supplier_id,
+                        "quantity",
+                        parseInt(e.target.value) || 1
+                      )
+                    }
+                  />
+                  <button
+                    onClick={() =>
+                      updateCartField(
+                        item.id,
+                        item.supplier_id,
+                        "quantity",
+                        item.quantity + 1
+                      )
+                    }
+                    style={styles.qtyBtn}
+                  >
+                    +
+                  </button>
+                </div>
+
+                <label style={styles.fieldLabel}>Unit Cost (₱)</label>
+                <input
+                  type="number"
+                  placeholder="Enter cost"
+                  value={item.unitCost}
+                  onChange={(e) =>
+                    updateCartField(item.id, item.supplier_id, "unitCost", e.target.value)
+                  }
+                  style={styles.smallInput}
+                />
+
+                <select
+                  value={item.unitType}
+                  onChange={(e) =>
+                    updateCartField(item.id, item.supplier_id, "unitType", e.target.value)
+                  }
+                  style={styles.smallInput}
+                >
+                  {unitOptions(item.baseUnit).map((u) => (
+                    <option key={u} value={u}>
+                      {u.charAt(0).toUpperCase() + u.slice(1)}
+                    </option>
+                  ))}
+                </select>
+
+                <div style={styles.expiryRow}>
+                  <input
+                    type="date"
+                    value={item.expirationDate}
+                    onChange={(e) =>
+                      updateCartField(item.id, item.supplier_id, "expirationDate", e.target.value)
+                    }
+                    style={styles.smallInput}
+                    disabled={item.noExpiry}
+                  />
+                  <label style={{ fontSize: 12 }}>
+                    <input
+                      type="checkbox"
+                      checked={item.noExpiry}
+                      onChange={(e) =>
+                        updateCartField(item.id, item.supplier_id, "noExpiry", e.target.checked)
+                      }
+                    />{" "}
+                    No Expiry
+                  </label>
+                </div>
+
+                <button
+                  onClick={() => removeFromCart(item.id, item.supplier_id)}
+                  style={styles.removeButton}
+                >
+                  Remove
+                </button>
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+
+      {cart.length > 0 && (
+        <button style={styles.submitButton} onClick={handleResupply}>
+          ✅ Complete Resupply
+        </button>
+      )}
     </div>
   );
 }
 
-
 const styles = {
   container: {
-    padding: 'clamp(12px, 4vw, 30px)',
-    backgroundColor: '#F8FAFC',
+    padding: "clamp(12px, 4vw, 30px)",
+    backgroundColor: "#F8FAFC",
+    minHeight: "100vh",
   },
-
-  pageTitle: {
-    fontSize: 'clamp(18px, 2vw, 24px)',
-    fontWeight: 'bold',
-    color: '#1E293B',
-    marginBottom: 'clamp(2px, 0.5vw, 4px)',
+  header: {
+    marginBottom: 20,
   },
-
-  pageSubtitle: {
-    fontSize: 'clamp(14px, 1.5vw, 16px)',
-    fontWeight: '500',
-    color: '#64748B',
-    marginBottom: 'clamp(12px, 2vw, 20px)',
+  title: {
+    fontSize: 24,
+    fontWeight: 700,
+    color: "#1E293B",
   },
-
-  formContainer: {
-    backgroundColor: '#FFFFFF',
-    padding: 'clamp(12px, 3vw, 20px)',
-    borderRadius: '12px',
-    border: '1px solid #E5E7EB',
-    marginBottom: 'clamp(16px, 3vw, 30px)',
+  subtitle: {
+    color: "#64748B",
   },
-
+  formCard: {
+    backgroundColor: "#fff",
+    borderRadius: 12,
+    padding: 16,
+    boxShadow: "0 1px 3px rgba(0,0,0,0.1)",
+    marginBottom: 20,
+  },
   label: {
-    fontSize: 'clamp(14px, 1.5vw, 16px)',
-    fontWeight: '600',
-    color: '#1E293B',
-    marginBottom: 'clamp(6px, 1vw, 8px)',
-    display: 'block',
+    fontWeight: 600,
+    color: "#1E293B",
+    marginBottom: 6,
+    display: "block",
   },
-
-  pickerContainer: {
-    width: '100%',
-    padding: 'clamp(8px, 2vw, 10px)',
-    marginBottom: 'clamp(12px, 2vw, 16px)',
-    borderRadius: '8px',
-    border: '1px solid #D1D5DB',
-    backgroundColor: '#F9FAFB',
-  },
-
   input: {
-    width: '100%',
-    padding: 'clamp(10px, 2.5vw, 14px)',
-    marginBottom: 'clamp(12px, 2vw, 16px)',
-    fontSize: 'clamp(14px, 1.5vw, 16px)',
-    borderRadius: '8px',
-    border: '1px solid #D1D5DB',
-    backgroundColor: '#F9FAFB',
+    width: "100%",
+    padding: 10,
+    marginBottom: 12,
+    borderRadius: 8,
+    border: "1px solid #D1D5DB",
+    backgroundColor: "#F9FAFB",
   },
-
+  cartCard: {
+    backgroundColor: "#fff",
+    borderRadius: 12,
+    padding: 16,
+    boxShadow: "0 1px 3px rgba(0,0,0,0.1)",
+  },
+  emptyCart: {
+    textAlign: "center",
+    padding: 30,
+    color: "#94A3B8",
+  },
+  cartItem: {
+    borderBottom: "1px solid #E2E8F0",
+    padding: "12px 0",
+    display: "flex",
+    justifyContent: "space-between",
+    flexWrap: "wrap",
+  },
+  itemInfo: {
+    flex: 1,
+    minWidth: 200,
+  },
+  itemTitle: {
+    fontWeight: 600,
+    color: "#1E293B",
+  },
+  itemMeta: {
+    fontSize: 13,
+    color: "#64748B",
+  },
+  itemControls: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 6,
+    alignItems: "flex-end",
+  },
+  qtyRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: 6,
+  },
+  qtyBtn: {
+    padding: "4px 8px",
+    borderRadius: 4,
+    border: "1px solid #CBD5E1",
+    background: "#F1F5F9",
+    cursor: "pointer",
+  },
+  qtyInput: {
+    width: 50,
+    textAlign: "center",
+  },
+  smallInput: {
+    padding: 6,
+    borderRadius: 6,
+    border: "1px solid #CBD5E1",
+    width: 120,
+  },
+  expiryRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+  },
+  removeButton: {
+    backgroundColor: "#EF4444",
+    color: "#fff",
+    border: "none",
+    borderRadius: 6,
+    padding: "4px 10px",
+    cursor: "pointer",
+  },
   submitButton: {
-    backgroundColor: '#3B82F6',
-    padding: 'clamp(12px, 3vw, 16px)',
-    borderRadius: '8px',
-    color: '#FFFFFF',
-    fontSize: 'clamp(14px, 1.5vw, 16px)',
-    fontWeight: '600',
-    cursor: 'pointer',
-    border: 'none',
-    width: '100%', // full-width button on mobile
-    maxWidth: '300px', // prevent giant buttons on desktop
+    backgroundColor: "#3B82F6",
+    color: "#fff",
+    padding: 14,
+    border: "none",
+    borderRadius: 10,
+    fontWeight: 600,
+    fontSize: 16,
+    marginTop: 20,
+    cursor: "pointer",
+    width: "100%",
+    maxWidth: 320,
   },
 };
