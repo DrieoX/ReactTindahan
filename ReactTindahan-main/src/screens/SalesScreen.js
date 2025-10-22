@@ -91,6 +91,12 @@ export default function POSScreen({ userMode }) {
     setCart(cart.filter(item => item.id !== id));
   };
 
+  const cancelAll = () => {
+    if (window.confirm('Are you sure you want to cancel all items?')) {
+      setCart([]);
+    }
+  };
+
   const calculateTotal = () => cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
 
   const handlePayment = async () => {
@@ -159,7 +165,7 @@ export default function POSScreen({ userMode }) {
         />
       </div>
 
-      {/* POS Section (formerly Shopping Cart) */}
+      {/* POS Section */}
       <div style={styles.section}>
         <h3 style={styles.sectionTitle}>Point of Sale</h3>
         {cart.length === 0 ? (
@@ -169,36 +175,78 @@ export default function POSScreen({ userMode }) {
           </div>
         ) : (
           <div style={styles.cartContainer}>
-            {cart.map(item => (
-              <div key={item.id} style={styles.cartItem}>
-                <div>
-                  <div style={{ fontWeight: 500 }}>{item.name}</div>
-                  <div style={{ color: '#64748B' }}>
-                    P{item.price.toFixed(2)} | Stock: {item.stock} {item.baseUnit}
-                  </div>
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <button onClick={() => updateQuantity(item.id, item.quantity - 1)}>-</button>
-                  <input
-                    type="number"
-                    value={item.quantity}
-                    style={{ width: 50, textAlign: 'center' }}
-                    onChange={(e) => handleQuantityInput(item.id, e.target.value)}
-                  />
-                  <button onClick={() => updateQuantity(item.id, item.quantity + 1)}>+</button>
-                  <button
-                    style={{ marginLeft: 8, backgroundColor: '#EF4444', color: '#fff', border: 'none', borderRadius: 4, padding: '4px 8px', cursor: 'pointer' }}
-                    onClick={() => removeFromCart(item.id)}
-                  >
-                    Remove
-                  </button>
-                </div>
-              </div>
-            ))}
+            {/* Cancel All Button */}
+            <button
+              onClick={cancelAll}
+              style={{
+                backgroundColor: '#EF4444',
+                color: '#fff',
+                border: 'none',
+                borderRadius: 6,
+                padding: '6px 12px',
+                marginBottom: 10,
+                cursor: 'pointer'
+              }}
+            >
+              Cancel All
+            </button>
+
+            {/* Cart Table */}
+            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <thead>
+                <tr style={{ backgroundColor: '#f3f4f6', textAlign: 'left' }}>
+                  <th style={styles.th}>Name</th>
+                  <th style={styles.th}>SKU</th>
+                  <th style={styles.th}>Price</th>
+                  <th style={styles.th}>Stock</th>
+                  <th style={styles.th}>Quantity</th>
+                  <th style={styles.th}>Total</th>
+                  <th style={styles.th}>Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {cart.map(item => (
+                  <tr key={item.id} style={{ borderBottom: '1px solid #E5E7EB' }}>
+                    <td style={styles.td}>{item.name}</td>
+                    <td style={styles.td}>{item.sku}</td>
+                    <td style={styles.td}>₱{item.price.toFixed(2)}</td>
+                    <td style={styles.td}>{item.stock} {item.baseUnit}</td>
+                    <td style={styles.td}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                        <button onClick={() => updateQuantity(item.id, item.quantity - 1)}>-</button>
+                        <input
+                          type="number"
+                          value={item.quantity}
+                          style={{ width: 50, textAlign: 'center' }}
+                          onChange={(e) => handleQuantityInput(item.id, e.target.value)}
+                        />
+                        <button onClick={() => updateQuantity(item.id, item.quantity + 1)}>+</button>
+                      </div>
+                    </td>
+                    <td style={styles.td}>₱{(item.price * item.quantity).toFixed(2)}</td>
+                    <td style={styles.td}>
+                      <button
+                        style={{
+                          backgroundColor: '#EF4444',
+                          color: '#fff',
+                          border: 'none',
+                          borderRadius: 4,
+                          padding: '4px 8px',
+                          cursor: 'pointer'
+                        }}
+                        onClick={() => removeFromCart(item.id)}
+                      >
+                        Remove
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
 
             {/* Payment Section */}
             <div style={{ marginTop: 16 }}>
-              <div>Total: P{calculateTotal().toFixed(2)}</div>
+              <div>Total: ₱{calculateTotal().toFixed(2)}</div>
               <div style={{ marginTop: 8 }}>
                 <input
                   type="number"
@@ -247,36 +295,19 @@ const styles = {
     border: '1px solid #D1D5DB',
     marginBottom: '12px',
   },
-  productsGrid: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
-    gap: '16px',
-  },
-  productCard: {
-    backgroundColor: '#fff',
-    borderRadius: 8,
-    padding: '12px',
-    boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
-  },
-  addButton: {
-    backgroundColor: '#10B981',
-    padding: '6px 10px',
-    borderRadius: 6,
-    color: '#fff',
-    border: 'none',
-    cursor: 'pointer',
-    fontSize: '14px',
-  },
   cartContainer: {
     backgroundColor: '#fff',
     padding: '16px',
     borderRadius: 8,
     marginTop: '20px',
   },
-  cartItem: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    marginBottom: '12px',
+  th: {
+    padding: '8px',
+    fontWeight: 600,
+    borderBottom: '2px solid #E5E7EB',
+  },
+  td: {
+    padding: '8px',
   },
   cartEmpty: {
     display: 'flex',

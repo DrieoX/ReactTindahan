@@ -555,11 +555,19 @@ function ProductModal({ visible, onClose, onSubmit, onDelete, item, setItem, tit
   );
 }
 
-function SupplierModal({ suppliers, onClose }) {
+function SupplierModal({ suppliers, inventory, onClose }) {
+  const currentStock = inventory?.quantity ?? 0;
+
   return (
     <div style={styles.modalOverlay}>
       <div style={styles.modalContainer}>
-        <h2 style={styles.modalHeader}>Stock Card</h2>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+          <h2 style={styles.modalHeader}>Stock Card</h2>
+          <div style={{ fontWeight: 'bold', color: '#1e293b', fontSize: '16px' }}>
+            Current Stock: {currentStock}
+          </div>
+        </div>
+
         <div style={styles.modalContent}>
           {suppliers.length === 0 ? (
             <p style={styles.noDataText}>No stock card records available</p>
@@ -571,6 +579,7 @@ function SupplierModal({ suppliers, onClose }) {
                     <th style={styles.tableCell}>Supplier</th>
                     <th style={styles.tableCell}>Transaction Date</th>
                     <th style={styles.tableCell}>Stock-in</th>
+                    <th style={styles.tableCell}>Stock-out</th>
                     <th style={styles.tableCell}>Units</th>
                     <th style={styles.tableCell}>Expiry Date</th>
                     <th style={styles.tableCell}>Unit Cost</th>
@@ -583,6 +592,7 @@ function SupplierModal({ suppliers, onClose }) {
                       <td style={styles.tableCell}>{s.name}</td>
                       <td style={styles.tableCell}>{s.resupply_date || 'N/A'}</td>
                       <td style={styles.tableCell}>{s.quantity}</td>
+                      <td style={styles.tableCell}>{s.stockout || 0}</td>
                       <td style={styles.tableCell}>{s.unit}</td>
                       <td style={styles.tableCell}>{s.expiration_date || 'N/A'}</td>
                       <td style={styles.tableCell}>₱{(s.unit_cost || 0).toFixed(2)}</td>
@@ -594,6 +604,7 @@ function SupplierModal({ suppliers, onClose }) {
             </div>
           )}
         </div>
+
         <div style={styles.modalButtons}>
           <button style={styles.cancelButton} onClick={onClose}>
             Close

@@ -2,10 +2,8 @@ import React, { useEffect, useState } from 'react';
 import { db } from '../db';
 
 export const addReport = async (report) => {
-  // Save to Dexie
   await db.backup.add(report);
 
-  // Push to API (so other clients / Expo can see updates)
   await fetch('http://localhost:5000/api/reports', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -16,14 +14,14 @@ export const addReport = async (report) => {
 export default function ReportsScreen({ userMode }) {
   const [report, setReport] = useState([]);
   const [resupplyReport, setResupplyReport] = useState([]);
-  const mode = userMode || 'client'; // default client if not passed
+  const [timeFilter, setTimeFilter] = useState('daily');
+  const mode = userMode || 'client';
 
   useEffect(() => {
     fetchReport();
     fetchResupplyReport();
-  }, []);
+  }, [timeFilter]);
 
-  // Helper: check if a date is today
   const isToday = (dateStr) => {
     if (!dateStr) return false;
     const date = new Date(dateStr);
@@ -35,27 +33,57 @@ export default function ReportsScreen({ userMode }) {
     );
   };
 
-  // 🔹 Pull reports directly from Dexie (local)
+  const isThisWeek = (dateStr) => {
+    const date = new Date(dateStr);
+    const now = new Date();
+    const firstDay = new Date(now.setDate(now.getDate() - now.getDay()));
+    const lastDay = new Date(now.setDate(now.getDate() - now.getDay() + 6));
+    return date >= firstDay && date <= lastDay;
+  };
+
+  const isThisMonth = (dateStr) => {
+    const date = new Date(dateStr);
+    const now = new Date();
+    return date.getMonth() === now.getMonth() && date.getFullYear() === now.getFullYear();
+  };
+
+  const isThisYear = (dateStr) => {
+    const date = new Date(dateStr);
+    const now = new Date();
+    return date.getFullYear() === now.getFullYear();
+  };
+
+  const matchesFilter = (dateStr) => {
+    switch (timeFilter) {
+      case 'weekly':
+        return isThisWeek(dateStr);
+      case 'monthly':
+        return isThisMonth(dateStr);
+      case 'yearly':
+        return isThisYear(dateStr);
+      default:
+        return isToday(dateStr);
+    }
+  };
+
   const fetchReport = async () => {
     try {
       const salesData = await db.sale_items.toArray();
       const sales = await db.sales.toArray();
       const products = await db.products.toArray();
 
-      // Filter to only today's sales
-      const todaysSales = sales.filter(s => isToday(s.sales_date));
+      const filteredSales = sales.filter(s => matchesFilter(s.sales_date));
 
-      // Group by sales_id
       const groupedSales = {};
       for (const item of salesData) {
-        if (todaysSales.find(s => s.sales_id === item.sales_id)) {
+        if (filteredSales.find(s => s.sales_id === item.sales_id)) {
           if (!groupedSales[item.sales_id]) groupedSales[item.sales_id] = [];
           groupedSales[item.sales_id].push(item);
         }
       }
 
       const enriched = Object.entries(groupedSales).map(([sales_id, items]) => {
-        const sale = todaysSales.find(s => s.sales_id === parseInt(sales_id));
+        const sale = filteredSales.find(s => s.sales_id === parseInt(sales_id));
         const totalAmount = items.reduce((sum, i) => sum + (i.amount || 0), 0);
         const productDetails = items.map(i => {
           const product = products.find(p => p.product_id === i.product_id);
@@ -78,19 +106,16 @@ export default function ReportsScreen({ userMode }) {
     }
   };
 
-  // 🔹 Pull resupply reports from Dexie (local)
   const fetchResupplyReport = async () => {
     try {
       const resuppliedItems = await db.resupplied_items.toArray();
       const products = await db.products.toArray();
       const suppliers = await db.suppliers.toArray();
 
-      // Filter to only today's resupplies
-      const todaysResupplies = resuppliedItems.filter(i => isToday(i.resupply_date));
+      const filteredResupplies = resuppliedItems.filter(i => matchesFilter(i.resupply_date));
 
-      // Group by resupply_date
       const groupedResupplies = {};
-      for (const item of todaysResupplies) {
+      for (const item of filteredResupplies) {
         const key = item.resupply_date;
         if (!groupedResupplies[key]) groupedResupplies[key] = [];
         groupedResupplies[key].push(item);
@@ -128,6 +153,27 @@ export default function ReportsScreen({ userMode }) {
         <h1 style={styles.header}>SmartTindahan</h1>
         <h2 style={styles.subheader}>Sales Reports</h2>
         <p style={styles.description}>Track your sales performance and analytics</p>
+
+        {/* 🔹 Timeline Selector */}
+        <div style={{ marginTop: 16 }}>
+          <label style={{ marginRight: 8, fontWeight: 600 }}>View By:</label>
+          <select
+            value={timeFilter}
+            onChange={(e) => setTimeFilter(e.target.value)}
+            style={{
+              padding: '6px 12px',
+              borderRadius: 8,
+              border: '1px solid #ccc',
+              backgroundColor: '#fff',
+              fontSize: 14
+            }}
+          >
+            <option value="daily">Daily</option>
+            <option value="weekly">Weekly</option>
+            <option value="monthly">Monthly</option>
+            <option value="yearly">Yearly</option>
+          </select>
+        </div>
       </div>
 
       <div style={styles.metricsContainer}>
@@ -136,7 +182,9 @@ export default function ReportsScreen({ userMode }) {
             ₱{report.reduce((sum, r) => sum + (r.totalAmount || 0), 0).toFixed(2)}
           </p>
           <p style={styles.metricLabel}>Total Revenue</p>
-          <p style={styles.metricSubLabel}>Today</p>
+          <p style={styles.metricSubLabel}>
+            {timeFilter.charAt(0).toUpperCase() + timeFilter.slice(1)}
+          </p>
         </div>
 
         <div style={styles.metricCard}>
@@ -144,13 +192,17 @@ export default function ReportsScreen({ userMode }) {
             ₱{report.length > 0 ? (report.reduce((sum, r) => sum + (r.totalAmount || 0), 0) / report.length).toFixed(2) : '0.00'}
           </p>
           <p style={styles.metricLabel}>Avg. Transaction</p>
-          <p style={styles.metricSubLabel}>Today</p>
+          <p style={styles.metricSubLabel}>
+            {timeFilter.charAt(0).toUpperCase() + timeFilter.slice(1)}
+          </p>
         </div>
 
         <div style={styles.metricCard}>
           <p style={styles.metricValue}>{report.length}</p>
           <p style={styles.metricLabel}>Total Transactions</p>
-          <p style={styles.metricSubLabel}>Today</p>
+          <p style={styles.metricSubLabel}>
+            {timeFilter.charAt(0).toUpperCase() + timeFilter.slice(1)}
+          </p>
         </div>
       </div>
 
@@ -169,9 +221,9 @@ export default function ReportsScreen({ userMode }) {
             
             {report.length === 0 ? (
               <div style={styles.placeholderCard}>
-                <p style={styles.placeholderText}>No sales today</p>
+                <p style={styles.placeholderText}>No sales for this {timeFilter}</p>
                 <p style={styles.placeholderSubText}>
-                  Sales data will appear here once you start making transactions
+                  Sales data will appear here once transactions are recorded
                 </p>
               </div>
             ) : (
@@ -201,7 +253,7 @@ export default function ReportsScreen({ userMode }) {
             <h3 style={styles.sectionHeader}>Resupply History</h3>
             {resupplyReport.length === 0 ? (
               <div style={styles.placeholderCard}>
-                <p style={styles.placeholderText}>No resupply data today</p>
+                <p style={styles.placeholderText}>No resupply data for this {timeFilter}</p>
                 <p style={styles.placeholderSubText}>
                   Resupply history will appear here once items are restocked
                 </p>
@@ -235,8 +287,6 @@ const styles = {
     minHeight: '100vh',
     fontFamily: "'Segoe UI', Tahoma, Geneva, Verdana, sans-serif",
   },
-
-  // Header Section
   headerSection: {
     backgroundColor: '#ffffff',
     padding: '20px',
@@ -261,8 +311,6 @@ const styles = {
     marginBottom: '0',
     color: '#7f8c8d',
   },
-
-  // Metrics
   metricsContainer: {
     display: 'grid',
     gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
@@ -293,8 +341,6 @@ const styles = {
     fontSize: 'clamp(12px, 1.2vw, 14px)',
     color: '#95a5a6',
   },
-
-  // Content Layout
   contentContainer: {
     display: 'grid',
     gridTemplateColumns: '2fr 1fr',
@@ -310,8 +356,6 @@ const styles = {
     flexDirection: 'column',
     gap: '20px',
   },
-
-  // Sections
   section: {
     backgroundColor: '#ffffff',
     padding: '20px',
@@ -347,8 +391,6 @@ const styles = {
     color: '#2c3e50',
     fontWeight: '500',
   },
-
-  // Report items
   reportList: {
     display: 'flex',
     flexDirection: 'column',
@@ -388,19 +430,12 @@ const styles = {
     color: '#2c3e50',
     marginBottom: '4px',
   },
-  reportDetails: {
-    fontSize: '14px',
-    color: '#7f8c8d',
-    marginBottom: '2px',
-  },
   reportAmount: {
     fontSize: '16px',
     fontWeight: 'bold',
     color: '#27ae60',
     margin: '0',
   },
-
-  // Empty / placeholder
   placeholderCard: {
     backgroundColor: '#f8f9fa',
     padding: '30px 20px',
