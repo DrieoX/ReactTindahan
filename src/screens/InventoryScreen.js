@@ -21,6 +21,7 @@ export default function InventoryScreen({ userMode }) {
   });
   const [editingItem, setEditingItem] = useState(null);
   const [supplierDetails, setSupplierDetails] = useState([]);
+  const [selectedProductName, setSelectedProductName] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [stats, setStats] = useState({
     totalProducts: 0,
@@ -239,6 +240,7 @@ export default function InventoryScreen({ userMode }) {
       await db.products.delete(editingItem.product_id);
       await db.inventory.where('product_id').equals(editingItem.product_id).delete();
       await db.resupplied_items.where('product_id').equals(editingItem.product_id).delete();
+      await db.stock_card.where('product_id').equals(editingItem.product_id).delete();
 
       setShowEditModal(false);
       setEditingItem(null);
@@ -255,24 +257,38 @@ export default function InventoryScreen({ userMode }) {
         .equals(item.product_id)
         .toArray();
 
+      // Sort by date to ensure proper chronological order
+      stockRecords.sort((a, b) => new Date(a.transaction_date || a.resupply_date || 0) - new Date(b.transaction_date || b.resupply_date || 0));
+
       const supplierInfo = await Promise.all(stockRecords.map(async (record) => {
-        const supplier = record.supplier_id 
-          ? await db.suppliers.get(record.supplier_id) 
-          : null;
+        let supplierName = 'N/A';
+        
+        // For sales, show as "Customer Sale"
+        if (record.transaction_type === 'SALE' || record.transaction_type === 'stock_out') {
+          supplierName = 'Customer Sale';
+        } 
+        // For resupplies, get supplier name
+        else if (record.supplier_id) {
+          const supplier = await db.suppliers.get(record.supplier_id);
+          supplierName = supplier?.name || 'N/A';
+        }
+
         return {
-          name: supplier?.name || 'N/A',
-          resupply_date: record.resupply_date || 'N/A',
+          name: supplierName,
+          transaction_date: record.transaction_date || record.resupply_date || 'N/A',
           quantity: record.quantity || 0,
           unit: item.base_unit || 'pcs',
+          unit_type: record.unit_type,
           unit_cost: record.unit_cost || 0,
           unit_price: record.unit_price || item.unit_price || 0,
           expiration_date: record.expiration_date || 'N/A',
           transaction_type: record.transaction_type || 'N/A',
-          running_balance: record.running_balance ?? null,
+          supplier_id: record.supplier_id,
         };
       }));
 
       setSupplierDetails(supplierInfo);
+      setSelectedProductName(item.name);
       setShowSupplierModal(true);
     } catch (err) {
       console.error('Error fetching supplier details:', err);
@@ -479,7 +495,11 @@ export default function InventoryScreen({ userMode }) {
       )}
 
       {showSupplierModal && (
-        <SupplierModal suppliers={supplierDetails} onClose={() => setShowSupplierModal(false)} />
+        <SupplierModal 
+          suppliers={supplierDetails} 
+          onClose={() => setShowSupplierModal(false)} 
+          productName={selectedProductName}
+        />
       )}
 
       {showCategoryModal && (
@@ -638,16 +658,33 @@ function ProductModal({ visible, onClose, onSubmit, onDelete, item, setItem, tit
   );
 }
 
-function SupplierModal({ suppliers, inventory, onClose }) {
-  const currentStock = inventory?.quantity ?? 0;
+function SupplierModal({ suppliers, onClose, productName }) {
+  // Calculate current stock from all transactions using the same logic as sales
+  const calculateCurrentStock = () => {
+    if (!suppliers || suppliers.length === 0) return 0;
+    
+    let currentStock = 0;
+    suppliers.forEach(record => {
+      // Use the same transaction types as in sales recording
+      if (record.transaction_type === 'stock_in' || record.transaction_type === 'RESUPPLY' || record.transaction_type === 'resupply') {
+        currentStock += record.quantity || 0;
+      } else if (record.transaction_type === 'stock_out' || record.transaction_type === 'SALE' || record.transaction_type === 'sale') {
+        currentStock -= record.quantity || 0;
+      }
+    });
+    
+    return Math.max(0, currentStock);
+  };
+
+  const currentStock = calculateCurrentStock();
 
   return (
     <div style={styles.modalOverlay}>
-      <div style={styles.modalContainer}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-          <h2 style={styles.modalHeader}>Stock Card</h2>
-          <div style={{ fontWeight: 'bold', color: '#1e293b', fontSize: '16px' }}>
-            Current Stock: {currentStock}
+      <div style={{...styles.modalContainer, maxWidth: '90%', maxHeight: '90%'}}>
+        <div style={styles.modalHeaderRow}>
+          <h2 style={styles.modalHeader}>Stock Card - {productName}</h2>
+          <div style={styles.currentStockBadge}>
+            Current Stock: <strong>{currentStock}</strong>
           </div>
         </div>
 
@@ -659,7 +696,7 @@ function SupplierModal({ suppliers, inventory, onClose }) {
               <table style={styles.table}>
                 <thead>
                   <tr style={styles.tableHeader}>
-                    <th style={styles.tableCell}>Supplier</th>
+                    <th style={styles.tableCell}>Supplier/Customer</th>
                     <th style={styles.tableCell}>Transaction Date</th>
                     <th style={styles.tableCell}>Stock-in</th>
                     <th style={styles.tableCell}>Stock-out</th>
@@ -670,18 +707,32 @@ function SupplierModal({ suppliers, inventory, onClose }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {suppliers.map((s, idx) => (
-                    <tr key={idx} style={styles.tableRow}>
-                      <td style={styles.tableCell}>{s.name}</td>
-                      <td style={styles.tableCell}>{s.resupply_date || 'N/A'}</td>
-                      <td style={styles.tableCell}>{s.quantity}</td>
-                      <td style={styles.tableCell}>{s.stockout || 0}</td>
-                      <td style={styles.tableCell}>{s.unit}</td>
-                      <td style={styles.tableCell}>{s.expiration_date || 'N/A'}</td>
-                      <td style={styles.tableCell}>₱{(s.unit_cost || 0).toFixed(2)}</td>
-                      <td style={styles.tableCell}>₱{(s.unit_price || 0).toFixed(2)}</td>
-                    </tr>
-                  ))}
+                  {suppliers.map((s, idx) => {
+                    // Use the same logic as in sales for determining stock-in vs stock-out
+                    const stockIn = (s.transaction_type === 'stock_in' || s.transaction_type === 'RESUPPLY' || s.transaction_type === 'resupply') ? s.quantity : 0;
+                    const stockOut = (s.transaction_type === 'stock_out' || s.transaction_type === 'SALE' || s.transaction_type === 'sale') ? s.quantity : 0;
+                    
+                    return (
+                      <tr key={idx} style={styles.tableRow}>
+                        <td style={styles.tableCell}>
+                          {s.transaction_type === 'SALE' || s.transaction_type === 'sale' || s.transaction_type === 'stock_out' ? 'Customer Sale' : s.name}
+                        </td>
+                        <td style={styles.tableCell}>
+                          {s.transaction_date || s.resupply_date || 'N/A'}
+                        </td>
+                        <td style={{...styles.tableCell, color: '#065f46', fontWeight: 'bold'}}>
+                          {stockIn > 0 ? stockIn : '-'}
+                        </td>
+                        <td style={{...styles.tableCell, color: '#dc2626', fontWeight: 'bold'}}>
+                          {stockOut > 0 ? stockOut : '-'}
+                        </td>
+                        <td style={styles.tableCell}>{s.unit || s.unit_type || 'pcs'}</td>
+                        <td style={styles.tableCell}>{s.expiration_date || 'N/A'}</td>
+                        <td style={styles.tableCell}>₱{(s.unit_cost || 0).toFixed(2)}</td>
+                        <td style={styles.tableCell}>₱{(s.unit_price || 0).toFixed(2)}</td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -791,6 +842,7 @@ function CategoryModal({ visible, onClose, newCategoryName, setNewCategoryName, 
     </div>
   );
 }
+
 
 const styles = {
   container: { 
@@ -994,6 +1046,23 @@ const styles = {
     fontWeight: 'bold',
     marginBottom: '20px',
     color: '#1e293b',
+  },
+  modalHeaderRow: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: '20px',
+    flexWrap: 'wrap',
+    gap: '12px'
+  },
+  currentStockBadge: {
+    backgroundColor: '#dbeafe',
+    color: '#1e40af',
+    padding: '8px 16px',
+    borderRadius: '20px',
+    fontSize: '14px',
+    fontWeight: '600',
+    border: '1px solid #bfdbfe'
   },
   modalContent: {
     marginBottom: '20px',
