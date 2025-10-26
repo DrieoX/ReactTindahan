@@ -267,7 +267,7 @@ export default function POSScreen({ userMode }) {
                           border: clickedButtons[`remove-${item.id}`] ? '2px solid #ef4444' : 'none',
                         }}
                       >
-                        Remove
+                        cancel
                       </button>
                     </td>
                   </tr>

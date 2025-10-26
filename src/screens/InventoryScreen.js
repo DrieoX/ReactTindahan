@@ -403,7 +403,7 @@ export default function InventoryScreen({ userMode }) {
               }}
               onClick={() => handleButtonClick('addItem', () => setShowAddModal(true))}
             >
-              Add New Item
+              Stock Registration
             </button>
             <button 
               style={{
@@ -444,28 +444,30 @@ export default function InventoryScreen({ userMode }) {
                   <td style={styles.tableCell}>{item.quantity || 0}</td>
                   <td style={styles.tableCell}>{item.threshold || 5}</td>
                   <td style={styles.tableCell}>
-                    <button 
-                      style={{
-                        ...styles.editButton,
-                        backgroundColor: clickedButtons[`edit-${item.product_id}`] ? '#ffffff' : '#0ea5e9',
-                        color: clickedButtons[`edit-${item.product_id}`] ? '#0ea5e9' : '#ffffff',
-                        border: clickedButtons[`edit-${item.product_id}`] ? '2px solid #0ea5e9' : 'none',
-                      }}
-                      onClick={() => handleButtonClick(`edit-${item.product_id}`, () => handleEditItem(item))}
-                    >
-                      Edit
-                    </button>
-                    <button 
-                      style={{
-                        ...styles.viewButton,
-                        backgroundColor: clickedButtons[`view-${item.product_id}`] ? '#ffffff' : '#0ea5e9',
-                        color: clickedButtons[`view-${item.product_id}`] ? '#0ea5e9' : '#ffffff',
-                        border: clickedButtons[`view-${item.product_id}`] ? '2px solid #0ea5e9' : 'none',
-                      }}
-                      onClick={() => handleButtonClick(`view-${item.product_id}`, () => handleSupplierDetails(item))}
-                    >
-                      View
-                    </button>
+                    <div style={styles.actionButtons}>
+                      <button 
+                        style={{
+                          ...styles.editButton,
+                          backgroundColor: clickedButtons[`edit-${item.product_id}`] ? '#ffffff' : '#0ea5e9',
+                          color: clickedButtons[`edit-${item.product_id}`] ? '#0ea5e9' : '#ffffff',
+                          border: clickedButtons[`edit-${item.product_id}`] ? '2px solid #0ea5e9' : 'none',
+                        }}
+                        onClick={() => handleButtonClick(`edit-${item.product_id}`, () => handleEditItem(item))}
+                      >
+                        Edit
+                      </button>
+                      <button 
+                        style={{
+                          ...styles.viewButton,
+                          backgroundColor: clickedButtons[`view-${item.product_id}`] ? '#ffffff' : '#0ea5e9',
+                          color: clickedButtons[`view-${item.product_id}`] ? '#0ea5e9' : '#ffffff',
+                          border: clickedButtons[`view-${item.product_id}`] ? '2px solid #0ea5e9' : 'none',
+                        }}
+                        onClick={() => handleButtonClick(`view-${item.product_id}`, () => handleSupplierDetails(item))}
+                      >
+                        View
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -659,16 +661,15 @@ function ProductModal({ visible, onClose, onSubmit, onDelete, item, setItem, tit
 }
 
 function SupplierModal({ suppliers, onClose, productName }) {
-  // Calculate current stock from all transactions using the same logic as sales
+  // Calculate current stock from all transactions
   const calculateCurrentStock = () => {
     if (!suppliers || suppliers.length === 0) return 0;
     
     let currentStock = 0;
     suppliers.forEach(record => {
-      // Use the same transaction types as in sales recording
-      if (record.transaction_type === 'stock_in' || record.transaction_type === 'RESUPPLY' || record.transaction_type === 'resupply') {
+      if (record.transaction_type === 'stock_in' || record.transaction_type === 'RESUPPLY') {
         currentStock += record.quantity || 0;
-      } else if (record.transaction_type === 'stock_out' || record.transaction_type === 'SALE' || record.transaction_type === 'sale') {
+      } else if (record.transaction_type === 'stock_out' || record.transaction_type === 'SALE') {
         currentStock -= record.quantity || 0;
       }
     });
@@ -707,15 +708,14 @@ function SupplierModal({ suppliers, onClose, productName }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {suppliers.map((s, idx) => {
-                    // Use the same logic as in sales for determining stock-in vs stock-out
-                    const stockIn = (s.transaction_type === 'stock_in' || s.transaction_type === 'RESUPPLY' || s.transaction_type === 'resupply') ? s.quantity : 0;
-                    const stockOut = (s.transaction_type === 'stock_out' || s.transaction_type === 'SALE' || s.transaction_type === 'sale') ? s.quantity : 0;
+                  {suppliers.map((s, idx) => {                    
+                    const stockIn = (s.transaction_type === 'stock_in' || s.transaction_type === 'RESUPPLY') ? s.quantity : 0;
+                    const stockOut = (s.transaction_type === 'stock_out' || s.transaction_type === 'SALE') ? s.quantity : 0;
                     
                     return (
                       <tr key={idx} style={styles.tableRow}>
                         <td style={styles.tableCell}>
-                          {s.transaction_type === 'SALE' || s.transaction_type === 'sale' || s.transaction_type === 'stock_out' ? 'Customer Sale' : s.name}
+                          {s.transaction_type === 'SALE' ? 'Customer Sale' : s.name}
                         </td>
                         <td style={styles.tableCell}>
                           {s.transaction_date || s.resupply_date || 'N/A'}
@@ -842,7 +842,6 @@ function CategoryModal({ visible, onClose, newCategoryName, setNewCategoryName, 
     </div>
   );
 }
-
 
 const styles = {
   container: { 
@@ -998,7 +997,8 @@ const styles = {
   },
   actionButtons: {
     display: 'flex',
-    gap: '8px',
+    gap: '12px', // Increased from 8px to 12px for more space
+    justifyContent: 'flex-start',
   },
   editButton: {
     border: 'none',
@@ -1008,6 +1008,7 @@ const styles = {
     fontSize: '12px',
     fontWeight: '500',
     transition: 'all 0.2s ease',
+    minWidth: '60px',
   },
   viewButton: {
     border: 'none',
@@ -1017,6 +1018,7 @@ const styles = {
     fontSize: '12px',
     fontWeight: '500',
     transition: 'all 0.2s ease',
+    minWidth: '60px',
   },
   modalOverlay: {
     position: 'fixed',

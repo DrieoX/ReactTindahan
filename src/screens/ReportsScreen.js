@@ -15,12 +15,21 @@ export default function ReportsScreen({ userMode }) {
   const [report, setReport] = useState([]);
   const [resupplyReport, setResupplyReport] = useState([]);
   const [timeFilter, setTimeFilter] = useState('daily');
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
   const mode = userMode || 'client';
+
+  useEffect(() => {
+    // Set default date range to today when component mounts
+    const today = new Date().toISOString().split('T')[0];
+    setStartDate(today);
+    setEndDate(today);
+  }, []);
 
   useEffect(() => {
     fetchReport();
     fetchResupplyReport();
-  }, [timeFilter]);
+  }, [timeFilter, startDate, endDate]);
 
   const isToday = (dateStr) => {
     if (!dateStr) return false;
@@ -53,7 +62,20 @@ export default function ReportsScreen({ userMode }) {
     return date.getFullYear() === now.getFullYear();
   };
 
+  const isInDateRange = (dateStr) => {
+    if (!startDate || !endDate) return false;
+    const date = new Date(dateStr);
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+    end.setHours(23, 59, 59, 999); // Include the entire end date
+    return date >= start && date <= end;
+  };
+
   const matchesFilter = (dateStr) => {
+    if (timeFilter === 'custom' && startDate && endDate) {
+      return isInDateRange(dateStr);
+    }
+    
     switch (timeFilter) {
       case 'weekly':
         return isThisWeek(dateStr);
@@ -64,6 +86,187 @@ export default function ReportsScreen({ userMode }) {
       default:
         return isToday(dateStr);
     }
+  };
+
+  const handleDateRangeChange = (newStartDate, newEndDate) => {
+    setStartDate(newStartDate);
+    setEndDate(newEndDate);
+    if (timeFilter !== 'custom') {
+      setTimeFilter('custom');
+    }
+  };
+
+  const getDateRangeLabel = () => {
+    if (timeFilter === 'custom' && startDate && endDate) {
+      if (startDate === endDate) {
+        return new Date(startDate).toLocaleDateString();
+      }
+      return `${new Date(startDate).toLocaleDateString()} - ${new Date(endDate).toLocaleDateString()}`;
+    }
+    return new Date().toLocaleDateString();
+  };
+
+  const getReportTitle = () => {
+    const baseTitle = "Sales Report";
+    if (timeFilter === 'custom' && startDate && endDate) {
+      if (startDate === endDate) {
+        return `${baseTitle} - ${new Date(startDate).toLocaleDateString()}`;
+      }
+      return `${baseTitle} - ${new Date(startDate).toLocaleDateString()} to ${new Date(endDate).toLocaleDateString()}`;
+    }
+    return `${baseTitle} - ${timeFilter.charAt(0).toUpperCase() + timeFilter.slice(1)}`;
+  };
+
+  // Download as CSV
+  const downloadCSV = () => {
+    if (report.length === 0) {
+      alert('No data to download');
+      return;
+    }
+
+    const headers = ['Date', 'Product', 'Quantity', 'Amount', 'Total Sale'];
+    
+    // Flatten all sales data
+    const csvData = report.flatMap(sale => 
+      sale.items.map(item => [
+        sale.sales_date,
+        item.name,
+        item.quantity,
+        `₱${item.amount.toFixed(2)}`,
+        `₱${sale.totalAmount.toFixed(2)}`
+      ])
+    );
+
+    // Add summary row
+    const totalRevenue = report.reduce((sum, r) => sum + (r.totalAmount || 0), 0);
+    const totalTransactions = report.length;
+    csvData.push([]);
+    csvData.push(['SUMMARY', '', '', '', '']);
+    csvData.push(['Total Revenue', '', '', '', `₱${totalRevenue.toFixed(2)}`]);
+    csvData.push(['Total Transactions', '', '', '', totalTransactions]);
+    csvData.push(['Average Transaction', '', '', '', `₱${(totalRevenue / totalTransactions).toFixed(2)}`]);
+
+    const csvContent = [
+      [getReportTitle()],
+      [],
+      headers,
+      ...csvData
+    ].map(row => row.join(',')).join('\n');
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    link.setAttribute('href', url);
+    link.setAttribute('download', `${getReportTitle().toLowerCase().replace(/ /g, '_')}.csv`);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  // Download as PDF (using browser's print functionality)
+  const downloadPDF = () => {
+    if (report.length === 0) {
+      alert('No data to download');
+      return;
+    }
+
+    const printWindow = window.open('', '_blank');
+    const totalRevenue = report.reduce((sum, r) => sum + (r.totalAmount || 0), 0);
+    const totalTransactions = report.length;
+    const averageTransaction = totalRevenue / totalTransactions;
+
+    printWindow.document.write(`
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>${getReportTitle()}</title>
+        <style>
+          body { font-family: Arial, sans-serif; margin: 20px; }
+          .header { text-align: center; margin-bottom: 30px; border-bottom: 2px solid #333; padding-bottom: 10px; }
+          .summary { background: #f5f5f5; padding: 15px; margin-bottom: 20px; border-radius: 5px; }
+          .summary-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; margin-bottom: 20px; }
+          .summary-item { text-align: center; padding: 10px; }
+          .summary-value { font-size: 18px; font-weight: bold; color: #2c3e50; }
+          .summary-label { font-size: 14px; color: #7f8c8d; }
+          table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
+          th, td { border: 1px solid #ddd; padding: 10px; text-align: left; }
+          th { background-color: #f8f9fa; font-weight: bold; }
+          .total-row { background-color: #e8f5e8; font-weight: bold; }
+          .footer { margin-top: 30px; text-align: center; color: #7f8c8d; font-size: 12px; }
+          @media print {
+            body { margin: 0; }
+            .no-print { display: none; }
+          }
+        </style>
+      </head>
+      <body>
+        <div class="header">
+          <h1>SmartTindahan</h1>
+          <h2>${getReportTitle()}</h2>
+          <p>Generated on: ${new Date().toLocaleDateString()}</p>
+        </div>
+
+        <div class="summary">
+          <h3>Summary</h3>
+          <div class="summary-grid">
+            <div class="summary-item">
+              <div class="summary-value">₱${totalRevenue.toFixed(2)}</div>
+              <div class="summary-label">Total Revenue</div>
+            </div>
+            <div class="summary-item">
+              <div class="summary-value">${totalTransactions}</div>
+              <div class="summary-label">Total Transactions</div>
+            </div>
+            <div class="summary-item">
+              <div class="summary-value">₱${averageTransaction.toFixed(2)}</div>
+              <div class="summary-label">Average Transaction</div>
+            </div>
+          </div>
+        </div>
+
+        <h3>Sales Details</h3>
+        <table>
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Product</th>
+              <th>Quantity</th>
+              <th>Amount</th>
+              <th>Total Sale</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${report.map(sale => 
+              sale.items.map((item, index) => `
+                <tr>
+                  ${index === 0 ? `<td rowspan="${sale.items.length}">${sale.sales_date}</td>` : ''}
+                  <td>${item.name}</td>
+                  <td>${item.quantity}</td>
+                  <td>₱${item.amount.toFixed(2)}</td>
+                  ${index === 0 ? `<td rowspan="${sale.items.length}">₱${sale.totalAmount.toFixed(2)}</td>` : ''}
+                </tr>
+              `).join('')
+            ).join('')}
+          </tbody>
+        </table>
+
+        <div class="footer">
+          <p>Generated by SmartTindahan Sales Report System</p>
+        </div>
+
+        <script>
+          window.onload = function() {
+            window.print();
+            setTimeout(function() {
+              window.close();
+            }, 500);
+          };
+        </script>
+      </body>
+      </html>
+    `);
+    printWindow.document.close();
   };
 
   const fetchReport = async () => {
@@ -166,7 +369,48 @@ export default function ReportsScreen({ userMode }) {
             <option value="weekly">Weekly</option>
             <option value="monthly">Monthly</option>
             <option value="yearly">Yearly</option>
+            <option value="custom">Custom Date Range</option>
           </select>
+
+          {/* Date Range Selector */}
+          <div style={styles.dateRangeContainer}>
+            <div style={styles.dateInputGroup}>
+              <label style={styles.dateLabel}>From:</label>
+              <input
+                type="date"
+                value={startDate}
+                onChange={(e) => handleDateRangeChange(e.target.value, endDate)}
+                style={styles.dateInput}
+              />
+            </div>
+            <div style={styles.dateInputGroup}>
+              <label style={styles.dateLabel}>To:</label>
+              <input
+                type="date"
+                value={endDate}
+                onChange={(e) => handleDateRangeChange(startDate, e.target.value)}
+                style={styles.dateInput}
+              />
+            </div>
+          </div>
+
+          {/* Download Buttons */}
+          <div style={styles.downloadContainer}>
+            <button 
+              onClick={downloadCSV}
+              style={styles.downloadButton}
+              disabled={report.length === 0}
+            >
+              📥 CSV
+            </button>
+            <button 
+              onClick={downloadPDF}
+              style={styles.downloadButton}
+              disabled={report.length === 0}
+            >
+              📥 PDF
+            </button>
+          </div>
         </div>
       </div>
 
@@ -177,7 +421,7 @@ export default function ReportsScreen({ userMode }) {
           </p>
           <p style={styles.metricLabel}>Total Revenue</p>
           <p style={styles.metricSubLabel}>
-            {timeFilter.charAt(0).toUpperCase() + timeFilter.slice(1)}
+            {timeFilter === 'custom' ? 'Custom Range' : timeFilter.charAt(0).toUpperCase() + timeFilter.slice(1)}
           </p>
         </div>
 
@@ -187,7 +431,7 @@ export default function ReportsScreen({ userMode }) {
           </p>
           <p style={styles.metricLabel}>Avg. Transaction</p>
           <p style={styles.metricSubLabel}>
-            {timeFilter.charAt(0).toUpperCase() + timeFilter.slice(1)}
+            {timeFilter === 'custom' ? 'Custom Range' : timeFilter.charAt(0).toUpperCase() + timeFilter.slice(1)}
           </p>
         </div>
 
@@ -195,7 +439,7 @@ export default function ReportsScreen({ userMode }) {
           <p style={styles.metricValue}>{report.length}</p>
           <p style={styles.metricLabel}>Total Transactions</p>
           <p style={styles.metricSubLabel}>
-            {timeFilter.charAt(0).toUpperCase() + timeFilter.slice(1)}
+            {timeFilter === 'custom' ? 'Custom Range' : timeFilter.charAt(0).toUpperCase() + timeFilter.slice(1)}
           </p>
         </div>
       </div>
@@ -208,14 +452,14 @@ export default function ReportsScreen({ userMode }) {
               <div style={styles.dateFilter}>
                 <span style={styles.dateLabel}>Date Range:</span>
                 <span style={styles.dateValue}>
-                  {new Date().toLocaleDateString()}
+                  {getDateRangeLabel()}
                 </span>
               </div>
             </div>
             
             {report.length === 0 ? (
               <div style={styles.placeholderCard}>
-                <p style={styles.placeholderText}>No sales for this {timeFilter}</p>
+                <p style={styles.placeholderText}>No sales for this {timeFilter === 'custom' ? 'date range' : timeFilter}</p>
                 <p style={styles.placeholderSubText}>
                   Sales data will appear here once transactions are recorded
                 </p>
@@ -247,7 +491,7 @@ export default function ReportsScreen({ userMode }) {
             <h3 style={styles.sectionHeader}>Resupply History</h3>
             {resupplyReport.length === 0 ? (
               <div style={styles.placeholderCard}>
-                <p style={styles.placeholderText}>No resupply data for this {timeFilter}</p>
+                <p style={styles.placeholderText}>No resupply data for this {timeFilter === 'custom' ? 'date range' : timeFilter}</p>
                 <p style={styles.placeholderSubText}>
                   Resupply history will appear here once items are restocked
                 </p>
@@ -315,6 +559,7 @@ const styles = {
     padding: '12px 16px',
     borderRadius: '10px',
     border: '1px solid #e9ecef',
+    flexWrap: 'wrap',
   },
   filterLabel: {
     fontSize: '14px',
@@ -334,6 +579,44 @@ const styles = {
     outline: 'none',
     transition: 'all 0.2s ease',
     minWidth: '140px',
+  },
+  dateRangeContainer: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '12px',
+    marginLeft: 'auto',
+  },
+  dateInputGroup: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '6px',
+  },
+  dateInput: {
+    padding: '8px 12px',
+    borderRadius: '6px',
+    border: '1px solid #ddd',
+    fontSize: '14px',
+    minWidth: '140px',
+  },
+  downloadContainer: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    marginLeft: 'auto',
+  },
+  downloadButton: {
+    padding: '10px 16px',
+    borderRadius: '8px',
+    border: '2px solid #27ae60',
+    backgroundColor: '#27ae60',
+    color: 'white',
+    fontSize: '14px',
+    fontWeight: '600',
+    cursor: 'pointer',
+    transition: 'all 0.2s ease',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '6px',
   },
   metricsContainer: {
     display: 'grid',
