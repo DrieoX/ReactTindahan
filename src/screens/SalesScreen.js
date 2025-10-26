@@ -119,6 +119,19 @@ export default function POSScreen({ userMode }) {
 
   const calculateTotal = () => cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
 
+  // Helper function to create reliable date format
+  const getFormattedDateTime = () => {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+    const hours = String(now.getHours()).padStart(2, '0');
+    const minutes = String(now.getMinutes()).padStart(2, '0');
+    const seconds = String(now.getSeconds()).padStart(2, '0');
+    
+    return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
+  };
+
   const handlePayment = async () => {
     if (cart.length === 0) return alert('Cart is empty!');
 
@@ -130,11 +143,15 @@ export default function POSScreen({ userMode }) {
     }
 
     try {
-      const saleId = await db.sales.add({ sales_date: new Date().toISOString().split('T')[0] });
+      const saleDate = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+      const transactionDateTime = getFormattedDateTime(); // YYYY-MM-DD HH:MM:SS
+
+      const saleId = await db.sales.add({ sales_date: saleDate });
 
       for (const item of cart) {
         const amount = item.quantity * item.price;
 
+        // Add sale item record
         await db.sale_items.add({
           sales_id: saleId,
           product_id: item.id,
@@ -143,9 +160,21 @@ export default function POSScreen({ userMode }) {
           total_amount: total
         });
 
+        // Update inventory quantity
         await db.inventory.where({ product_id: item.id }).modify(inv => {
           inv.quantity -= item.quantity;
           if (inv.quantity < 0) inv.quantity = 0;
+        });
+
+        // ✅ ADD STOCK CARD RECORD FOR THE SALE (STOCK-OUT)
+        await db.stock_card.add({
+          product_id: item.id,
+          quantity: -item.quantity, // Negative for stock-out
+          unit_price: item.price,
+          transaction_type: 'SALE', // Use 'SALE' to match your inventory screen logic
+          transaction_date: transactionDateTime, // Use the formatted date time
+          sales_id: saleId,
+          running_balance: 0
         });
       }
 

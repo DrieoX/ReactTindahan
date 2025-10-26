@@ -288,14 +288,27 @@ export default function ReportsScreen({ userMode }) {
       const enriched = Object.entries(groupedSales).map(([sales_id, items]) => {
         const sale = filteredSales.find(s => s.sales_id === parseInt(sales_id));
         const totalAmount = items.reduce((sum, i) => sum + (i.amount || 0), 0);
-        const productDetails = items.map(i => {
+        
+        // Combine items with the same product name
+        const combinedItems = {};
+        items.forEach(i => {
           const product = products.find(p => p.product_id === i.product_id);
-          return {
-            name: product?.name || 'Unknown Product',
-            quantity: i.quantity,
-            amount: i.amount
-          };
+          const productName = product?.name || 'Unknown Product';
+          
+          if (!combinedItems[productName]) {
+            combinedItems[productName] = {
+              name: productName,
+              quantity: 0,
+              amount: 0
+            };
+          }
+          
+          combinedItems[productName].quantity += i.quantity || 0;
+          combinedItems[productName].amount += i.amount || 0;
         });
+        
+        const productDetails = Object.values(combinedItems);
+
         return {
           sales_date: sale?.sales_date,
           items: productDetails,
@@ -472,12 +485,12 @@ export default function ReportsScreen({ userMode }) {
                       <p style={styles.reportDate}>{group.sales_date}</p>
                       {group.items.map((item, idx) => (
                         <p key={idx} style={styles.reportName}>
-                          {item.name} — Qty: {item.quantity} — ₱{item.amount}
+                          {item.name} — Qty: {item.quantity} — ₱{item.amount.toFixed(2)}
                         </p>
                       ))}
                     </div>
                     <div style={styles.reportItemRight}>
-                      <p style={styles.reportAmount}>Total: ₱{group.totalAmount}</p>
+                      <p style={styles.reportAmount}>Total: ₱{group.totalAmount.toFixed(2)}</p>
                     </div>
                   </div>
                 ))}

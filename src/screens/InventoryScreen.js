@@ -661,16 +661,18 @@ function ProductModal({ visible, onClose, onSubmit, onDelete, item, setItem, tit
 }
 
 function SupplierModal({ suppliers, onClose, productName }) {
-  // Calculate current stock from all transactions
+  // Calculate current stock from all transactions - FIXED VERSION
   const calculateCurrentStock = () => {
     if (!suppliers || suppliers.length === 0) return 0;
     
     let currentStock = 0;
     suppliers.forEach(record => {
       if (record.transaction_type === 'stock_in' || record.transaction_type === 'RESUPPLY') {
-        currentStock += record.quantity || 0;
-      } else if (record.transaction_type === 'stock_out' || record.transaction_type === 'SALE') {
-        currentStock -= record.quantity || 0;
+        // Stock-in: positive quantity
+        currentStock += Math.abs(record.quantity || 0);
+      } else if (record.transaction_type === 'SALE' || record.transaction_type === 'stock_out') {
+        // Stock-out: negative quantity (already stored as negative)
+        currentStock += (record.quantity || 0); // This will subtract since quantity is negative
       }
     });
     
@@ -679,9 +681,23 @@ function SupplierModal({ suppliers, onClose, productName }) {
 
   const currentStock = calculateCurrentStock();
 
+  // Function to format transaction type for display
+  const formatTransactionType = (type) => {
+    switch(type) {
+      case 'stock_in':
+      case 'RESUPPLY':
+        return 'Stock In';
+      case 'SALE':
+      case 'stock_out':
+        return 'Sale';
+      default:
+        return type || 'N/A';
+    }
+  };
+
   return (
     <div style={styles.modalOverlay}>
-      <div style={{...styles.modalContainer, maxWidth: '90%', maxHeight: '90%'}}>
+      <div style={{...styles.modalContainer, maxWidth: '95%', maxHeight: '90%'}}>
         <div style={styles.modalHeaderRow}>
           <h2 style={styles.modalHeader}>Stock Card - {productName}</h2>
           <div style={styles.currentStockBadge}>
@@ -699,6 +715,7 @@ function SupplierModal({ suppliers, onClose, productName }) {
                   <tr style={styles.tableHeader}>
                     <th style={styles.tableCell}>Supplier/Customer</th>
                     <th style={styles.tableCell}>Transaction Date</th>
+                    <th style={styles.tableCell}>Transaction Type</th>
                     <th style={styles.tableCell}>Stock-in</th>
                     <th style={styles.tableCell}>Stock-out</th>
                     <th style={styles.tableCell}>Units</th>
@@ -709,16 +726,25 @@ function SupplierModal({ suppliers, onClose, productName }) {
                 </thead>
                 <tbody>
                   {suppliers.map((s, idx) => {                    
-                    const stockIn = (s.transaction_type === 'stock_in' || s.transaction_type === 'RESUPPLY') ? s.quantity : 0;
-                    const stockOut = (s.transaction_type === 'stock_out' || s.transaction_type === 'SALE') ? s.quantity : 0;
+                    // FIXED: Properly separate stock-in and stock-out quantities
+                    const stockIn = (s.transaction_type === 'stock_in' || s.transaction_type === 'RESUPPLY') 
+                      ? Math.abs(s.quantity || 0) 
+                      : 0;
+                    
+                    const stockOut = (s.transaction_type === 'SALE' || s.transaction_type === 'stock_out') 
+                      ? Math.abs(s.quantity || 0) 
+                      : 0;
                     
                     return (
                       <tr key={idx} style={styles.tableRow}>
                         <td style={styles.tableCell}>
-                          {s.transaction_type === 'SALE' ? 'Customer Sale' : s.name}
+                          {s.transaction_type === 'SALE' || s.transaction_type === 'stock_out' ? 'Customer Sale' : s.name}
                         </td>
                         <td style={styles.tableCell}>
                           {s.transaction_date || s.resupply_date || 'N/A'}
+                        </td>
+                        <td style={styles.tableCell}>
+                          {formatTransactionType(s.transaction_type)}
                         </td>
                         <td style={{...styles.tableCell, color: '#065f46', fontWeight: 'bold'}}>
                           {stockIn > 0 ? stockIn : '-'}
