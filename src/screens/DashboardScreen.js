@@ -27,7 +27,6 @@ export default function DashboardScreen({ userMode }) {
 
   // Get display name - prioritize owner's full name from signup
   const getDisplayName = () => {
-    // Check for owner's name in different possible properties
     const ownerName = user?.fullName || user?.full_name || user?.ownerName || user?.owner_name || user?.name || user?.username || 'User';
     return ownerName;
   };
@@ -35,6 +34,26 @@ export default function DashboardScreen({ userMode }) {
   // Get store name for display if needed
   const getStoreName = () => {
     return user?.storeName || user?.store_name || user?.storeName || '';
+  };
+
+  // Format date reliably
+  const formatDate = (dateString) => {
+    if (!dateString) return new Date().toISOString().split('T')[0];
+    
+    try {
+      const date = new Date(dateString);
+      return date.toLocaleDateString('en-US', {
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit'
+      });
+    } catch (error) {
+      return new Date().toLocaleDateString('en-US', {
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit'
+      });
+    }
   };
 
   useEffect(() => {
@@ -62,15 +81,21 @@ export default function DashboardScreen({ userMode }) {
           })
         );
 
+        // Use reliable date formatting only
+        const saleDate = formatDate(sale.sales_date);
+
         recentSalesData.push({
           id: sale.sales_id,
-          date: sale.sales_date,
-          time: sale.sales_time || '00:00',
+          date: saleDate,
           amount: totalSale,
           items: items.length,
-          productNames: productDetails
+          productNames: productDetails,
+          timestamp: sale.timestamp || new Date().getTime()
         });
       }
+
+      // Sort by timestamp (most recent first)
+      recentSalesData.sort((a, b) => b.timestamp - a.timestamp);
 
       // ✅ Total Products
       const totalProducts = await db.products.count();
@@ -97,7 +122,7 @@ export default function DashboardScreen({ userMode }) {
       nearExpiryThreshold.setDate(todayDate.getDate() + 7);
 
       for (let i of inventory) {
-        if (!i.expiration_date) continue; // ❌ Skip items without expiration
+        if (!i.expiration_date) continue;
         const expDate = new Date(i.expiration_date);
         const product = await db.products.get(i.product_id);
         if (expDate < todayDate) {
@@ -140,7 +165,6 @@ export default function DashboardScreen({ userMode }) {
   };
 
   const handleTotalProductsClick = () => {
-    // Acts as "clear filter" button – just reloads stats
     fetchDashboardStats();
   };
 
@@ -230,31 +254,56 @@ export default function DashboardScreen({ userMode }) {
           <div style={styles.recentTransactions}>
             <div style={styles.sectionHeader}>
               <h3 style={styles.sectionTitle}>Recent Transactions</h3>
-              <button style={styles.viewAllButton}>View all transactions</button>
+              <button style={styles.viewAllButton} onClick={fetchDashboardStats}>
+                Refresh
+              </button>
             </div>
 
             {recentSales.length === 0 ? (
-              <p style={styles.noDataText}>No recent transactions</p>
+              <div style={styles.noDataContainer}>
+                <p style={styles.noDataText}>No recent transactions</p>
+                <p style={styles.noDataSubtext}>Transactions will appear here as they occur</p>
+              </div>
             ) : (
-              recentSales.map((sale, index) => (
-                <div key={index} style={styles.transactionCard}>
-                  <div style={styles.transactionHeader}>
-                    <span style={styles.transactionStatus}>Sale Completed</span>
-                    <span style={styles.transactionTime}>
-                      {sale.items} items • {sale.date} {sale.time}
-                    </span>
-                  </div>
-                  <div style={styles.transactionProducts}>
-                    {sale.productNames.slice(0, 2).map((name, i) => (
-                      <span key={i} style={styles.productName}>{name}</span>
+              <div style={styles.tableContainer}>
+                <table style={styles.transactionsTable}>
+                  <thead>
+                    <tr style={styles.tableHeader}>
+                      <th style={styles.tableHeaderCell}>Date</th>
+                      <th style={styles.tableHeaderCell}>Items</th>
+                      <th style={styles.tableHeaderCell}>Products</th>
+                      <th style={styles.tableHeaderCell}>Amount</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {recentSales.map((sale, index) => (
+                      <tr key={sale.id || index} style={index % 2 === 0 ? styles.tableRowEven : styles.tableRowOdd}>
+                        <td style={styles.tableCell}>
+                          <div style={styles.dateCell}>
+                            <div style={styles.dateText}>{sale.date}</div>
+                          </div>
+                        </td>
+                        <td style={styles.tableCell}>
+                          <span style={styles.itemsCount}>{sale.items} items</span>
+                        </td>
+                        <td style={styles.tableCell}>
+                          <div style={styles.productsCell}>
+                            {sale.productNames.slice(0, 2).map((name, i) => (
+                              <span key={i} style={styles.productName}>{name}</span>
+                            ))}
+                            {sale.productNames.length > 2 && (
+                              <span style={styles.moreItems}>+{sale.productNames.length - 2} more</span>
+                            )}
+                          </div>
+                        </td>
+                        <td style={styles.tableCell}>
+                          <span style={styles.amountText}>₱{sale.amount.toFixed(2)}</span>
+                        </td>
+                      </tr>
                     ))}
-                    {sale.productNames.length > 2 && (
-                      <span style={styles.moreItems}>+{sale.productNames.length - 2} more</span>
-                    )}
-                  </div>
-                  <div style={styles.transactionAmount}>₱{sale.amount.toFixed(2)}</div>
-                </div>
-              ))
+                  </tbody>
+                </table>
+              </div>
             )}
           </div>
 
@@ -262,7 +311,10 @@ export default function DashboardScreen({ userMode }) {
           <div style={styles.alertsSection}>
             <h3 style={styles.sectionTitle}>Alerts & Notifications</h3>
             {notifications.length === 0 ? (
-              <p style={styles.noDataText}>No alerts right now.</p>
+              <div style={styles.noDataContainer}>
+                <p style={styles.noDataText}>No alerts right now.</p>
+                <p style={styles.noDataSubtext}>All systems are running smoothly</p>
+              </div>
             ) : (
               <div style={styles.alertsList}>
                 {notifications.map((item, index) => (
@@ -518,42 +570,276 @@ const styles = {
     fontSize: '14px',
     lineHeight: '1.2',
   },
-  welcomeTitle: { fontSize: '24px', fontWeight: 'bold', marginBottom: '4px', color: '#1e293b' },
-  welcomeSubtitle: { fontSize: '16px', color: '#64748b', marginBottom: '20px' },
-  statCardsContainer: { display: 'flex', flexWrap: 'wrap', gap: '16px', marginBottom: '30px' },
-  statCard: { padding: '20px', borderRadius: '12px', flex: '1 1 200px', minWidth: '200px', boxShadow: '0 4px 6px rgba(0, 0, 0, 0.05)' },
-  statLabel: { fontSize: '14px', opacity: 0.9, marginBottom: '8px' },
-  statValue: { fontSize: '24px', fontWeight: 'bold', marginBottom: '4px' },
-  statChange: { fontSize: '12px', opacity: 0.9 },
-  dashboardGrid: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px', marginBottom: '30px' },
-  recentTransactions: { backgroundColor: '#ffffff', borderRadius: '12px', padding: '20px', boxShadow: '0 4px 6px rgba(0, 0, 0, 0.05)', height: 'fit-content' },
-  alertsSection: { backgroundColor: '#ffffff', borderRadius: '12px', padding: '20px', boxShadow: '0 4px 6px rgba(0, 0, 0, 0.05)', height: 'fit-content' },
-  sectionHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' },
-  sectionTitle: { fontSize: '18px', fontWeight: '600', color: '#1e293b', marginBottom: '0' },
-  viewAllButton: { backgroundColor: 'transparent', border: 'none', color: '#4f46e5', fontSize: '14px', fontWeight: '500', cursor: 'pointer' },
-  transactionCard: { border: '1px solid #e2e8f0', borderRadius: '8px', padding: '16px', marginBottom: '12px' },
-  transactionHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' },
-  transactionStatus: { fontWeight: '500', color: '#1e293b' },
-  transactionTime: { fontSize: '12px', color: '#64748b' },
-  transactionProducts: { display: 'flex', flexWrap: 'wrap', gap: '4px', marginBottom: '8px' },
-  productName: { fontSize: '12px', backgroundColor: '#f1f5f9', padding: '2px 6px', borderRadius: '4px', color: '#475569' },
-  moreItems: { fontSize: '12px', color: '#64748b' },
-  transactionAmount: { fontWeight: '600', color: '#4f46e5', fontSize: '14px' },
-  alertsList: { display: 'flex', flexDirection: 'column', gap: '12px' },
-  alertCard: { borderRadius: '8px', padding: '16px' },
-  alertHeader: { display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '8px' },
-  alertIcon: { width: '32px', height: '32px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '16px' },
-  alertTitle: { fontWeight: '600', color: '#1e293b', margin: '0', fontSize: '14px' },
-  alertProduct: { fontWeight: '500', color: '#475569', margin: '0', fontSize: '13px' },
-  alertDescription: { margin: '0', fontSize: '12px', color: '#64748b' },
-  noDataText: { color: '#94a3b8', fontSize: '14px', fontStyle: 'italic' },
-  modalOverlay: { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.3)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 },
-  modalContainer: { backgroundColor: '#fff', borderRadius: '12px', padding: '24px', width: '90%', maxWidth: '600px', maxHeight: '80vh', overflowY: 'auto', boxShadow: '0 4px 10px rgba(0,0,0,0.2)' },
-  modalHeader: { fontSize: '20px', fontWeight: 'bold', marginBottom: '16px', color: '#1e293b' },
-  table: { width: '100%', borderCollapse: 'collapse', marginBottom: '16px' },
-  tableHeader: { backgroundColor: '#f1f5f9' },
-  tableCell: { textAlign: 'left', padding: '8px', borderBottom: '1px solid #e2e8f0', fontSize: '14px', color: '#334155' },
-  tableRow: { backgroundColor: '#fff' },
-  modalButtons: { display: 'flex', justifyContent: 'flex-end', gap: '12px' },
-  cancelButton: { backgroundColor: '#ef4444', color: '#fff', border: 'none', padding: '10px 16px', borderRadius: '8px', cursor: 'pointer' },
+  welcomeTitle: { 
+    fontSize: '24px', 
+    fontWeight: 'bold', 
+    marginBottom: '4px', 
+    color: '#1e293b' 
+  },
+  welcomeSubtitle: { 
+    fontSize: '16px', 
+    color: '#64748b', 
+    marginBottom: '20px',
+    lineHeight: '1.5'
+  },
+  statCardsContainer: { 
+    display: 'flex', 
+    flexWrap: 'wrap', 
+    gap: '16px', 
+    marginBottom: '30px' 
+  },
+  statCard: { 
+    padding: '20px', 
+    borderRadius: '12px', 
+    flex: '1 1 200px', 
+    minWidth: '200px', 
+    boxShadow: '0 4px 6px rgba(0, 0, 0, 0.05)' 
+  },
+  statLabel: { 
+    fontSize: '14px', 
+    opacity: 0.9, 
+    marginBottom: '8px' 
+  },
+  statValue: { 
+    fontSize: '24px', 
+    fontWeight: 'bold', 
+    marginBottom: '4px' 
+  },
+  statChange: { 
+    fontSize: '12px', 
+    opacity: 0.9 
+  },
+  dashboardGrid: { 
+    display: 'grid', 
+    gridTemplateColumns: '1fr 1fr', 
+    gap: '24px', 
+    marginBottom: '30px' 
+  },
+  recentTransactions: { 
+    backgroundColor: '#ffffff', 
+    borderRadius: '12px', 
+    padding: '20px', 
+    boxShadow: '0 4px 6px rgba(0, 0, 0, 0.05)', 
+    height: 'fit-content' 
+  },
+  alertsSection: { 
+    backgroundColor: '#ffffff', 
+    borderRadius: '12px', 
+    padding: '20px', 
+    boxShadow: '0 4px 6px rgba(0, 0, 0, 0.05)', 
+    height: 'fit-content' 
+  },
+  sectionHeader: { 
+    display: 'flex', 
+    justifyContent: 'space-between', 
+    alignItems: 'center', 
+    marginBottom: '16px' 
+  },
+  sectionTitle: { 
+    fontSize: '18px', 
+    fontWeight: '600', 
+    color: '#1e293b', 
+    marginBottom: '0' 
+  },
+  viewAllButton: { 
+    backgroundColor: 'transparent', 
+    border: 'none', 
+    color: '#4f46e5', 
+    fontSize: '14px', 
+    fontWeight: '500', 
+    cursor: 'pointer' 
+  },
+  
+  // Table Styles for Recent Transactions
+  tableContainer: {
+    overflowX: 'auto',
+    borderRadius: '8px',
+    border: '1px solid #e2e8f0',
+  },
+  transactionsTable: {
+    width: '100%',
+    borderCollapse: 'collapse',
+    backgroundColor: '#ffffff',
+  },
+  tableHeader: {
+    backgroundColor: '#f8fafc',
+  },
+  tableHeaderCell: {
+    padding: '12px 16px',
+    textAlign: 'left',
+    fontWeight: '600',
+    fontSize: '14px',
+    color: '#374151',
+    borderBottom: '1px solid #e2e8f0',
+  },
+  tableRowEven: {
+    backgroundColor: '#ffffff',
+  },
+  tableRowOdd: {
+    backgroundColor: '#f8fafc',
+  },
+  tableCell: {
+    padding: '12px 16px',
+    borderBottom: '1px solid #e2e8f0',
+    fontSize: '14px',
+    color: '#374151',
+    verticalAlign: 'top',
+  },
+  dateCell: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '2px',
+  },
+  dateText: {
+    fontWeight: '500',
+    color: '#1e293b',
+    fontSize: '14px',
+  },
+  itemsCount: {
+    backgroundColor: '#f1f5f9',
+    padding: '4px 8px',
+    borderRadius: '4px',
+    fontSize: '12px',
+    fontWeight: '500',
+    color: '#475569',
+    display: 'inline-block',
+  },
+  productsCell: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '4px',
+    maxWidth: '150px',
+  },
+  productName: {
+    fontSize: '12px',
+    backgroundColor: '#f1f5f9',
+    padding: '2px 6px',
+    borderRadius: '4px',
+    color: '#475569',
+    width: 'fit-content',
+    whiteSpace: 'nowrap',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    maxWidth: '140px',
+  },
+  moreItems: {
+    fontSize: '11px',
+    color: '#64748b',
+    fontStyle: 'italic',
+  },
+  amountText: {
+    fontWeight: '600',
+    color: '#4f46e5',
+    fontSize: '14px',
+  },
+  
+  // Alerts Section
+  alertsList: { 
+    display: 'flex', 
+    flexDirection: 'column', 
+    gap: '12px' 
+  },
+  alertCard: { 
+    borderRadius: '8px', 
+    padding: '16px' 
+  },
+  alertHeader: { 
+    display: 'flex', 
+    alignItems: 'center', 
+    gap: '12px', 
+    marginBottom: '8px' 
+  },
+  alertIcon: { 
+    width: '32px', 
+    height: '32px', 
+    borderRadius: '50%', 
+    display: 'flex', 
+    alignItems: 'center', 
+    justifyContent: 'center', 
+    fontSize: '16px' 
+  },
+  alertTitle: { 
+    fontWeight: '600', 
+    color: '#1e293b', 
+    margin: '0', 
+    fontSize: '14px' 
+  },
+  alertProduct: { 
+    fontWeight: '500', 
+    color: '#475569', 
+    margin: '0', 
+    fontSize: '13px' 
+  },
+  alertDescription: { 
+    margin: '0', 
+    fontSize: '12px', 
+    color: '#64748b' 
+  },
+  noDataContainer: {
+    padding: '40px 20px',
+    textAlign: 'center',
+    backgroundColor: '#f8fafc',
+    borderRadius: '8px',
+    border: '1px dashed #cbd5e1',
+  },
+  noDataText: { 
+    color: '#94a3b8', 
+    fontSize: '14px', 
+    fontStyle: 'italic', 
+    margin: 0,
+    marginBottom: '8px'
+  },
+  noDataSubtext: {
+    color: '#cbd5e1',
+    fontSize: '12px',
+    margin: 0,
+  },
+  
+  // Modal Styles
+  modalOverlay: { 
+    position: 'fixed', 
+    top: 0, 
+    left: 0, 
+    right: 0, 
+    bottom: 0, 
+    backgroundColor: 'rgba(0,0,0,0.3)', 
+    display: 'flex', 
+    justifyContent: 'center', 
+    alignItems: 'center', 
+    zIndex: 1000 
+  },
+  modalContainer: { 
+    backgroundColor: '#fff', 
+    borderRadius: '12px', 
+    padding: '24px', 
+    width: '90%', 
+    maxWidth: '600px', 
+    maxHeight: '80vh', 
+    overflowY: 'auto', 
+    boxShadow: '0 4px 10px rgba(0,0,0,0.2)' 
+  },
+  modalHeader: { 
+    fontSize: '20px', 
+    fontWeight: 'bold', 
+    marginBottom: '16px', 
+    color: '#1e293b' 
+  },
+  table: { 
+    width: '100%', 
+    borderCollapse: 'collapse', 
+    marginBottom: '16px' 
+  },
+  modalButtons: { 
+    display: 'flex', 
+    justifyContent: 'flex-end', 
+    gap: '12px' 
+  },
+  cancelButton: { 
+    backgroundColor: '#ef4444', 
+    color: '#fff', 
+    border: 'none', 
+    padding: '10px 16px', 
+    borderRadius: '8px', 
+    cursor: 'pointer' 
+  },
 };
