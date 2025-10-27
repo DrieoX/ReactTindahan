@@ -117,6 +117,16 @@ export default function ReportsScreen({ userMode }) {
     return `${baseTitle} - ${timeFilter.charAt(0).toUpperCase() + timeFilter.slice(1)}`;
   };
 
+  const getDateRangeForExport = () => {
+    if (timeFilter === 'custom' && startDate && endDate) {
+      if (startDate === endDate) {
+        return `${new Date(startDate).toLocaleDateString()}`;
+      }
+      return `${new Date(startDate).toLocaleDateString()} to ${new Date(endDate).toLocaleDateString()}`;
+    }
+    return `${new Date().toLocaleDateString()}`;
+  };
+
   // Download as CSV
   const downloadCSV = () => {
     if (report.length === 0) {
@@ -140,24 +150,26 @@ export default function ReportsScreen({ userMode }) {
     // Add summary row
     const totalRevenue = report.reduce((sum, r) => sum + (r.totalAmount || 0), 0);
     const totalTransactions = report.length;
-    csvData.push([]);
-    csvData.push(['SUMMARY', '', '', '', '']);
-    csvData.push(['Total Revenue', '', '', '', `₱${totalRevenue.toFixed(2)}`]);
-    csvData.push(['Total Transactions', '', '', '', totalTransactions]);
-    csvData.push(['Average Transaction', '', '', '', `₱${(totalRevenue / totalTransactions).toFixed(2)}`]);
-
+    
     const csvContent = [
-      [getReportTitle()],
+      ['SmartTindahan - Sales Report'],
+      ['Date Range:', getDateRangeForExport()],
+      [`Generated on: ${new Date().toLocaleDateString()}`],
       [],
       headers,
-      ...csvData
+      ...csvData,
+      [],
+      ['SUMMARY', '', '', '', ''],
+      ['Total Revenue', '', '', '', `₱${totalRevenue.toFixed(2)}`],
+      ['Total Transactions', '', '', '', totalTransactions],
+      ['Average Transaction', '', '', '', `₱${(totalRevenue / totalTransactions).toFixed(2)}`]
     ].map(row => row.join(',')).join('\n');
 
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement('a');
     const url = URL.createObjectURL(blob);
     link.setAttribute('href', url);
-    link.setAttribute('download', `${getReportTitle().toLowerCase().replace(/ /g, '_')}.csv`);
+    link.setAttribute('download', `sales_report_${new Date().toISOString().split('T')[0]}.csv`);
     link.style.visibility = 'hidden';
     document.body.appendChild(link);
     link.click();
@@ -180,10 +192,13 @@ export default function ReportsScreen({ userMode }) {
       <!DOCTYPE html>
       <html>
       <head>
-        <title>${getReportTitle()}</title>
+        <title>Sales Report</title>
         <style>
           body { font-family: Arial, sans-serif; margin: 20px; }
-          .header { text-align: center; margin-bottom: 30px; border-bottom: 2px solid #333; padding-bottom: 10px; }
+          .header { text-align: center; margin-bottom: 20px; border-bottom: 2px solid #333; padding-bottom: 10px; }
+          .date-info { text-align: center; margin-bottom: 20px; padding: 15px; background: #f8f9fa; border-radius: 5px; }
+          .date-range { font-size: 18px; font-weight: bold; color: #2c3e50; margin-bottom: 5px; }
+          .generated-date { font-size: 14px; color: #7f8c8d; }
           .summary { background: #f5f5f5; padding: 15px; margin-bottom: 20px; border-radius: 5px; }
           .summary-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; margin-bottom: 20px; }
           .summary-item { text-align: center; padding: 10px; }
@@ -203,8 +218,12 @@ export default function ReportsScreen({ userMode }) {
       <body>
         <div class="header">
           <h1>SmartTindahan</h1>
-          <h2>${getReportTitle()}</h2>
-          <p>Generated on: ${new Date().toLocaleDateString()}</p>
+          <h2>Sales Report</h2>
+        </div>
+
+        <div class="date-info">
+          <div class="date-range">Date Range: ${getDateRangeForExport()}</div>
+          <div class="generated-date">Generated on: ${new Date().toLocaleDateString()}</div>
         </div>
 
         <div class="summary">
@@ -478,22 +497,41 @@ export default function ReportsScreen({ userMode }) {
                 </p>
               </div>
             ) : (
-              <div style={styles.reportList}>
-                {report.map((group, index) => (
-                  <div key={index} style={styles.reportItem}>
-                    <div style={styles.reportItemLeft}>
-                      <p style={styles.reportDate}>{group.sales_date}</p>
-                      {group.items.map((item, idx) => (
-                        <p key={idx} style={styles.reportName}>
-                          {item.name} — Qty: {item.quantity} — ₱{item.amount.toFixed(2)}
-                        </p>
-                      ))}
-                    </div>
-                    <div style={styles.reportItemRight}>
-                      <p style={styles.reportAmount}>Total: ₱{group.totalAmount.toFixed(2)}</p>
-                    </div>
-                  </div>
-                ))}
+              <div style={styles.tableContainer}>
+                <table style={styles.salesTable}>
+                  <thead>
+                    <tr>
+                      <th style={styles.tableHeader}>Date</th>
+                      <th style={styles.tableHeader}>Product</th>
+                      <th style={styles.tableHeader}>Quantity</th>
+                      <th style={styles.tableHeader}>Amount</th>
+                      <th style={styles.tableHeader}>Total Sale</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {report.map((sale, saleIndex) => (
+                      sale.items.map((item, itemIndex) => (
+                        <tr key={`${saleIndex}-${itemIndex}`} style={itemIndex % 2 === 0 ? styles.tableRowEven : styles.tableRowOdd}>
+                          {itemIndex === 0 && (
+                            <>
+                              <td style={styles.tableCell} rowSpan={sale.items.length}>
+                                {sale.sales_date}
+                              </td>
+                            </>
+                          )}
+                          <td style={styles.tableCell}>{item.name}</td>
+                          <td style={styles.tableCell}>{item.quantity}</td>
+                          <td style={styles.tableCell}>₱{item.amount.toFixed(2)}</td>
+                          {itemIndex === 0 && (
+                            <td style={styles.tableCell} rowSpan={sale.items.length}>
+                              ₱{sale.totalAmount.toFixed(2)}
+                            </td>
+                          )}
+                        </tr>
+                      ))
+                    ))}
+                  </tbody>
+                </table>
               </div>
             )}
           </div>
@@ -711,19 +749,42 @@ const styles = {
     color: '#2c3e50',
     fontWeight: '500',
   },
+  // Table Styles
+  tableContainer: {
+    overflowX: 'auto',
+    borderRadius: '8px',
+    border: '1px solid #e0e0e0',
+  },
+  salesTable: {
+    width: '100%',
+    borderCollapse: 'collapse',
+    backgroundColor: '#ffffff',
+  },
+  tableHeader: {
+    backgroundColor: '#3498db',
+    color: 'white',
+    padding: '12px 16px',
+    textAlign: 'left',
+    fontWeight: '600',
+    fontSize: '14px',
+    borderBottom: '1px solid #2980b9',
+  },
+  tableRowEven: {
+    backgroundColor: '#f8f9fa',
+  },
+  tableRowOdd: {
+    backgroundColor: '#ffffff',
+  },
+  tableCell: {
+    padding: '12px 16px',
+    borderBottom: '1px solid #e0e0e0',
+    fontSize: '14px',
+    color: '#2c3e50',
+  },
   reportList: {
     display: 'flex',
     flexDirection: 'column',
     gap: '12px',
-  },
-  reportItem: {
-    backgroundColor: '#f8f9fa',
-    padding: '16px',
-    borderRadius: '8px',
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    borderLeft: '4px solid #2ecc71',
   },
   resupplyItem: {
     backgroundColor: '#f8f9fa',
@@ -731,12 +792,6 @@ const styles = {
     borderRadius: '8px',
     borderLeft: '4px solid #e74c3c',
     marginBottom: '12px',
-  },
-  reportItemLeft: {
-    flex: 1,
-  },
-  reportItemRight: {
-    textAlign: 'right',
   },
   reportDate: {
     fontSize: '14px',
