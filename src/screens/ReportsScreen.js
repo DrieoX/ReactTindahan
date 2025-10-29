@@ -127,29 +127,33 @@ export default function ReportsScreen({ userMode }) {
     return `${new Date().toLocaleDateString()}`;
   };
 
-  // Download as CSV
+  // Download as CSV - UPDATED: Removed Quantity and Amount columns
   const downloadCSV = () => {
     if (report.length === 0) {
       alert('No data to download');
       return;
     }
 
-    const headers = ['Date', 'Product', 'Quantity', 'Amount', 'Total Sale'];
+    const headers = ['Date', 'Customer', 'Product', 'Total Items', 'Total Sale'];
     
     // Flatten all sales data
-    const csvData = report.flatMap(sale => 
-      sale.items.map(item => [
+    const csvData = report.flatMap(sale => {
+      const totalItemsInSale = sale.items.reduce((sum, item) => sum + item.quantity, 0);
+      return sale.items.map((item, index) => [
         sale.sales_date,
+        'Cash', // Customer name
         item.name,
-        item.quantity,
-        `₱${item.amount.toFixed(2)}`,
-        `₱${sale.totalAmount.toFixed(2)}`
-      ])
-    );
+        index === 0 ? totalItemsInSale : '', // Total items (only show in first row per sale)
+        index === 0 ? `₱${sale.totalAmount.toFixed(2)}` : '' // Total sale (only show in first row per sale)
+      ]);
+    });
 
     // Add summary row
     const totalRevenue = report.reduce((sum, r) => sum + (r.totalAmount || 0), 0);
     const totalTransactions = report.length;
+    const totalItemsSold = report.reduce((sum, sale) => 
+      sum + sale.items.reduce((itemSum, item) => itemSum + item.quantity, 0), 0
+    );
     
     const csvContent = [
       ['SmartTindahan - Sales Report'],
@@ -162,6 +166,7 @@ export default function ReportsScreen({ userMode }) {
       ['SUMMARY', '', '', '', ''],
       ['Total Revenue', '', '', '', `₱${totalRevenue.toFixed(2)}`],
       ['Total Transactions', '', '', '', totalTransactions],
+      ['Total Items Sold', '', '', '', totalItemsSold],
       ['Average Transaction', '', '', '', `₱${(totalRevenue / totalTransactions).toFixed(2)}`]
     ].map(row => row.join(',')).join('\n');
 
@@ -176,7 +181,7 @@ export default function ReportsScreen({ userMode }) {
     document.body.removeChild(link);
   };
 
-  // Download as PDF (using browser's print functionality)
+  // Download as PDF - UPDATED: Removed Quantity and Amount columns
   const downloadPDF = () => {
     if (report.length === 0) {
       alert('No data to download');
@@ -186,6 +191,9 @@ export default function ReportsScreen({ userMode }) {
     const printWindow = window.open('', '_blank');
     const totalRevenue = report.reduce((sum, r) => sum + (r.totalAmount || 0), 0);
     const totalTransactions = report.length;
+    const totalItemsSold = report.reduce((sum, sale) => 
+      sum + sale.items.reduce((itemSum, item) => itemSum + item.quantity, 0), 0
+    );
     const averageTransaction = totalRevenue / totalTransactions;
 
     printWindow.document.write(`
@@ -200,7 +208,7 @@ export default function ReportsScreen({ userMode }) {
           .date-range { font-size: 18px; font-weight: bold; color: #2c3e50; margin-bottom: 5px; }
           .generated-date { font-size: 14px; color: #7f8c8d; }
           .summary { background: #f5f5f5; padding: 15px; margin-bottom: 20px; border-radius: 5px; }
-          .summary-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; margin-bottom: 20px; }
+          .summary-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; margin-bottom: 20px; }
           .summary-item { text-align: center; padding: 10px; }
           .summary-value { font-size: 18px; font-weight: bold; color: #2c3e50; }
           .summary-label { font-size: 14px; color: #7f8c8d; }
@@ -231,11 +239,15 @@ export default function ReportsScreen({ userMode }) {
           <div class="summary-grid">
             <div class="summary-item">
               <div class="summary-value">₱${totalRevenue.toFixed(2)}</div>
-              <div class="summary-label">Total Revenue</div>
+              <div class="summary-label">Grand Total</div>
             </div>
             <div class="summary-item">
               <div class="summary-value">${totalTransactions}</div>
               <div class="summary-label">Total Transactions</div>
+            </div>
+            <div class="summary-item">
+              <div class="summary-value">${totalItemsSold}</div>
+              <div class="summary-label">Total Items Sold</div>
             </div>
             <div class="summary-item">
               <div class="summary-value">₱${averageTransaction.toFixed(2)}</div>
@@ -249,24 +261,25 @@ export default function ReportsScreen({ userMode }) {
           <thead>
             <tr>
               <th>Date</th>
+              <th>Customer</th>
               <th>Product</th>
-              <th>Quantity</th>
-              <th>Amount</th>
+              <th>Total Items</th>
               <th>Total Sale</th>
             </tr>
           </thead>
           <tbody>
-            ${report.map(sale => 
-              sale.items.map((item, index) => `
+            ${report.map(sale => {
+              const totalItemsInSale = sale.items.reduce((sum, item) => sum + item.quantity, 0);
+              return sale.items.map((item, index) => `
                 <tr>
                   ${index === 0 ? `<td rowspan="${sale.items.length}">${sale.sales_date}</td>` : ''}
+                  ${index === 0 ? `<td rowspan="${sale.items.length}">Cash</td>` : ''}
                   <td>${item.name}</td>
-                  <td>${item.quantity}</td>
-                  <td>₱${item.amount.toFixed(2)}</td>
+                  ${index === 0 ? `<td rowspan="${sale.items.length}">${totalItemsInSale}</td>` : ''}
                   ${index === 0 ? `<td rowspan="${sale.items.length}">₱${sale.totalAmount.toFixed(2)}</td>` : ''}
                 </tr>
               `).join('')
-            ).join('')}
+            }).join('')}
           </tbody>
         </table>
 
@@ -474,6 +487,18 @@ export default function ReportsScreen({ userMode }) {
             {timeFilter === 'custom' ? 'Custom Range' : timeFilter.charAt(0).toUpperCase() + timeFilter.slice(1)}
           </p>
         </div>
+
+        <div style={styles.metricCard}>
+          <p style={styles.metricValue}>
+            {report.reduce((sum, sale) => 
+              sum + sale.items.reduce((itemSum, item) => itemSum + item.quantity, 0), 0
+            )}
+          </p>
+          <p style={styles.metricLabel}>Total Items Sold</p>
+          <p style={styles.metricSubLabel}>
+            {timeFilter === 'custom' ? 'Custom Range' : timeFilter.charAt(0).toUpperCase() + timeFilter.slice(1)}
+          </p>
+        </div>
       </div>
 
       <div style={styles.contentContainer}>
@@ -642,6 +667,12 @@ const styles = {
     alignItems: 'center',
     gap: '6px',
   },
+  dateLabel: {
+    fontSize: '14px',
+    fontWeight: '600',
+    color: '#2c3e50',
+    marginRight: '8px',
+  },
   dateInput: {
     padding: '8px 12px',
     borderRadius: '6px',
@@ -690,7 +721,7 @@ const styles = {
     marginBottom: '8px',
   },
   metricLabel: {
-    fontSize: 'clamp(14px, 1.5vw, 16px',
+    fontSize: 'clamp(14px, 1.5vw, 16px)',
     color: '#7f8c8d',
     marginBottom: '4px',
     fontWeight: '600',
