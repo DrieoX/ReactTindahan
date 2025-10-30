@@ -305,24 +305,48 @@ export default function POSScreen({ userMode }) {
             </table>
 
             {/* Payment Section */}
-            <div style={{ marginTop: 16 }}>
-              <div>Total: ₱{calculateTotal().toFixed(2)}</div>
-              <div style={{ marginTop: 8 }}>
-                <input
-                  type="number"
-                  placeholder="Cash given"
-                  value={cashGiven}
-                  onChange={(e) => setCashGiven(e.target.value)}
-                  style={{ width: 150, padding: 4, marginRight: 8 }}
-                />
+            <div style={styles.paymentSection}>
+              {/* Total Amount - Right Aligned */}
+              <div style={styles.totalRow}>
+                <span style={styles.totalLabel}>Total Amount:</span>
+                <span style={styles.totalAmount}>₱{calculateTotal().toFixed(2)}</span>
+              </div>
+
+              {/* Cash Tender - Designed like a minus formula */}
+              <div style={styles.cashTenderSection}>
+                <div style={styles.cashTenderRow}>
+                  <span style={styles.cashTenderLabel}>Cash Tender:</span>
+                  <div style={styles.cashTenderInputContainer}>
+                    <span style={styles.currencySymbol}>₱</span>
+                    <input
+                      type="number"
+                      placeholder="0.00"
+                      value={cashGiven}
+                      onChange={(e) => setCashGiven(e.target.value)}
+                      style={styles.cashTenderInput}
+                    />
+                  </div>
+                </div>
+                
+                {/* Minus Line */}
+                <div style={styles.minusLine}></div>
+                
+                {/* Change Display */}
                 {cashGiven && (
-                  <span>
-                    {parseFloat(cashGiven) >= calculateTotal()
-                      ? `Change: ₱${(parseFloat(cashGiven) - calculateTotal()).toFixed(2)}`
-                      : `Short: ₱${(calculateTotal() - parseFloat(cashGiven)).toFixed(2)}`}
-                  </span>
+                  <div style={styles.changeRow}>
+                    <span style={styles.changeLabel}>
+                      {parseFloat(cashGiven) >= calculateTotal() ? 'Change:' : 'Short:'}
+                    </span>
+                    <span style={{
+                      ...styles.changeAmount,
+                      color: parseFloat(cashGiven) >= calculateTotal() ? '#10b981' : '#ef4444'
+                    }}>
+                      ₱{Math.abs(parseFloat(cashGiven) - calculateTotal()).toFixed(2)}
+                    </span>
+                  </div>
                 )}
               </div>
+
               <button 
                 onClick={() => handleButtonClick('completePayment', handlePayment)}
                 style={{
@@ -387,6 +411,90 @@ const styles = {
     fontWeight: 600,
     color: '#6B7280',
     marginTop: '16px',
+  },
+  // Payment Section Styles
+  paymentSection: {
+    marginTop: '24px',
+    padding: '16px',
+    backgroundColor: '#f8fafc',
+    borderRadius: '8px',
+    border: '1px solid #e2e8f0',
+  },
+  totalRow: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: '16px',
+    padding: '8px 0',
+  },
+  totalLabel: {
+    fontSize: '18px',
+    fontWeight: '600',
+    color: '#374151',
+  },
+  totalAmount: {
+    fontSize: '20px',
+    fontWeight: '700',
+    color: '#1f2937',
+  },
+  cashTenderSection: {
+    marginBottom: '16px',
+  },
+  cashTenderRow: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: '8px',
+  },
+  cashTenderLabel: {
+    fontSize: '16px',
+    fontWeight: '500',
+    color: '#4b5563',
+  },
+  cashTenderInputContainer: {
+    display: 'flex',
+    alignItems: 'center',
+    position: 'relative',
+  },
+  currencySymbol: {
+    position: 'absolute',
+    left: '8px',
+    fontSize: '16px',
+    fontWeight: '500',
+    color: '#6b7280',
+    zIndex: 1,
+  },
+  cashTenderInput: {
+    width: '120px',
+    padding: '8px 8px 8px 24px',
+    borderRadius: '4px',
+    border: '1px solid #d1d5db',
+    fontSize: '16px',
+    fontWeight: '500',
+    textAlign: 'right',
+    backgroundColor: 'white',
+  },
+  minusLine: {
+    height: '1px',
+    backgroundColor: '#9ca3af',
+    margin: '8px 0',
+    width: '100%',
+  },
+  changeRow: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: '8px',
+    padding: '4px 0',
+  },
+  changeLabel: {
+    fontSize: '16px',
+    fontWeight: '500',
+    color: '#4b5563',
+  },
+  changeAmount: {
+    fontSize: '18px',
+    fontWeight: '600',
   },
   // Button Styles
   cancelButton: {

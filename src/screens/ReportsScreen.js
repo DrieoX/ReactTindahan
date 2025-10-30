@@ -164,7 +164,7 @@ export default function ReportsScreen({ userMode }) {
       ...csvData,
       [],
       ['SUMMARY', '', '', '', ''],
-      ['Total Revenue', '', '', '', `₱${totalRevenue.toFixed(2)}`],
+      ['Grand Total', '', '', '', `₱${totalRevenue.toFixed(2)}`],
       ['Total Transactions', '', '', '', totalTransactions],
       ['Total Items Sold', '', '', '', totalItemsSold],
       ['Average Transaction', '', '', '', `₱${(totalRevenue / totalTransactions).toFixed(2)}`]
@@ -395,6 +395,12 @@ export default function ReportsScreen({ userMode }) {
     }
   };
 
+  // Calculate totals for the table footer
+  const totalItemsSold = report.reduce((sum, sale) => 
+    sum + sale.items.reduce((itemSum, item) => itemSum + item.quantity, 0), 0
+  );
+  const grandTotal = report.reduce((sum, r) => sum + (r.totalAmount || 0), 0);
+
   return (
     <div style={styles.container}>
       <div style={styles.headerSection}>
@@ -462,9 +468,9 @@ export default function ReportsScreen({ userMode }) {
       <div style={styles.metricsContainer}>
         <div style={styles.metricCard}>
           <p style={styles.metricValue}>
-            ₱{report.reduce((sum, r) => sum + (r.totalAmount || 0), 0).toFixed(2)}
+            ₱{grandTotal.toFixed(2)}
           </p>
-          <p style={styles.metricLabel}>Total Revenue</p>
+          <p style={styles.metricLabel}>Grand Total</p>
           <p style={styles.metricSubLabel}>
             {timeFilter === 'custom' ? 'Custom Range' : timeFilter.charAt(0).toUpperCase() + timeFilter.slice(1)}
           </p>
@@ -472,7 +478,7 @@ export default function ReportsScreen({ userMode }) {
 
         <div style={styles.metricCard}>
           <p style={styles.metricValue}>
-            ₱{report.length > 0 ? (report.reduce((sum, r) => sum + (r.totalAmount || 0), 0) / report.length).toFixed(2) : '0.00'}
+            ₱{report.length > 0 ? (grandTotal / report.length).toFixed(2) : '0.00'}
           </p>
           <p style={styles.metricLabel}>Avg. Transaction</p>
           <p style={styles.metricSubLabel}>
@@ -490,9 +496,7 @@ export default function ReportsScreen({ userMode }) {
 
         <div style={styles.metricCard}>
           <p style={styles.metricValue}>
-            {report.reduce((sum, sale) => 
-              sum + sale.items.reduce((itemSum, item) => itemSum + item.quantity, 0), 0
-            )}
+            {totalItemsSold}
           </p>
           <p style={styles.metricLabel}>Total Items Sold</p>
           <p style={styles.metricSubLabel}>
@@ -555,6 +559,19 @@ export default function ReportsScreen({ userMode }) {
                         </tr>
                       ))
                     ))}
+                    {/* Table Footer with Totals */}
+                    <tr style={styles.tableFooter}>
+                      <td style={styles.footerCell} colSpan="2">
+                        <strong>Grand Total</strong>
+                      </td>
+                      <td style={styles.footerCell}>
+                        <strong>Total Items: {totalItemsSold}</strong>
+                      </td>
+                      <td style={styles.footerCell}></td>
+                      <td style={styles.footerCell}>
+                        <strong>₱{grandTotal.toFixed(2)}</strong>
+                      </td>
+                    </tr>
                   </tbody>
                 </table>
               </div>
@@ -809,6 +826,16 @@ const styles = {
   tableCell: {
     padding: '12px 16px',
     borderBottom: '1px solid #e0e0e0',
+    fontSize: '14px',
+    color: '#2c3e50',
+  },
+  tableFooter: {
+    backgroundColor: '#e8f5e8',
+    fontWeight: 'bold',
+  },
+  footerCell: {
+    padding: '12px 16px',
+    borderTop: '2px solid #27ae60',
     fontSize: '14px',
     color: '#2c3e50',
   },
