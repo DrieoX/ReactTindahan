@@ -559,13 +559,13 @@ export default function ReportsScreen({ userMode }) {
                         </tr>
                       ))
                     ))}
-                    {/* Table Footer with Totals */}
+                    {/* Table Footer with Totals - UPDATED: Total Items below Quantity (3rd column), Grand Total below Total Sale (5th column) */}
                     <tr style={styles.tableFooter}>
                       <td style={styles.footerCell} colSpan="2">
-                        <strong>Grand Total</strong>
+                        <strong>Totals:</strong>
                       </td>
                       <td style={styles.footerCell}>
-                        <strong>Total Items: {totalItemsSold}</strong>
+                        <strong>{totalItemsSold}</strong>
                       </td>
                       <td style={styles.footerCell}></td>
                       <td style={styles.footerCell}>

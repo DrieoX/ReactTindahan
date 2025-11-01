@@ -118,6 +118,9 @@ export default function POSScreen({ userMode }) {
   };
 
   const calculateTotal = () => cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+  
+  // Calculate total items in cart
+  const calculateTotalItems = () => cart.reduce((sum, item) => sum + item.quantity, 0);
 
   // Helper function to create reliable date format
   const getFormattedDateTime = () => {
@@ -244,7 +247,6 @@ export default function POSScreen({ userMode }) {
                   <th style={styles.th}>Name</th>
                   <th style={styles.th}>SKU</th>
                   <th style={styles.th}>Price</th>
-                  <th style={styles.th}>Stock</th>
                   <th style={styles.th}>Quantity</th>
                   <th style={styles.th}>Total</th>
                   <th style={styles.th}>Action</th>
@@ -256,7 +258,6 @@ export default function POSScreen({ userMode }) {
                     <td style={styles.td}>{item.name}</td>
                     <td style={styles.td}>{item.sku}</td>
                     <td style={styles.td}>₱{item.price.toFixed(2)}</td>
-                    <td style={styles.td}>{item.stock} {item.baseUnit}</td>
                     <td style={styles.td}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                         <button 
@@ -303,6 +304,12 @@ export default function POSScreen({ userMode }) {
                 ))}
               </tbody>
             </table>
+
+            {/* Total Items Display */}
+            <div style={styles.totalItemsContainer}>
+              <span style={styles.totalItemsLabel}>Total Items:</span>
+              <span style={styles.totalItemsValue}>{calculateTotalItems()}</span>
+            </div>
 
             {/* Payment Section */}
             <div style={styles.paymentSection}>
@@ -411,6 +418,27 @@ const styles = {
     fontWeight: 600,
     color: '#6B7280',
     marginTop: '16px',
+  },
+  // Total Items Styles
+  totalItemsContainer: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: '12px 8px',
+    backgroundColor: '#f8fafc',
+    borderRadius: '6px',
+    marginTop: '16px',
+    border: '1px solid #e2e8f0',
+  },
+  totalItemsLabel: {
+    fontSize: '16px',
+    fontWeight: '600',
+    color: '#374151',
+  },
+  totalItemsValue: {
+    fontSize: '18px',
+    fontWeight: '700',
+    color: '#0ea5e9',
   },
   // Payment Section Styles
   paymentSection: {
