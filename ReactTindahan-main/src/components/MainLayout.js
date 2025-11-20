@@ -12,8 +12,9 @@ export default function MainLayout({ children, userMode, handleLogout }) {
   const menuItems = [
     { name: 'Dashboard', label: 'Home' },
     { name: 'Inventory', label: 'Inventory' },
-    { name: 'Resupply', label: 'Resupply' },
     { name: 'Suppliers', label: 'Suppliers' },
+    { name: 'Resupply', label: 'Resupply' },
+    
   ];
 
   if (mode === 'server') {
