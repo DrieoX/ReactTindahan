@@ -54,8 +54,8 @@ export default function LoginScreen({ setUserMode }) {
         onChange={(e) => setMode(e.target.value)}
         style={styles.select}
       >
-        <option value="Server">Server</option>
-        <option value="Client">Client</option>
+        <option value="Server">Cashier</option>
+        <option value="Client">Owner</option>
       </select>
 
       <button style={styles.button} onClick={handleLogin}>

@@ -526,23 +526,6 @@ export default function InventoryScreen({ userMode }) {
 function ProductModal({ visible, onClose, onSubmit, onDelete, item, setItem, title, isEdit, categories, clickedButtons, handleButtonClick }) {
   if (!visible) return null;
 
-  const getUnitOptions = (base_unit) => {
-    switch(base_unit) {
-      case 'pcs':
-        return ['pcs', 'dozen', 'boxes', 'packs'];
-      case 'grams':
-      case 'kilos':
-        return ['grams', 'kilos'];
-      case 'ml':
-      case 'liters':
-        return ['ml', 'liters'];
-      default:
-        return [base_unit];
-    }
-  };
-
-  const unitOptions = getUnitOptions(item?.base_unit || 'pcs');
-
   return (
     <div style={styles.modalOverlay}>
       <div style={styles.modalContainer}>
@@ -661,18 +644,15 @@ function ProductModal({ visible, onClose, onSubmit, onDelete, item, setItem, tit
 }
 
 function SupplierModal({ suppliers, onClose, productName }) {
-  // Calculate current stock from all transactions - FIXED VERSION
   const calculateCurrentStock = () => {
     if (!suppliers || suppliers.length === 0) return 0;
     
     let currentStock = 0;
     suppliers.forEach(record => {
       if (record.transaction_type === 'stock_in' || record.transaction_type === 'RESUPPLY') {
-        // Stock-in: positive quantity
         currentStock += Math.abs(record.quantity || 0);
       } else if (record.transaction_type === 'SALE' || record.transaction_type === 'stock_out') {
-        // Stock-out: negative quantity (already stored as negative)
-        currentStock += (record.quantity || 0); // This will subtract since quantity is negative
+        currentStock += (record.quantity || 0);
       }
     });
     
@@ -681,7 +661,6 @@ function SupplierModal({ suppliers, onClose, productName }) {
 
   const currentStock = calculateCurrentStock();
 
-  // Function to format transaction type for display
   const formatTransactionType = (type) => {
     switch(type) {
       case 'stock_in':
@@ -726,7 +705,6 @@ function SupplierModal({ suppliers, onClose, productName }) {
                 </thead>
                 <tbody>
                   {suppliers.map((s, idx) => {                    
-                    // FIXED: Properly separate stock-in and stock-out quantities
                     const stockIn = (s.transaction_type === 'stock_in' || s.transaction_type === 'RESUPPLY') 
                       ? Math.abs(s.quantity || 0) 
                       : 0;
@@ -781,6 +759,7 @@ function CategoryModal({ visible, onClose, newCategoryName, setNewCategoryName, 
     <div style={styles.modalOverlay}>
       <div style={styles.modalContainer}>
         <h2 style={styles.modalHeader}>{editingCategory ? 'Edit Category' : 'Add New Category'}</h2>
+        
         <div style={styles.modalContent}>
           <div style={styles.inputGroup}>
             <label style={styles.inputLabel}>Category Name</label>
@@ -792,12 +771,12 @@ function CategoryModal({ visible, onClose, newCategoryName, setNewCategoryName, 
             />
           </div>
 
-          <div style={{marginTop: '20px'}}>
-            <h3>Existing Categories</h3>
-            <div style={styles.tableContainer}>
+          <div style={styles.existingCategoriesSection}>
+            <h3 style={styles.categoriesTitle}>Existing Categories</h3>
+            <div style={styles.categoriesTableContainer}>
               <table style={styles.table}>
-                <thead>
-                  <tr style={styles.tableHeader}>
+                <thead style={styles.tableHeaderFixed}>
+                  <tr>
                     <th style={styles.tableCell}>Category Name</th>
                     <th style={styles.tableCell}>Actions</th>
                   </tr>
@@ -825,8 +804,8 @@ function CategoryModal({ visible, onClose, newCategoryName, setNewCategoryName, 
               </table>
             </div>
           </div>
-
         </div>
+
         <div style={styles.modalButtons}>
           {editingCategory && (
             <button 
@@ -992,38 +971,14 @@ const styles = {
   tableRow: {
     borderBottom: '1px solid #e2e8f0',
   },
-  detailsRow: {
-    backgroundColor: '#f8fafc',
-  },
   tableCell: {
     padding: '12px 16px',
     textAlign: 'left',
     fontSize: '14px',
   },
-  detailsCell: {
-    padding: '8px 16px',
-  },
-  productInfo: {
-    display: 'flex',
-    flexDirection: 'column',
-  },
-  productName: {
-    fontWeight: '500',
-    color: '#1e293b',
-  },
-  productId: {
-    fontSize: '12px',
-    color: '#64748b',
-  },
-  productDetails: {
-    display: 'flex',
-    gap: '16px',
-    fontSize: '12px',
-    color: '#64748b',
-  },
   actionButtons: {
     display: 'flex',
-    gap: '12px', // Increased from 8px to 12px for more space
+    gap: '12px',
     justifyContent: 'flex-start',
   },
   editButton: {
@@ -1065,8 +1020,9 @@ const styles = {
     borderRadius: '12px',
     width: '100%',
     maxWidth: '500px',
-    maxHeight: '90vh',
-    overflowY: 'auto',
+    maxHeight: '80vh',
+    display: 'flex',
+    flexDirection: 'column',
     boxShadow: '0 10px 25px rgba(0, 0, 0, 0.15)',
   },
   modalHeader: {
@@ -1074,6 +1030,7 @@ const styles = {
     fontWeight: 'bold',
     marginBottom: '20px',
     color: '#1e293b',
+    flexShrink: 0,
   },
   modalHeaderRow: {
     display: 'flex',
@@ -1093,7 +1050,31 @@ const styles = {
     border: '1px solid #bfdbfe'
   },
   modalContent: {
+    flex: 1,
+    overflowY: 'auto',
     marginBottom: '20px',
+    minHeight: 0,
+  },
+  existingCategoriesSection: {
+    marginTop: '20px',
+  },
+  categoriesTitle: {
+    fontSize: '16px',
+    fontWeight: '600',
+    color: '#1e293b',
+    marginBottom: '12px',
+  },
+  categoriesTableContainer: {
+    maxHeight: '300px',
+    overflowY: 'auto',
+    border: '1px solid #e2e8f0',
+    borderRadius: '8px',
+  },
+  tableHeaderFixed: {
+    position: 'sticky',
+    top: 0,
+    backgroundColor: '#f8fafc',
+    zIndex: 1,
   },
   inputGroup: {
     marginBottom: '16px',
@@ -1116,6 +1097,10 @@ const styles = {
     display: 'flex',
     justifyContent: 'flex-end',
     gap: '12px',
+    flexShrink: 0,
+    paddingTop: '16px',
+    borderTop: '1px solid #e2e8f0',
+    marginTop: 'auto',
   },
   submitButton: {
     border: 'none',
@@ -1134,6 +1119,7 @@ const styles = {
     fontSize: '14px',
     fontWeight: '500',
     transition: 'all 0.2s ease',
+    marginRight: 'auto',
   },
   cancelButton: {
     border: '1px solid #e2e8f0',
@@ -1143,35 +1129,6 @@ const styles = {
     fontSize: '14px',
     fontWeight: '500',
     transition: 'all 0.2s ease',
-  },
-  supplierDetails: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '16px',
-  },
-  supplierDetailCard: {
-    border: '1px solid #e2e8f0',
-    borderRadius: '8px',
-    padding: '16px',
-  },
-  supplierDetailGrid: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(2, 1fr)',
-    gap: '12px',
-  },
-  detailItem: {
-    display: 'flex',
-    flexDirection: 'column',
-  },
-  detailLabel: {
-    fontSize: '12px',
-    color: '#64748b',
-    marginBottom: '4px',
-  },
-  detailValue: {
-    fontSize: '14px',
-    color: '#1e293b',
-    fontWeight: '500',
   },
   noDataText: {
     color: '#94a3b8',
