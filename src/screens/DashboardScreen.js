@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '../db';
 import { useLocation } from 'react-router-dom';
-import { FaBell, FaUserCircle } from 'react-icons/fa';
 
 export default function DashboardScreen({ userMode }) {
   const location = useLocation();
@@ -181,24 +180,7 @@ export default function DashboardScreen({ userMode }) {
             {storeName ? `Overview of ${storeName}'s performance and inventory status` : "Overview of your store's performance and inventory status"}
           </p>
         </div>
-        <div style={styles.userSection}>
-          <div style={styles.notificationIcon}>
-            <FaBell size={20} color="#64748b" />
-            {notifications.length > 0 && (
-              <span style={styles.notificationBadge}>
-                {notifications.length}
-              </span>
-            )}
-          </div>
-          <div style={styles.profileContainer}>
-            <div style={styles.profileIconBox}>
-              <FaUserCircle size={24} color="#4f46e5" />
-            </div>
-            <div style={styles.usernameBox}>
-              <span style={styles.userName}>{displayName}</span>
-            </div>
-          </div>
-        </div>
+        {/* User section removed as requested */}
       </div>
 
       {/* Main Content */}
@@ -503,72 +485,6 @@ const styles = {
     color: '#64748b',
     lineHeight: '1.2',
     margin: 0,
-  },
-  userSection: { 
-    display: 'flex', 
-    alignItems: 'center', 
-    gap: 'clamp(16px, 2vw, 24px)', 
-    flexWrap: 'wrap', 
-    justifyContent: 'flex-end',
-    height: '100%',
-  },
-  notificationIcon: { 
-    position: 'relative', 
-    cursor: 'pointer',
-    padding: '8px',
-    borderRadius: '50%',
-    transition: 'background-color 0.2s ease',
-    display: 'flex',
-    alignItems: 'center',
-    height: '100%',
-  },
-  notificationBadge: {
-    position: 'absolute',
-    top: '4px',
-    right: '4px',
-    backgroundColor: '#ef4444',
-    color: 'white',
-    borderRadius: '50%',
-    width: '18px',
-    height: '18px',
-    fontSize: '10px',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    fontWeight: 'bold',
-  },
-  profileContainer: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '8px',
-    height: 'fit-content',
-  },
-  profileIconBox: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    width: '30px',
-    height: '30px',
-    borderRadius: '50%',
-    backgroundColor: '#f1f5f9',
-    border: '1px solid #e2e8f0',
-    padding: '8px',
-  },
-  usernameBox: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: '8px 16px',
-    borderRadius: '20px',
-    backgroundColor: '#f8fafc',
-    border: '1px solid #e2e8f0',
-    height: '30px',
-  },
-  userName: { 
-    fontWeight: 600, 
-    color: '#111827', 
-    fontSize: '14px',
-    lineHeight: '1.2',
   },
   welcomeTitle: { 
     fontSize: '24px', 
