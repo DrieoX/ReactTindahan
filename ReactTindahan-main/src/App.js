@@ -77,8 +77,10 @@ export default function App() {
         console.error('❌ Error initializing DB:', err);
       }
 
+      // 🔹 Load saved user mode
       const savedMode = localStorage.getItem('userMode');
       if (savedMode) setUserMode(savedMode);
+
       setLoading(false);
     };
 
@@ -107,20 +109,28 @@ export default function App() {
       <Routes>
         {!userMode ? (
           // Not logged in
-          <>
-            <Route path="/*" element={<AuthStack setUserMode={setUserMode} />} />
-          </>
+          <Route path="/*" element={<AuthStack setUserMode={setUserMode} />} />
         ) : userMode === 'server' ? (
           // Server user, protected
           <Route
             path="/*"
-            element={<ProtectedRoute userMode={userMode} element={<ServerStack handleLogout={handleLogout} userMode={userMode} />} />}
+            element={
+              <ProtectedRoute
+                userMode={userMode}
+                element={<ServerStack handleLogout={handleLogout} userMode={userMode} />}
+              />
+            }
           />
         ) : (
           // Client user, protected
           <Route
             path="/*"
-            element={<ProtectedRoute userMode={userMode} element={<ClientStack handleLogout={handleLogout} userMode={userMode} />} />}
+            element={
+              <ProtectedRoute
+                userMode={userMode}
+                element={<ClientStack handleLogout={handleLogout} userMode={userMode} />}
+              />
+            }
           />
         )}
       </Routes>

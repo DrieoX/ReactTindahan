@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react'; 
 import { db } from '../db';
+import * as API from '../services/APIService';
 
 export default function InventoryScreen({ userMode }) {
   const mode = userMode || 'client';
@@ -10,35 +11,25 @@ export default function InventoryScreen({ userMode }) {
   const [showAddModal, setShowAddModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [showSupplierModal, setShowSupplierModal] = useState(false);
-  const [showCategoryModal, setShowCategoryModal] = useState(false); // new
+  const [showCategoryModal, setShowCategoryModal] = useState(false);
   const [newItem, setNewItem] = useState({ 
-    name: '', 
-    sku: '', 
-    unit_price: '', 
-    base_unit: 'pcs',
-    category_id: null,
-    threshold: 5,
+    name: '', sku: '', unit_price: '', base_unit: 'pcs', category_id: null, threshold: 5 
   });
   const [editingItem, setEditingItem] = useState(null);
   const [supplierDetails, setSupplierDetails] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [stats, setStats] = useState({
-    totalProducts: 0,
-    lowStock: 0,
-    expiringSoon: 0,
-    inventoryValue: 0
+    totalProducts: 0, lowStock: 0, expiringSoon: 0, inventoryValue: 0
   });
   const [showLowStockOnly, setShowLowStockOnly] = useState(false);
-
   const [barcode, setBarcode] = useState('');
-  const [newCategoryName, setNewCategoryName] = useState(''); // new
-  const [editingCategory, setEditingCategory] = useState(null); // new
+  const [newCategoryName, setNewCategoryName] = useState('');
+  const [editingCategory, setEditingCategory] = useState(null);
+  const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    prepopulateCategories(); // Add basic categories if empty
-    fetchInventory();
-    fetchSuppliers();
-    fetchCategories();
+    prepopulateCategories();
+    fetchData();
 
     const handleGlobalScan = (e) => {
       if (e.key === 'Enter' && barcode.trim()) {
@@ -51,39 +42,97 @@ export default function InventoryScreen({ userMode }) {
 
     window.addEventListener('keydown', handleGlobalScan);
     return () => window.removeEventListener('keydown', handleGlobalScan);
-  }, [barcode]);
+  }, [barcode, mode]);
 
-  // --- Prepopulate basic grocery categories ---
+  // --- Fetch based on mode ---
+  const fetchData = async () => {
+    setLoading(true);
+    if (mode === 'server') {
+      await fetchFromDB();
+    } else {
+      await fetchFromAPI();
+    }
+    setLoading(false);
+  };
+
+  const fetchFromDB = async () => {
+    await fetchInventoryDB();
+    await fetchSuppliersDB();
+    await fetchCategoriesDB();
+  };
+
+  const fetchFromAPI = async () => {
+    try {
+      // Use the imported API functions
+      const [apiInventory, apiSuppliers, apiCategories] = await Promise.all([
+        API.fetchInventory(),
+        API.fetchSuppliers(),  
+        API.fetchCategories()
+      ]);
+
+      console.log('API Inventory response:', apiInventory);
+      console.log('API Suppliers response:', apiSuppliers);
+      console.log('API Categories response:', apiCategories);
+
+      // Format the data to match expected structure
+      const items = apiInventory.map(p => ({
+        ...p,
+        id: p.product_id || p.id,
+        product_id: p.product_id || p.id, // Ensure product_id exists
+        quantity: p.quantity || 0,
+        threshold: p.threshold || 5,
+        suppliers: p.suppliers || [],
+      }));
+
+      updateStats(items);
+      setInventory(items);
+      setSuppliers(apiSuppliers);
+      setCategories(apiCategories);
+    } catch (err) {
+      console.error('Error fetching inventory from API:', err);
+      // Fallback to empty arrays
+      setInventory([]);
+      setSuppliers([]);
+      setCategories([]);
+    }
+  };
+
+  const updateStats = (items) => {
+    const totalProducts = items.length;
+    const lowStock = items.filter(item => item.quantity <= (item.threshold || 5)).length;
+    const today = new Date();
+    const nextWeek = new Date(today.getTime() + 7 * 24 * 60 * 60 * 1000);
+    const expiringSoon = items.filter(item => {
+      if (!item.expiration_date) return false;
+      const expDate = new Date(item.expiration_date);
+      return expDate <= nextWeek && expDate >= today;
+    }).length;
+    const inventoryValue = items.reduce((sum, item) => sum + ((item.unit_price || 0) * (item.quantity || 0)), 0);
+    setStats({ totalProducts, lowStock, expiringSoon, inventoryValue });
+  };
+
+  // --- Prepopulate categories ---
   const prepopulateCategories = async () => {
+    if (mode !== 'server') return; // skip for API mode
     try {
       const count = await db.categories.count();
       if (count === 0) {
         const defaultCategories = [
-          'Beverages',
-          'Bakery',
-          'Dairy & Eggs',
-          'Meat & Poultry',
-          'Seafood',
-          'Fruits',
-          'Vegetables',
-          'Pantry & Dry Goods',
-          'Snacks & Confectionery',
-          'Frozen Foods',
-          'Canned & Packaged Foods',
-          'Condiments & Spices',
-          'Baking Supplies',
-          'Household & Cleaning',
-          'Personal Care'
+          'Beverages','Bakery','Dairy & Eggs','Meat & Poultry','Seafood','Fruits','Vegetables',
+          'Pantry & Dry Goods','Snacks & Confectionery','Frozen Foods','Canned & Packaged Foods',
+          'Condiments & Spices','Baking Supplies','Household & Cleaning','Personal Care'
         ];
         await Promise.all(defaultCategories.map(name => db.categories.add({ name })));
-        fetchCategories();
+        fetchCategoriesDB();
       }
     } catch (err) {
       console.error('Error prepopulating categories:', err);
     }
   };
 
-  const fetchCategories = async () => {
+  // --- Local DB fetch ---
+  const fetchCategoriesDB = async () => {
+    if (mode !== 'server') return;
     try {
       const list = await db.categories.toArray();
       setCategories(list);
@@ -92,7 +141,8 @@ export default function InventoryScreen({ userMode }) {
     }
   };
 
-  const fetchInventory = async () => {
+  const fetchInventoryDB = async () => {
+    if (mode !== 'server') return;
     try {
       const products = await db.products.toArray();
       const inventoryRecords = await db.inventory.toArray();
@@ -100,43 +150,33 @@ export default function InventoryScreen({ userMode }) {
 
       const items = products.map((p) => {
         const invRecord = inventoryRecords.find(inv => inv.product_id === p.product_id);
-        const invQuantity = invRecord ? invRecord.quantity : 0;
-
         return {
           ...p,
-          quantity: invQuantity,
+          id: p.product_id,
+          product_id: p.product_id,
+          quantity: invRecord?.quantity || 0,
           threshold: invRecord?.threshold || p.threshold || 5,
           suppliers: invRecord
-            ? [ {
+            ? [{
                 supplier_id: invRecord.supplier_id,
-                name: (supplierList.find(s => s.supplier_id === invRecord.supplier_id)?.name) || 'N/A',
+                name: supplierList.find(s => s.supplier_id === invRecord.supplier_id)?.name || 'N/A',
                 quantity: invRecord.quantity,
                 expiration_date: invRecord.expiration_date || 'N/A',
                 unit_cost: 0, 
-              } ]
+              }]
             : [],
         };
       });
 
-      const totalProducts = items.length;
-      const lowStock = items.filter(item => item.quantity <= (item.threshold || 5)).length;
-      const today = new Date();
-      const nextWeek = new Date(today.getTime() + 7 * 24 * 60 * 60 * 1000);
-      const expiringSoon = items.filter(item => {
-        if (!item.expiration_date) return false;
-        const expDate = new Date(item.expiration_date);
-        return expDate <= nextWeek && expDate >= today;
-      }).length;
-      const inventoryValue = items.reduce((sum, item) => sum + (item.unit_price * item.quantity), 0);
-
-      setStats({ totalProducts, lowStock, expiringSoon, inventoryValue });
+      updateStats(items);
       setInventory(items);
     } catch (err) {
       console.error('Error fetching inventory:', err);
     }
   };
 
-  const fetchSuppliers = async () => {
+  const fetchSuppliersDB = async () => {
+    if (mode !== 'server') return;
     try {
       const list = await db.suppliers.toArray();
       setSuppliers(list);
@@ -145,130 +185,24 @@ export default function InventoryScreen({ userMode }) {
     }
   };
 
-  // --- Product handlers ---
-  const handleAddItem = async () => {
-    if (!newItem.name || !newItem.unit_price || !newItem.base_unit)
-      return alert('Please fill out all required fields.');
-
-    try {
-      const existing = await db.products.where('sku').equals(newItem.sku).first();
-      if (existing) return alert('A product with this SKU already exists.');
-
-      const productId = await db.products.add({
-        sku: newItem.sku || null,
-        name: newItem.name,
-        unit_price: parseFloat(newItem.unit_price),
-        base_unit: newItem.base_unit,
-        category_id: newItem.category_id || null,
-      });
-
-      await db.inventory.add({
-        product_id: productId,
-        supplier_id: null,
-        quantity: 0,
-        threshold: parseInt(newItem.threshold) || 5,
-      });
-
-      setShowAddModal(false);
-      setNewItem({ 
-        name: '', 
-        sku: '', 
-        unit_price: '', 
-        base_unit: 'pcs',
-        category_id: null,
-        threshold: 5,
-      });
-      fetchInventory();
-    } catch (err) {
-      console.error('Error adding product:', err);
-    }
-  };
-
-  const handleEditItem = (item) => {
-    setEditingItem(item);
-    setShowEditModal(true);
-  };
-
-  const handleSaveEdit = async () => {
-    try {
-      await db.products.update(editingItem.product_id, {
-        sku: editingItem.sku,
-        name: editingItem.name,
-        unit_price: parseFloat(editingItem.unit_price),
-        base_unit: editingItem.base_unit,
-        category_id: editingItem.category_id || null,
-      });
-
-      await db.inventory.where({ product_id: editingItem.product_id }).modify(inv => {
-        inv.threshold = parseInt(editingItem.threshold) || 5;
-      });
-
-      setShowEditModal(false);
-      setEditingItem(null);
-      fetchInventory();
-    } catch (err) {
-      console.error('Error saving product edit:', err);
-    }
-  };
-
-  const handleDeleteItem = async () => {
-    if (!editingItem) return;
-    if (!window.confirm(`Are you sure you want to delete "${editingItem.name}"?`)) return;
-
-    try {
-      await db.products.delete(editingItem.product_id);
-      await db.inventory.where('product_id').equals(editingItem.product_id).delete();
-      await db.resupplied_items.where('product_id').equals(editingItem.product_id).delete();
-
-      setShowEditModal(false);
-      setEditingItem(null);
-      fetchInventory();
-    } catch (err) {
-      console.error('Error deleting product:', err);
-    }
-  };
-
-  const handleSupplierDetails = async (item) => {
-    try {
-      const stockRecords = await db.stock_card
-        .where('product_id')
-        .equals(item.product_id)
-        .toArray();
-
-      const supplierInfo = await Promise.all(stockRecords.map(async (record) => {
-        const supplier = record.supplier_id 
-          ? await db.suppliers.get(record.supplier_id) 
-          : null;
-        return {
-          name: supplier?.name || 'N/A',
-          resupply_date: record.resupply_date || 'N/A',
-          quantity: record.quantity || 0,
-          unit: item.base_unit || 'pcs',
-          unit_cost: record.unit_cost || 0,
-          unit_price: record.unit_price || item.unit_price || 0,
-          expiration_date: record.expiration_date || 'N/A',
-          transaction_type: record.transaction_type || 'N/A',
-          running_balance: record.running_balance ?? null,
-        };
-      }));
-
-      setSupplierDetails(supplierInfo);
-      setShowSupplierModal(true);
-    } catch (err) {
-      console.error('Error fetching supplier details:', err);
-    }
-  };
-
   // --- Category handlers ---
   const handleAddCategory = async () => {
     if (!newCategoryName.trim()) return alert("Enter a category name.");
     try {
-      await db.categories.add({ name: newCategoryName.trim() });
+      if (mode === 'server') {
+        // Local DB mode
+        await db.categories.add({ name: newCategoryName.trim() });
+      } else {
+        // API mode
+        await API.addCategory(newCategoryName.trim());
+      }
+      
       setNewCategoryName('');
       setShowCategoryModal(false);
-      fetchCategories();
+      fetchData(); // This will refresh categories from either DB or API
     } catch (err) {
       console.error("Error adding category:", err);
+      alert('Failed to add category: ' + err.message);
     }
   };
 
@@ -281,23 +215,229 @@ export default function InventoryScreen({ userMode }) {
   const handleSaveCategory = async () => {
     if (!newCategoryName.trim()) return alert("Enter a category name.");
     try {
-      await db.categories.update(editingCategory.category_id, { name: newCategoryName.trim() });
+      if (mode === 'server') {
+        // Local DB mode
+        await db.categories.update(editingCategory.category_id, { name: newCategoryName.trim() });
+      } else {
+        // API mode
+        await API.updateCategory(editingCategory.category_id || editingCategory.id, newCategoryName.trim());
+      }
+      
       setEditingCategory(null);
       setNewCategoryName('');
       setShowCategoryModal(false);
-      fetchCategories();
+      fetchData(); // This will refresh categories from either DB or API
     } catch (err) {
       console.error("Error editing category:", err);
+      alert('Failed to edit category: ' + err.message);
     }
   };
 
   const handleDeleteCategory = async (category) => {
     if (!window.confirm(`Are you sure you want to delete category "${category.name}"?`)) return;
     try {
-      await db.categories.delete(category.category_id);
-      fetchCategories();
+      if (mode === 'server') {
+        // Local DB mode
+        await db.categories.delete(category.category_id);
+      } else {
+        // API mode
+        await API.deleteCategory(category.category_id || category.id);
+      }
+      
+      fetchData(); // This will refresh categories from either DB or API
     } catch (err) {
       console.error("Error deleting category:", err);
+      alert('Failed to delete category: ' + err.message);
+    }
+  };
+
+  // --- Add/Edit/Delete functions ---
+  const handleAddItem = async () => {
+    if (!newItem.name || !newItem.unit_price) {
+      alert('Name and unit price are required');
+      return;
+    }
+
+    try {
+      if (mode === 'server') {
+        // Local DB mode
+        const productId = await db.products.add({
+          sku: newItem.sku,
+          name: newItem.name,
+          unit_price: parseFloat(newItem.unit_price),
+          base_unit: newItem.base_unit,
+          category_id: newItem.category_id,
+          supplier_id: 1 // Default supplier
+        });
+
+        await db.inventory.add({
+          product_id: productId,
+          supplier_id: 1,
+          quantity: 0,
+          threshold: newItem.threshold || 5,
+          expiration_date: null
+        });
+      } else {
+        // API mode
+        // First create the product
+        const productData = {
+          sku: newItem.sku,
+          name: newItem.name,
+          unit_price: parseFloat(newItem.unit_price),
+          base_unit: newItem.base_unit,
+          category_id: newItem.category_id,
+          supplier_id: 1 // Default supplier
+        };
+
+        // Use API.addProduct function
+        const productResponse = await API.addProduct(productData);
+        const product = productResponse;
+        
+        // Then create inventory record
+        const inventoryData = {
+          product_id: product.product_id || product.id,
+          supplier_id: 1,
+          quantity: 0,
+          threshold: newItem.threshold || 5,
+          expiration_date: null
+        };
+
+        await API.addInventoryItem(inventoryData);
+      }
+
+      // Reset form and refresh
+      setNewItem({ name: '', sku: '', unit_price: '', base_unit: 'pcs', category_id: null, threshold: 5 });
+      setShowAddModal(false);
+      fetchData();
+    } catch (err) {
+      console.error('Error adding item:', err);
+      alert('Failed to add item: ' + err.message);
+    }
+  };
+
+  // This function opens the edit modal
+  const handleEditItemClick = (item) => {
+    setEditingItem(item);
+    setShowEditModal(true);
+  };
+
+  // This function saves the edited item
+  const handleSaveEdit = async () => {
+    if (!editingItem || !editingItem.name || !editingItem.unit_price) {
+      alert('Name and unit price are required');
+      return;
+    }
+
+    try {
+      const productId = editingItem.product_id || editingItem.id;
+      
+      if (mode === 'server') {
+        // Update product in IndexedDB
+        await db.products.update(productId, {
+          sku: editingItem.sku,
+          name: editingItem.name,
+          unit_price: parseFloat(editingItem.unit_price),
+          base_unit: editingItem.base_unit,
+          category_id: editingItem.category_id
+        });
+
+        // Update inventory in IndexedDB
+        const invRecord = await db.inventory.where('product_id').equals(productId).first();
+        if (invRecord) {
+          await db.inventory.update(invRecord.inventory_id, {
+            threshold: editingItem.threshold || 5
+          });
+        }
+      } else {
+        // API mode
+        // Update product via API
+        const productData = {
+          sku: editingItem.sku,
+          name: editingItem.name,
+          unit_price: parseFloat(editingItem.unit_price),
+          base_unit: editingItem.base_unit,
+          category_id: editingItem.category_id
+        };
+
+        await API.updateProduct(productId, productData);
+
+        // Update inventory via API
+        const inventoryData = {
+          quantity: editingItem.quantity || 0,
+          threshold: editingItem.threshold || 5,
+          expiration_date: editingItem.expiration_date || null,
+          supplier_id: 1
+        };
+
+        await API.updateInventoryItem(productId, inventoryData);
+      }
+
+      // Reset and refresh
+      setEditingItem(null);
+      setShowEditModal(false);
+      fetchData();
+    } catch (err) {
+      console.error('Error updating item:', err);
+      alert('Failed to update item: ' + err.message);
+    }
+  };
+
+  // Delete function for individual items
+  const handleDeleteItem = async (id, name) => {
+    if (!window.confirm(`Are you sure you want to delete "${name}"?`)) return;
+
+    try {
+      if (mode === 'server') {
+        // Delete from IndexedDB
+        await db.inventory.where('product_id').equals(id).delete();
+        await db.products.delete(id);
+      } else {
+        // Delete from API - use the correct ID (product_id)
+        await API.deleteInventoryItem(id);
+      }
+
+      fetchData();
+    } catch (err) {
+      console.error('Error deleting item:', err);
+      alert('Failed to delete item: ' + err.message);
+    }
+  };
+
+  const handleSupplierDetails = async (item) => {
+    try {
+      if (mode === 'server') {
+        // Get supplier details from IndexedDB
+        const stockRecords = await db.stock_card
+          .where('product_id')
+          .equals(item.product_id)
+          .toArray();
+
+        const supplierInfo = await Promise.all(stockRecords.map(async (record) => {
+          const supplier = record.supplier_id 
+            ? await db.suppliers.get(record.supplier_id) 
+            : null;
+          return {
+            name: supplier?.name || 'N/A',
+            resupply_date: record.resupply_date || 'N/A',
+            quantity: record.quantity || 0,
+            unit: item.base_unit || 'pcs',
+            unit_cost: record.unit_cost || 0,
+            unit_price: record.unit_price || item.unit_price || 0,
+            expiration_date: record.expiration_date || 'N/A',
+            transaction_type: record.transaction_type || 'N/A',
+            running_balance: record.running_balance ?? null,
+          };
+        }));
+
+        setSupplierDetails(supplierInfo);
+        setShowSupplierModal(true);
+      } else {
+        // For API mode, show a message that this feature is not available
+        alert('Supplier details feature is currently only available in Server mode.');
+      }
+    } catch (err) {
+      console.error('Error fetching supplier details:', err);
+      alert('Error fetching supplier details: ' + err.message);
     }
   };
 
@@ -306,7 +446,7 @@ export default function InventoryScreen({ userMode }) {
     const q = searchQuery.toLowerCase();
     if (item.name.toLowerCase().includes(q)) return true;
     if (item.sku && item.sku.toLowerCase().includes(q)) return true;
-    if (item.suppliers.some((s) => s.name.toLowerCase().includes(q))) return true;
+    if (item.suppliers && item.suppliers.some((s) => s.name && s.name.toLowerCase().includes(q))) return true;
     return false;
   });
 
@@ -317,6 +457,9 @@ export default function InventoryScreen({ userMode }) {
         <div>
           <h1 style={styles.pageTitle}>Inventory Management</h1>
           <p style={styles.pageSubtitle}>Manage your products, track stock levels, and monitor expiry dates</p>
+          <div style={styles.modeIndicator}>
+            Mode: <span style={styles.modeText}>{mode === 'server' ? 'Local Database' : 'API Server'}</span>
+          </div>
         </div>
         <div style={styles.headerActions}>
           <input
@@ -368,39 +511,62 @@ export default function InventoryScreen({ userMode }) {
           </div>
         </div>
 
-        <div style={styles.tableContainer}>
-          <table style={styles.table}>
-            <thead>
-              <tr style={styles.tableHeader}>
-                <th style={styles.tableCell}>PRODUCT</th>
-                <th style={styles.tableCell}>CATEGORY</th>
-                <th style={styles.tableCell}>SKU</th>
-                <th style={styles.tableCell}>UNIT</th>
-                <th style={styles.tableCell}>PRICE</th>
-                <th style={styles.tableCell}>STOCK</th>
-                <th style={styles.tableCell}>THRESHOLD</th>
-                <th style={styles.tableCell}>ACTIONS</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredInventory.map((item) => (
-                <tr key={item.product_id} style={styles.tableRow}>
-                  <td style={styles.tableCell}>{item.name}</td>
-                  <td style={styles.tableCell}>{categories.find(c => c.category_id === item.category_id)?.name || 'N/A'}</td>
-                  <td style={styles.tableCell}>{item.sku || 'N/A'}</td>
-                  <td style={styles.tableCell}>{item.base_unit || 'pcs'}</td>
-                  <td style={styles.tableCell}>₱{item.unit_price || '0.00'}</td>
-                  <td style={styles.tableCell}>{item.quantity || 0}</td>
-                  <td style={styles.tableCell}>{item.threshold || 5}</td>
-                  <td style={styles.tableCell}>
-                    <button style={styles.editButton} onClick={() => handleEditItem(item)}>Edit</button>
-                    <button style={styles.viewButton} onClick={() => handleSupplierDetails(item)}>View</button>
-                  </td>
+        {loading ? (
+          <div style={styles.loadingContainer}>
+            <div style={styles.loadingSpinner}></div>
+            <p>Loading inventory data...</p>
+          </div>
+        ) : (
+          <div style={styles.tableContainer}>
+            <table style={styles.table}>
+              <thead>
+                <tr style={styles.tableHeader}>
+                  <th style={styles.tableCell}>PRODUCT</th>
+                  <th style={styles.tableCell}>CATEGORY</th>
+                  <th style={styles.tableCell}>SKU</th>
+                  <th style={styles.tableCell}>UNIT</th>
+                  <th style={styles.tableCell}>PRICE</th>
+                  <th style={styles.tableCell}>STOCK</th>
+                  <th style={styles.tableCell}>THRESHOLD</th>
+                  <th style={styles.tableCell}>ACTIONS</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                {filteredInventory.length === 0 ? (
+                  <tr>
+                    <td colSpan="8" style={{textAlign: 'center', padding: '40px', color: '#64748b'}}>
+                      No products found. Add your first product to get started.
+                    </td>
+                  </tr>
+                ) : (
+                  filteredInventory.map((item) => (
+                    <tr key={item.product_id || item.id} style={styles.tableRow}>
+                      <td style={styles.tableCell}>{item.name}</td>
+                      <td style={styles.tableCell}>{categories.find(c => c.category_id === item.category_id)?.name || 'N/A'}</td>
+                      <td style={styles.tableCell}>{item.sku || 'N/A'}</td>
+                      <td style={styles.tableCell}>{item.base_unit || 'pcs'}</td>
+                      <td style={styles.tableCell}>₱{item.unit_price || '0.00'}</td>
+                      <td style={styles.tableCell}>{item.quantity || 0}</td>
+                      <td style={styles.tableCell}>{item.threshold || 5}</td>
+                      <td style={styles.tableCell}>
+                        <div style={styles.actionButtons}>
+                          <button style={styles.editButton} onClick={() => handleEditItemClick(item)}>Edit</button>
+                          <button style={styles.viewButton} onClick={() => handleSupplierDetails(item)}>View</button>
+                          <button 
+                            style={styles.deleteButtonSmall} 
+                            onClick={() => handleDeleteItem(item.product_id || item.id, item.name)}
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
       {/* Modals */}
@@ -410,9 +576,10 @@ export default function InventoryScreen({ userMode }) {
           onClose={() => {
             setShowAddModal(false);
             setShowEditModal(false);
+            setEditingItem(null);
           }}
           onSubmit={showAddModal ? handleAddItem : handleSaveEdit}
-          onDelete={showEditModal ? handleDeleteItem : null}
+          onDelete={showEditModal ? () => handleDeleteItem(editingItem.product_id || editingItem.id, editingItem.name) : null}
           item={showAddModal ? newItem : editingItem}
           setItem={showAddModal ? setNewItem : setEditingItem}
           categories={categories}
@@ -433,9 +600,9 @@ export default function InventoryScreen({ userMode }) {
           setNewCategoryName={setNewCategoryName}
           onSubmit={editingCategory ? handleSaveCategory : handleAddCategory}
           editingCategory={editingCategory}
-          onDelete={editingCategory ? handleDeleteCategory : null}
-          categories={categories} // pass categories for modal table
-          handleEditCategory={handleEditCategory} // edit from modal
+          onDelete={editingCategory ? () => handleDeleteCategory(editingCategory) : null}
+          categories={categories}
+          handleEditCategory={handleEditCategory}
         />
       )}
     </div>
@@ -445,30 +612,13 @@ export default function InventoryScreen({ userMode }) {
 function ProductModal({ visible, onClose, onSubmit, onDelete, item, setItem, title, isEdit, categories }) {
   if (!visible) return null;
 
-  const getUnitOptions = (base_unit) => {
-    switch(base_unit) {
-      case 'pcs':
-        return ['pcs', 'dozen', 'boxes', 'packs'];
-      case 'grams':
-      case 'kilos':
-        return ['grams', 'kilos'];
-      case 'ml':
-      case 'liters':
-        return ['ml', 'liters'];
-      default:
-        return [base_unit];
-    }
-  };
-
-  const unitOptions = getUnitOptions(item?.base_unit || 'pcs');
-
   return (
     <div style={styles.modalOverlay}>
       <div style={styles.modalContainer}>
         <h2 style={styles.modalHeader}>{title}</h2>
         <div style={styles.modalContent}>
           <div style={styles.inputGroup}>
-            <label style={styles.inputLabel}>SKU *</label>
+            <label style={styles.inputLabel}>SKU</label>
             <input
               placeholder="Enter product SKU"
               value={item?.sku || ''}
@@ -483,6 +633,7 @@ function ProductModal({ visible, onClose, onSubmit, onDelete, item, setItem, tit
               value={item?.name || ''}
               onChange={(e) => setItem({ ...item, name: e.target.value })}
               style={styles.input}
+              required
             />
           </div>
           <div style={styles.inputGroup}>
@@ -490,11 +641,11 @@ function ProductModal({ visible, onClose, onSubmit, onDelete, item, setItem, tit
             <select 
               style={styles.input}
               value={item?.category_id || ''}
-              onChange={(e) => setItem({ ...item, category_id: parseInt(e.target.value) })}
+              onChange={(e) => setItem({ ...item, category_id: e.target.value ? parseInt(e.target.value) : null })}
             >
               <option value="">Select Category</option>
               {categories.map(c => (
-                <option key={c.category_id} value={c.category_id}>{c.name}</option>
+                <option key={c.category_id || c.id} value={c.category_id || c.id}>{c.name}</option>
               ))}
             </select>
           </div>
@@ -521,17 +672,19 @@ function ProductModal({ visible, onClose, onSubmit, onDelete, item, setItem, tit
               placeholder="0.00"
               value={item?.unit_price?.toString() || ''}
               type="number"
+              step="0.01"
               onChange={(e) => setItem({ ...item, unit_price: e.target.value })}
               style={styles.input}
+              required
             />
           </div>
           <div style={styles.inputGroup}>
-            <label style={styles.inputLabel}>Threshold *</label>
+            <label style={styles.inputLabel}>Stock Threshold *</label>
             <input
               placeholder="5"
-              value={item?.threshold?.toString() || ''}
+              value={item?.threshold?.toString() || '5'}
               type="number"
-              onChange={(e) => setItem({ ...item, threshold: e.target.value })}
+              onChange={(e) => setItem({ ...item, threshold: e.target.value || 5 })}
               style={styles.input}
             />
           </div>
@@ -555,17 +708,12 @@ function ProductModal({ visible, onClose, onSubmit, onDelete, item, setItem, tit
   );
 }
 
-function SupplierModal({ suppliers, inventory, onClose }) {
-  const currentStock = inventory?.quantity ?? 0;
-
+function SupplierModal({ suppliers, onClose }) {
   return (
     <div style={styles.modalOverlay}>
       <div style={styles.modalContainer}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
           <h2 style={styles.modalHeader}>Stock Card</h2>
-          <div style={{ fontWeight: 'bold', color: '#1e293b', fontSize: '16px' }}>
-            Current Stock: {currentStock}
-          </div>
         </div>
 
         <div style={styles.modalContent}>
@@ -579,7 +727,6 @@ function SupplierModal({ suppliers, inventory, onClose }) {
                     <th style={styles.tableCell}>Supplier</th>
                     <th style={styles.tableCell}>Transaction Date</th>
                     <th style={styles.tableCell}>Stock-in</th>
-                    <th style={styles.tableCell}>Stock-out</th>
                     <th style={styles.tableCell}>Units</th>
                     <th style={styles.tableCell}>Expiry Date</th>
                     <th style={styles.tableCell}>Unit Cost</th>
@@ -592,7 +739,6 @@ function SupplierModal({ suppliers, inventory, onClose }) {
                       <td style={styles.tableCell}>{s.name}</td>
                       <td style={styles.tableCell}>{s.resupply_date || 'N/A'}</td>
                       <td style={styles.tableCell}>{s.quantity}</td>
-                      <td style={styles.tableCell}>{s.stockout || 0}</td>
                       <td style={styles.tableCell}>{s.unit}</td>
                       <td style={styles.tableCell}>{s.expiration_date || 'N/A'}</td>
                       <td style={styles.tableCell}>₱{(s.unit_cost || 0).toFixed(2)}</td>
@@ -644,7 +790,7 @@ function CategoryModal({ visible, onClose, newCategoryName, setNewCategoryName, 
                 </thead>
                 <tbody>
                   {categories.map((c) => (
-                    <tr key={c.category_id} style={styles.tableRow}>
+                    <tr key={c.category_id || c.id} style={styles.tableRow}>
                       <td style={styles.tableCell}>{c.name}</td>
                       <td style={styles.tableCell}>
                         <button style={styles.editButton} onClick={() => handleEditCategory(c)}>Edit</button>
@@ -659,7 +805,7 @@ function CategoryModal({ visible, onClose, newCategoryName, setNewCategoryName, 
         </div>
         <div style={styles.modalButtons}>
           {editingCategory && (
-            <button style={styles.deleteButton} onClick={() => onDelete(editingCategory)}>Delete</button>
+            <button style={styles.deleteButton} onClick={onDelete}>Delete</button>
           )}
           <button style={styles.cancelButton} onClick={onClose}>Cancel</button>
           <button style={styles.submitButton} onClick={onSubmit}>{editingCategory ? 'Save Changes' : 'Add Category'}</button>
@@ -668,182 +814,215 @@ function CategoryModal({ visible, onClose, newCategoryName, setNewCategoryName, 
     </div>
   );
 }
-
 const styles = {
   container: { 
-    padding: '20px', 
+    padding: '28px',
     backgroundColor: '#f8fafc', 
     minHeight: '100vh',
-    maxWidth: '1400px',
-    margin: '0 auto'
+    maxWidth: '1440px',
+    margin: '0 auto',
+    fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
   },
   header: {
     display: 'flex',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
-    marginBottom: '24px',
+    marginBottom: '32px',
     flexWrap: 'wrap',
-    gap: '16px'
+    gap: '20px',
+    backgroundColor: '#ffffff',
+    padding: '24px',
+    borderRadius: '16px',
+    boxShadow: '0 4px 6px rgba(0, 0, 0, 0.03)',
+    border: '1px solid #e2e8f0'
   },
   pageTitle: {
-    fontSize: '28px',
-    fontWeight: 'bold',
+    fontSize: '32px',
+    fontWeight: '800',
     color: '#1e293b',
     marginBottom: '8px',
+    letterSpacing: '-0.5px',
+    background: 'linear-gradient(135deg, #1e293b 0%, #334155 100%)',
+    WebkitBackgroundClip: 'text',
+    WebkitTextFillColor: 'transparent'
   },
   pageSubtitle: {
-    fontSize: '16px',
+    fontSize: '15px',
     color: '#64748b',
+    lineHeight: '1.5',
+    maxWidth: '600px'
   },
   headerActions: {
     display: 'flex',
-    gap: '12px',
+    gap: '16px',
+    alignItems: 'center',
   },
   searchInput: {
-    border: '1px solid #d1d5db',
-    borderRadius: '8px',
-    padding: '10px 16px',
-    backgroundColor: '#fff',
-    width: '300px',
-    fontSize: '14px',
+    border: '2px solid #e2e8f0',
+    borderRadius: '10px',
+    padding: '12px 20px',
+    backgroundColor: '#ffffff',
+    width: '320px',
+    fontSize: '15px',
+    transition: 'all 0.2s ease',
+    outline: 'none',
+    boxShadow: '0 2px 4px rgba(0, 0, 0, 0.02)'
   },
   statsContainer: {
     display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
-    gap: '16px',
-    marginBottom: '24px',
+    gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
+    gap: '20px',
+    marginBottom: '32px'
   },
   statCard: {
-    backgroundColor: '#fff',
-    border: '1px solid #e2e8f0',
-    borderRadius: '12px',
-    padding: '20px',
-    boxShadow: '0 1px 3px rgba(0, 0, 0, 0.05)',
+    backgroundColor: '#ffffff',
+    border: '2px solid #e2e8f0',
+    borderRadius: '14px',
+    padding: '24px',
+    boxShadow: '0 4px 8px rgba(0, 0, 0, 0.04)',
+    transition: 'all 0.3s ease',
+    cursor: 'pointer',
+    position: 'relative',
+    overflow: 'hidden'
   },
   statTitle: {
     fontSize: '14px',
     color: '#64748b',
-    marginBottom: '8px',
-    fontWeight: '500',
+    marginBottom: '12px',
+    fontWeight: '600',
+    textTransform: 'uppercase',
+    letterSpacing: '0.5px'
   },
   statValue: {
-    fontSize: '24px',
-    fontWeight: 'bold',
+    fontSize: '36px',
+    fontWeight: '800',
     color: '#1e293b',
     marginBottom: '4px',
-  },
-  statChange: {
-    fontSize: '12px',
-    color: '#64748b',
+    lineHeight: '1.1'
   },
   productsSection: {
-    backgroundColor: '#fff',
-    border: '1px solid #e2e8f0',
-    borderRadius: '12px',
-    padding: '20px',
-    boxShadow: '0 1px 3px rgba(0, 0, 0, 0.05)',
+    backgroundColor: '#ffffff',
+    border: '2px solid #e2e8f0',
+    borderRadius: '16px',
+    padding: '28px',
+    boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)',
+    overflow: 'hidden'
   },
   sectionHeader: {
     display: 'flex',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: '20px',
+    marginBottom: '28px',
     flexWrap: 'wrap',
-    gap: '12px'
+    gap: '16px'
   },
   sectionTitle: {
-    fontSize: '18px',
-    fontWeight: '600',
+    fontSize: '22px',
+    fontWeight: '700',
     color: '#1e293b',
+    position: 'relative',
+    paddingLeft: '16px'
   },
   sectionActions: {
     display: 'flex',
-    gap: '8px',
+    gap: '12px',
+    alignItems: 'center'
   },
   primaryButton: {
     backgroundColor: '#4f46e5',
-    color: '#fff',
+    color: '#ffffff',
     border: 'none',
-    padding: '8px 16px',
-    borderRadius: '6px',
+    padding: '12px 24px',
+    borderRadius: '10px',
     cursor: 'pointer',
-    fontSize: '14px',
-    fontWeight: '500',
+    fontSize: '15px',
+    fontWeight: '600',
+    transition: 'all 0.2s ease',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    boxShadow: '0 4px 6px rgba(79, 70, 229, 0.2)'
   },
   secondaryButton: {
-    backgroundColor: '#f1f5f9',
+    backgroundColor: '#f8fafc',
     color: '#475569',
-    border: '1px solid #e2e8f0',
-    padding: '8px 16px',
-    borderRadius: '6px',
+    border: '2px solid #e2e8f0',
+    padding: '12px 24px',
+    borderRadius: '10px',
     cursor: 'pointer',
-    fontSize: '14px',
-    fontWeight: '500',
+    fontSize: '15px',
+    fontWeight: '600',
+    transition: 'all 0.2s ease',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px'
   },
   tableContainer: {
     overflowX: 'auto',
+    borderRadius: '12px',
+    border: '2px solid #f1f5f9'
   },
   table: {
     width: '100%',
-    borderCollapse: 'collapse',
+    borderCollapse: 'separate',
+    borderSpacing: '0',
+    minWidth: '1000px'
   },
   tableHeader: {
     backgroundColor: '#f8fafc',
-    borderBottom: '2px solid #e2e8f0',
+    borderBottom: '2px solid #e2e8f0'
   },
   tableRow: {
-    borderBottom: '1px solid #e2e8f0',
-  },
-  detailsRow: {
-    backgroundColor: '#f8fafc',
+    borderBottom: '1px solid #f1f5f9',
+    transition: 'background-color 0.2s ease'
   },
   tableCell: {
-    padding: '12px 16px',
+    padding: '18px 20px',
     textAlign: 'left',
-    fontSize: '14px',
-  },
-  detailsCell: {
-    padding: '8px 16px',
-  },
-  productInfo: {
-    display: 'flex',
-    flexDirection: 'column',
-  },
-  productName: {
-    fontWeight: '500',
-    color: '#1e293b',
-  },
-  productId: {
-    fontSize: '12px',
-    color: '#64748b',
-  },
-  productDetails: {
-    display: 'flex',
-    gap: '16px',
-    fontSize: '12px',
-    color: '#64748b',
+    fontSize: '14.5px',
+    color: '#334155',
+    verticalAlign: 'middle',
+    fontWeight: '500'
   },
   actionButtons: {
     display: 'flex',
-    gap: '8px',
+    gap: '8px'
   },
   editButton: {
     backgroundColor: '#3b82f6',
-    color: '#fff',
+    color: '#ffffff',
     border: 'none',
-    padding: '6px 12px',
-    borderRadius: '4px',
+    padding: '8px 16px',
+    borderRadius: '8px',
     cursor: 'pointer',
-    fontSize: '12px',
+    fontSize: '13px',
+    fontWeight: '600',
+    transition: 'all 0.2s ease',
+    minWidth: '70px'
   },
   viewButton: {
     backgroundColor: '#10b981',
-    color: '#fff',
+    color: '#ffffff',
     border: 'none',
-    padding: '6px 12px',
-    borderRadius: '4px',
+    padding: '8px 16px',
+    borderRadius: '8px',
     cursor: 'pointer',
-    fontSize: '12px',
+    fontSize: '13px',
+    fontWeight: '600',
+    transition: 'all 0.2s ease',
+    minWidth: '70px'
+  },
+  deleteButtonSmall: {
+    backgroundColor: '#ef4444',
+    color: '#ffffff',
+    border: 'none',
+    padding: '8px 16px',
+    borderRadius: '8px',
+    cursor: 'pointer',
+    fontSize: '13px',
+    fontWeight: '600',
+    transition: 'all 0.2s ease',
+    minWidth: '70px'
   },
   modalOverlay: {
     position: 'fixed',
@@ -851,117 +1030,141 @@ const styles = {
     left: 0,
     width: '100vw',
     height: '100vh',
-    backgroundColor: 'rgba(0,0,0,0.5)',
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
     display: 'flex',
     justifyContent: 'center',
     alignItems: 'center',
     zIndex: 1000,
-    padding: '16px',
+    padding: '20px',
+    backdropFilter: 'blur(4px)'
   },
   modalContainer: {
-    backgroundColor: '#fff',
-    padding: '24px',
-    borderRadius: '12px',
+    backgroundColor: '#ffffff',
+    padding: '32px',
+    borderRadius: '20px',
     width: '100%',
-    maxWidth: '500px',
+    maxWidth: '540px',
     maxHeight: '90vh',
     overflowY: 'auto',
-    boxShadow: '0 10px 25px rgba(0, 0, 0, 0.15)',
+    boxShadow: '0 20px 25px rgba(0, 0, 0, 0.15)',
+    border: '1px solid #e2e8f0'
   },
   modalHeader: {
-    fontSize: '20px',
-    fontWeight: 'bold',
-    marginBottom: '20px',
+    fontSize: '24px',
+    fontWeight: '800',
+    marginBottom: '24px',
     color: '#1e293b',
+    paddingBottom: '16px',
+    borderBottom: '2px solid #f1f5f9'
   },
   modalContent: {
-    marginBottom: '20px',
+    marginBottom: '28px'
   },
   inputGroup: {
-    marginBottom: '16px',
+    marginBottom: '20px'
   },
   inputLabel: {
     display: 'block',
     fontSize: '14px',
-    fontWeight: '500',
+    fontWeight: '600',
     color: '#374151',
-    marginBottom: '6px',
+    marginBottom: '8px',
+    letterSpacing: '0.3px'
   },
   input: {
     width: '100%',
-    padding: '10px 12px',
-    borderRadius: '6px',
-    border: '1px solid #d1d5db',
-    fontSize: '14px',
+    padding: '14px 16px',
+    borderRadius: '10px',
+    border: '2px solid #e2e8f0',
+    fontSize: '15px',
+    backgroundColor: '#f8fafc',
+    transition: 'all 0.2s ease',
+    outline: 'none',
+    boxSizing: 'border-box'
   },
   modalButtons: {
     display: 'flex',
     justifyContent: 'flex-end',
-    gap: '12px',
+    gap: '16px',
+    paddingTop: '24px',
+    borderTop: '2px solid #f1f5f9'
   },
   submitButton: {
     backgroundColor: '#4f46e5',
-    color: '#fff',
+    color: '#ffffff',
     border: 'none',
-    padding: '10px 20px',
-    borderRadius: '6px',
+    padding: '14px 28px',
+    borderRadius: '10px',
     cursor: 'pointer',
-    fontSize: '14px',
-    fontWeight: '500',
+    fontSize: '15px',
+    fontWeight: '600',
+    transition: 'all 0.2s ease',
+    minWidth: '140px',
+    boxShadow: '0 4px 6px rgba(79, 70, 229, 0.3)'
   },
   deleteButton: {
     backgroundColor: '#ef4444',
-    color: '#fff',
+    color: '#ffffff',
     border: 'none',
-    padding: '10px 20px',
-    borderRadius: '6px',
+    padding: '14px 28px',
+    borderRadius: '10px',
     cursor: 'pointer',
-    fontSize: '14px',
-    fontWeight: '500',
+    fontSize: '15px',
+    fontWeight: '600',
+    transition: 'all 0.2s ease',
+    minWidth: '120px',
+    boxShadow: '0 4px 6px rgba(239, 68, 68, 0.2)'
   },
   cancelButton: {
-    backgroundColor: '#f1f5f9',
+    backgroundColor: '#f8fafc',
     color: '#475569',
-    border: '1px solid #e2e8f0',
-    padding: '10px 20px',
-    borderRadius: '6px',
+    border: '2px solid #e2e8f0',
+    padding: '14px 28px',
+    borderRadius: '10px',
     cursor: 'pointer',
-    fontSize: '14px',
-    fontWeight: '500',
-  },
-  supplierDetails: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '16px',
-  },
-  supplierDetailCard: {
-    border: '1px solid #e2e8f0',
-    borderRadius: '8px',
-    padding: '16px',
-  },
-  supplierDetailGrid: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(2, 1fr)',
-    gap: '12px',
-  },
-  detailItem: {
-    display: 'flex',
-    flexDirection: 'column',
-  },
-  detailLabel: {
-    fontSize: '12px',
-    color: '#64748b',
-    marginBottom: '4px',
-  },
-  detailValue: {
-    fontSize: '14px',
-    color: '#1e293b',
-    fontWeight: '500',
+    fontSize: '15px',
+    fontWeight: '600',
+    transition: 'all 0.2s ease',
+    minWidth: '120px'
   },
   noDataText: {
     color: '#94a3b8',
-    fontSize: '14px',
+    fontSize: '15px',
     textAlign: 'center',
-    padding: '20px',
-  },
+    padding: '40px 20px',
+    fontStyle: 'italic'
+  }
 };
+
+// Add CSS animation for spinner
+const styleSheet = document.createElement('style');
+styleSheet.textContent = `
+  @keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+  }
+  
+  input:focus, select:focus {
+    border-color: #4f46e5 !important;
+    box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.1) !important;
+  }
+  
+  button:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 8px rgba(0, 0, 0, 0.1) !important;
+  }
+  
+  button:active {
+    transform: translateY(0);
+  }
+  
+  .stat-card:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 12px 20px rgba(0, 0, 0, 0.08) !important;
+  }
+  
+  .table-row:hover {
+    background-color: #f8fafc;
+  }
+`;
+document.head.appendChild(styleSheet);

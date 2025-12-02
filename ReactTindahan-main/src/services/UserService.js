@@ -1,34 +1,50 @@
-import { getDBConnection, db, addUser, getUserByUsername } from '../db';
-import CryptoJS from 'crypto-js';
+// --- Register user ---
+export const registerUser = async (username, password, role, fullName, storeName, serverIP) => {
+  if (!serverIP) return { success: false, error: 'Desktop server IP not provided' };
 
-const hashPassword = (password) => CryptoJS.SHA256(password).toString();
+  const API_BASE = `http://${serverIP}:5000/api`;
 
-export const registerUser = async (username, password, role, fullName, storeName) => {
   try {
-    const password_hash = hashPassword(password);
-    const user = {
-      username,
-      password_hash,
-      role,
-      full_name: fullName,
-      store_name: storeName,
-    };
-    const user_id = await addUser(user);
-    return { success: true, user_id };
+    const trimmedUsername = username.trim().toLowerCase();
+    const res = await fetch(`${API_BASE}/users`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        username: trimmedUsername,
+        password, // send raw password
+        role,
+        full_name: fullName.trim(),
+        store_name: storeName.trim()
+      }),
+    });
+    const user = await res.json();
+    return { success: true, user };
   } catch (err) {
     return { success: false, error: err.message };
   }
 };
 
-export const loginUser = async (username, password) => {
+// --- Login user ---
+export const loginUser = async (username, password, serverIP) => {
+  if (!serverIP) return { success: false, error: 'Desktop server IP not provided' };
+
+  const API_BASE = `http://${serverIP}:5000/api`;
+  const trimmedUsername = username.trim().toLowerCase();
+
   try {
-    const password_hash = hashPassword(password);
-    const user = await getUserByUsername(username);
-    if (user && user.password_hash === password_hash) {
-      return { success: true, user };
-    } else {
-      return { success: false, error: 'Invalid username or password' };
+    const res = await fetch(`${API_BASE}/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: trimmedUsername, password }) // send raw password
+    });
+
+    if (!res.ok) {
+      const error = await res.json();
+      return { success: false, error: error.error };
     }
+
+    const user = await res.json();
+    return { success: true, user };
   } catch (err) {
     return { success: false, error: err.message };
   }

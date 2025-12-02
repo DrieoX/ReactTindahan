@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { registerUser } from '../services/UserService';
 
@@ -10,6 +10,37 @@ export default function SignupScreen() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirm, setShowConfirm] = useState(false);
+
+  // Mode selection for signup
+  const [mode, setMode] = useState('Server');
+  const [serverIP, setServerIP] = useState(null);
+
+  // Resolve server IP based on mode
+  useEffect(() => {
+    if (mode === 'Server') {
+      setServerIP('127.0.0.1'); // Server mode → localhost
+      window.serverIP = '127.0.0.1';
+    } else {
+      if (window.serverIP) {
+        setServerIP(window.serverIP);
+      } else {
+        const savedIP = localStorage.getItem('pos_server_ip');
+        if (savedIP) {
+          setServerIP(savedIP);
+          window.serverIP = savedIP;
+        } else {
+          const manual = window.prompt('Enter POS server IP (LAN):');
+          if (manual) {
+            localStorage.setItem('pos_server_ip', manual);
+            setServerIP(manual);
+            window.serverIP = manual;
+          }
+        }
+      }
+    }
+  }, [mode]);
 
   const handleRegister = async () => {
     if (!fullName || !storeName || !email || !password || !confirmPassword) {
@@ -20,9 +51,11 @@ export default function SignupScreen() {
       alert('Passwords do not match.');
       return;
     }
+    if (!serverIP) return alert('Cannot resolve server IP. Please check network.');
 
     try {
-      const result = await registerUser(email, password, 'Owner', fullName, storeName);
+      const result = await registerUser(email, password, 'Owner', fullName, storeName, serverIP);
+
       if (result.success) {
         alert('User registered! Please login.');
         navigate('/');
@@ -65,20 +98,60 @@ export default function SignupScreen() {
         onChange={(e) => setEmail(e.target.value)}
         style={styles.input}
       />
-      <input
-        type="password"
-        placeholder="Password"
-        value={password}
-        onChange={(e) => setPassword(e.target.value)}
-        style={styles.input}
-      />
-      <input
-        type="password"
-        placeholder="Confirm Password"
-        value={confirmPassword}
-        onChange={(e) => setConfirmPassword(e.target.value)}
-        style={styles.input}
-      />
+
+      <div style={{ position: 'relative' }}>
+        <input
+          type={showPassword ? "text" : "password"}
+          placeholder="Password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          style={{ ...styles.input, paddingRight: '40px' }}
+        />
+        <span
+          onClick={() => setShowPassword(!showPassword)}
+          style={{
+            position: 'absolute',
+            right: 10,
+            top: 8,
+            cursor: 'pointer',
+            userSelect: 'none'
+          }}
+        >
+          {showPassword ? '🙈' : '👁️'}
+        </span>
+      </div>
+
+      <div style={{ position: 'relative' }}>
+        <input
+          type={showConfirm ? "text" : "password"}
+          placeholder="Confirm Password"
+          value={confirmPassword}
+          onChange={(e) => setConfirmPassword(e.target.value)}
+          style={{ ...styles.input, paddingRight: '40px' }}
+        />
+        <span
+          onClick={() => setShowConfirm(!showConfirm)}
+          style={{
+            position: 'absolute',
+            right: 10,
+            top: 8,
+            cursor: 'pointer',
+            userSelect: 'none'
+          }}
+        >
+          {showConfirm ? '🙈' : '👁️'}
+        </span>
+      </div>
+
+      <label style={styles.label}>Mode</label>
+      <select
+        value={mode}
+        onChange={(e) => setMode(e.target.value)}
+        style={styles.select}
+      >
+        <option value="Server">Server</option>
+        <option value="Client">Client</option>
+      </select>
 
       <button style={styles.button} onClick={handleRegister}>
         Create account
