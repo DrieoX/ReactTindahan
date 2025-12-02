@@ -1,87 +1,150 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { loginUser } from '../services/UserService';
+import { loginUser, checkAPIHealth } from '../services/APIService';
 
 // Server discovery utility function
 const discoverServers = async () => {
   const servers = [];
   const savedIP = localStorage.getItem('pos_server_ip');
   
-  // Check saved server first
+  // Check saved server first with longer timeout
   if (savedIP && savedIP !== '127.0.0.1') {
     try {
       const response = await fetch(`http://${savedIP}:5000/api/health`, {
         method: 'GET',
-        timeout: 2000
+        mode: 'cors',
+        credentials: 'omit'
       });
+      
+      // Add timeout separately
+      const timeoutPromise = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('Timeout after 5000ms')), 5000)
+      );
+      
+      await Promise.race([response, timeoutPromise]);
+      
       if (response.ok) {
+        const data = await response.json();
         servers.push({
           ip: savedIP,
-          name: 'Last Connected Server',
-          type: 'saved'
+          name: data.server || 'Last Connected Server',
+          type: 'saved',
+          version: data.version || '1.0.0'
         });
+        console.log('Found saved server:', savedIP);
       }
     } catch (error) {
-      // Server not reachable, continue with discovery
+      console.log('Saved server not reachable:', error.message);
+      // Continue with discovery
     }
   }
   
-  // Try mDNS/Bonjour discovery if available
+  // Try mDNS/Bonjour discovery if available (with longer timeout)
   if (typeof Zeroconf !== 'undefined') {
     try {
       const mdnsServers = await discoverMDNSServers();
       servers.push(...mdnsServers);
+      console.log('mDNS discovered servers:', mdnsServers.length);
     } catch (error) {
-      console.log('mDNS discovery failed, falling back to IP scan');
+      console.log('mDNS discovery failed:', error.message);
     }
   }
   
-  // Try common local IP ranges (simplified discovery)
+  // Try common local IP ranges with improved scanning
+  console.log('Starting IP network scan...');
   const commonIPs = generateLocalIPs();
   
-  // Test a limited number of IPs (for performance)
-  const testIPs = commonIPs.slice(0, 50);
+  // Test IPs in batches to avoid overwhelming the browser
+  const testIPs = commonIPs.slice(0, 100); // Increased from 50 to 100
   
-  const scanPromises = testIPs.map(async (ip) => {
-    try {
-      const response = await Promise.race([
-        fetch(`http://${ip}:5000/api/health`),
-        new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 1000))
-      ]);
-      
-      if (response && response.ok) {
-        const healthData = await response.json();
-        return {
-          ip,
-          name: healthData.server || 'POS Server',
-          type: 'discovered'
-        };
+  // Process in batches of 5 with longer timeouts
+  const batchSize = 5;
+  const batches = [];
+  
+  for (let i = 0; i < testIPs.length; i += batchSize) {
+    batches.push(testIPs.slice(i, i + batchSize));
+  }
+  
+  for (const batch of batches) {
+    const batchPromises = batch.map(async (ip) => {
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 3000); // Increased from 1000ms to 3000ms
+        
+        const response = await fetch(`http://${ip}:5000/api/health`, {
+          method: 'GET',
+          mode: 'cors',
+          credentials: 'omit',
+          signal: controller.signal
+        }).catch(error => {
+          if (error.name === 'AbortError') {
+            throw new Error('Timeout after 3000ms');
+          }
+          throw error;
+        });
+        
+        clearTimeout(timeoutId);
+        
+        if (response && response.ok) {
+          const healthData = await response.json();
+          console.log('Found server at:', ip, healthData.server);
+          return {
+            ip,
+            name: healthData.server || 'POS Server',
+            type: 'discovered',
+            version: healthData.version || '1.0.0'
+          };
+        }
+      } catch (error) {
+        // Silently fail for individual IPs
+        return null;
       }
-    } catch (error) {
       return null;
+    });
+    
+    const batchResults = await Promise.all(batchPromises);
+    const validBatchResults = batchResults.filter(Boolean);
+    servers.push(...validBatchResults);
+    
+    // Small delay between batches to avoid overwhelming
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+  
+  console.log('Discovery complete. Found servers:', servers.length);
+  
+  // Remove duplicates (same IP)
+  const uniqueServers = [];
+  const seenIPs = new Set();
+  
+  for (const server of servers) {
+    if (!seenIPs.has(server.ip)) {
+      seenIPs.add(server.ip);
+      uniqueServers.push(server);
     }
-    return null;
-  });
+  }
   
-  const results = await Promise.all(scanPromises);
-  const validResults = results.filter(Boolean);
-  servers.push(...validResults);
-  
-  return servers;
+  return uniqueServers;
 };
 
-// mDNS discovery function
+// mDNS discovery function with longer timeout
 const discoverMDNSServers = () => {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     const servers = [];
+    const timeout = setTimeout(() => {
+      console.log('mDNS discovery timed out after 10000ms');
+      resolve(servers);
+    }, 10000); // 10 second timeout
     
     // This would use the Zeroconf plugin in a real app
-    // For now, return empty and rely on IP scanning
-    resolve(servers);
+    // For demo purposes, simulate discovery
+    setTimeout(() => {
+      clearTimeout(timeout);
+      resolve(servers);
+    }, 2000);
   });
 };
 
-// Generate common local network IPs
+// Generate common local network IPs with broader range
 const generateLocalIPs = () => {
   const ips = [];
   
@@ -90,18 +153,41 @@ const generateLocalIPs = () => {
     const parts = window.location.hostname.split('.');
     if (parts.length === 4) {
       const base = parts.slice(0, 3).join('.');
-      for (let i = 1; i <= 20; i++) { // Limit scanning range
+      for (let i = 1; i <= 50; i++) { // Increased from 20 to 50
         ips.push(`${base}.${i}`);
       }
     }
   }
   
-  // Add common local IP ranges with limited scanning
-  for (let i = 1; i <= 20; i++) {
-    ips.push(`192.168.1.${i}`);
-    ips.push(`192.168.0.${i}`);
-    ips.push(`10.0.0.${i}`);
+  // Add common local IP ranges with broader scanning
+  const commonRanges = [
+    '192.168.1',  // Most common home routers
+    '192.168.0',  // Alternative home router range
+    '192.168.2',  // Common secondary range
+    '192.168.100', // Some ISP routers
+    '10.0.0',     // Class A private
+    '10.0.1',     // Alternative class A
+    '172.16.0',   // Class B private
+    '172.16.1',   // Alternative class B
+  ];
+  
+  for (const range of commonRanges) {
+    for (let i = 1; i <= 50; i++) { // Scan first 50 IPs in each range
+      ips.push(`${range}.${i}`);
+    }
   }
+  
+  // Add some specific common router IPs
+  const commonRouterIPs = [
+    '192.168.1.1',
+    '192.168.0.1',
+    '10.0.0.1',
+    '192.168.1.254',
+    '192.168.0.254',
+    '192.168.2.1'
+  ];
+  
+  ips.push(...commonRouterIPs);
   
   return [...new Set(ips)]; // Remove duplicates
 };
@@ -120,6 +206,8 @@ export default function LoginScreen({ setUserMode }) {
   const [manualIP, setManualIP] = useState('');
   const [showManualInput, setShowManualInput] = useState(false);
   const [debugInfo, setDebugInfo] = useState(null);
+  const [discoveryProgress, setDiscoveryProgress] = useState(0);
+  const [totalIPsToScan, setTotalIPsToScan] = useState(0);
 
   // Discover servers when in client mode
   useEffect(() => {
@@ -130,6 +218,7 @@ export default function LoginScreen({ setUserMode }) {
       window.serverIP = '127.0.0.1';
       localStorage.setItem('pos_server_ip', '127.0.0.1');
       setDiscoveredServers([]);
+      setIsDiscovering(false);
     }
     
     // Debug network info
@@ -141,7 +230,8 @@ export default function LoginScreen({ setUserMode }) {
       userAgent: navigator.userAgent,
       platform: navigator.platform,
       hostname: window.location.hostname,
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
+      url: window.location.href
     };
     console.log('=== NETWORK DEBUG INFO ===', info);
     setDebugInfo(info);
@@ -149,8 +239,17 @@ export default function LoginScreen({ setUserMode }) {
 
   const handleServerDiscovery = async () => {
     setIsDiscovering(true);
+    setDiscoveryProgress(0);
+    setDiscoveredServers([]);
+    
+    // Calculate total IPs to scan for progress
+    const ips = generateLocalIPs();
+    setTotalIPsToScan(Math.min(ips.length, 100));
+    
     try {
+      console.log('Starting server discovery...');
       const servers = await discoverServers();
+      console.log('Discovery completed, found:', servers.length, 'servers');
       setDiscoveredServers(servers);
       
       // Auto-select first server if found
@@ -159,8 +258,10 @@ export default function LoginScreen({ setUserMode }) {
         setServerIP(selectedServer.ip);
         window.serverIP = selectedServer.ip;
         localStorage.setItem('pos_server_ip', selectedServer.ip);
+        console.log('Auto-selected server:', selectedServer.ip);
       } else {
         // No servers found, show manual input
+        console.log('No servers found, showing manual input');
         setShowManualInput(true);
       }
     } catch (error) {
@@ -168,6 +269,7 @@ export default function LoginScreen({ setUserMode }) {
       setShowManualInput(true);
     } finally {
       setIsDiscovering(false);
+      setDiscoveryProgress(100);
     }
   };
 
@@ -176,6 +278,7 @@ export default function LoginScreen({ setUserMode }) {
     window.serverIP = ip;
     localStorage.setItem('pos_server_ip', ip);
     setShowManualInput(false);
+    console.log('Selected server:', ip);
   };
 
   const handleManualIPSubmit = () => {
@@ -188,10 +291,23 @@ export default function LoginScreen({ setUserMode }) {
 
   const validateServerConnection = async (ip) => {
     try {
+      console.log('Validating server connection to:', ip);
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+      
       const response = await fetch(`http://${ip}:5000/api/health`, {
         method: 'GET',
-        timeout: 3000
+        mode: 'cors',
+        credentials: 'omit',
+        signal: controller.signal
+      }).catch(error => {
+        if (error.name === 'AbortError') {
+          throw new Error('Connection timeout after 10000ms');
+        }
+        throw error;
       });
+      
+      clearTimeout(timeoutId);
       
       if (response.ok) {
         const data = await response.json();
@@ -201,13 +317,15 @@ export default function LoginScreen({ setUserMode }) {
           data
         };
       } else {
+        const errorText = await response.text();
+        console.log('Server responded with error:', response.status, errorText);
         return {
           success: false,
-          message: 'Server responded with error'
+          message: `Server error: ${response.status} ${response.statusText}`
         };
       }
     } catch (error) {
-      console.error('Server connection failed:', error);
+      console.error('Server connection failed:', error.message);
       return {
         success: false,
         message: `Cannot connect: ${error.message}`
@@ -228,26 +346,32 @@ export default function LoginScreen({ setUserMode }) {
 
     // Validate server connection for Client mode
     if (mode === 'Client') {
+      setIsLoading(true);
       const connectionResult = await validateServerConnection(serverIP);
       if (!connectionResult.success) {
-        alert(`Cannot connect to server at ${serverIP}.\nError: ${connectionResult.message}\n\nPlease check:\n1. Server is running on desktop\n2. Firewall allows port 5000\n3. Both devices on same WiFi`);
+        alert(`Cannot connect to server at ${serverIP}.\n\nError: ${connectionResult.message}\n\nPlease check:\n1. Server is running on desktop\n2. Firewall allows port 5000\n3. Both devices are on same WiFi\n4. Try entering IP manually`);
+        setIsLoading(false);
         return;
       }
+      setIsLoading(false);
     }
 
     setIsLoading(true);
     try {
-      const result = await loginUser(username, password, serverIP);
+      // Use the updated loginUser from APIService
+      const result = await loginUser({ username, password });
 
       if (result.success) {
         const normalizedMode = mode.toLowerCase();
         
         // Store session data
-        localStorage.setItem("user", JSON.stringify(result.user));
+        localStorage.setItem("user", JSON.stringify(result.user || result));
         localStorage.setItem("userMode", normalizedMode);
         
         // Update global state
-        setUserMode(normalizedMode);
+        if (setUserMode) {
+          setUserMode(normalizedMode);
+        }
         
         // Navigate to dashboard
         navigate('/dashboard', { replace: true });
@@ -282,34 +406,42 @@ export default function LoginScreen({ setUserMode }) {
   const ManualConnectionHelper = () => {
     const [desktopIP, setDesktopIP] = useState('');
     const [connectionTest, setConnectionTest] = useState(null);
+    const [isTesting, setIsTesting] = useState(false);
 
     const testConnection = async () => {
       if (!desktopIP) return;
       
-      setConnectionTest('testing');
+      setIsTesting(true);
+      setConnectionTest(null);
+      
       const result = await validateServerConnection(desktopIP);
       
       if (result.success) {
         setConnectionTest({
           success: true,
-          message: `Connected to ${result.data.server}`,
+          message: `✅ Connected to ${result.data.server}`,
           ip: result.data.ip,
           version: result.data.version
         });
-        handleServerSelect(desktopIP);
+        // Auto-select after successful connection
+        setTimeout(() => {
+          handleServerSelect(desktopIP);
+        }, 500);
       } else {
         setConnectionTest({
           success: false,
-          message: result.message
+          message: `❌ ${result.message}`
         });
       }
+      
+      setIsTesting(false);
     };
 
     return (
       <div style={styles.manualHelper}>
         <h4 style={styles.helperTitle}>Manual Connection</h4>
         <p style={styles.helperText}>
-          Find your desktop IP address (use ipconfig on Windows or ifconfig on Mac/Linux) and enter it below:
+          Find your desktop IP address and enter it below:
         </p>
         <div style={styles.ipInputGroup}>
           <input
@@ -317,22 +449,26 @@ export default function LoginScreen({ setUserMode }) {
             placeholder="e.g., 192.168.1.100"
             value={desktopIP}
             onChange={(e) => setDesktopIP(e.target.value)}
-            onKeyPress={(e) => e.key === 'Enter' && testConnection()}
+            onKeyPress={(e) => e.key === 'Enter' && desktopIP && testConnection()}
             style={styles.ipInput}
           />
           <button
             onClick={testConnection}
-            style={styles.testButton}
-            disabled={!desktopIP}
+            style={{
+              ...styles.testButton,
+              ...(isTesting ? styles.testButtonDisabled : {})
+            }}
+            disabled={!desktopIP || isTesting}
           >
-            Test
+            {isTesting ? 'Testing...' : 'Test'}
           </button>
         </div>
-        {connectionTest && connectionTest !== 'testing' && (
+        {connectionTest && (
           <div style={{
             ...styles.testResult,
             backgroundColor: connectionTest.success ? '#d1fae5' : '#fee2e2',
-            color: connectionTest.success ? '#065f46' : '#991b1b'
+            color: connectionTest.success ? '#065f46' : '#991b1b',
+            border: `1px solid ${connectionTest.success ? '#10b981' : '#ef4444'}`
           }}>
             {connectionTest.message}
             {connectionTest.success && (
@@ -341,11 +477,6 @@ export default function LoginScreen({ setUserMode }) {
                 <div>Version: {connectionTest.version}</div>
               </div>
             )}
-          </div>
-        )}
-        {connectionTest === 'testing' && (
-          <div style={styles.testResult}>
-            Testing connection...
           </div>
         )}
       </div>
@@ -366,17 +497,18 @@ export default function LoginScreen({ setUserMode }) {
         <div style={styles.formSection}>
           <div style={styles.formGroup}>
             <label style={styles.label}>
-              <span style={styles.labelText}>Email Address</span>
+              <span style={styles.labelText}>Username</span>
               <input
-                type="email"
-                placeholder="you@example.com"
+                type="text"
+                placeholder="Enter username"
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
                 onKeyPress={handleKeyPress}
                 style={styles.input}
                 autoCapitalize="none"
-                autoComplete="email"
+                autoComplete="username"
                 enterKeyHint="next"
+                disabled={isLoading}
               />
             </label>
           </div>
@@ -387,19 +519,21 @@ export default function LoginScreen({ setUserMode }) {
               <div style={styles.passwordWrapper}>
                 <input
                   type={showPassword ? "text" : "password"}
-                  placeholder="••••••••"
+                  placeholder="Enter password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   onKeyPress={handleKeyPress}
                   style={styles.input}
                   autoComplete="current-password"
                   enterKeyHint="go"
+                  disabled={isLoading}
                 />
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
                   style={styles.passwordToggle}
                   aria-label={showPassword ? "Hide password" : "Show password"}
+                  disabled={isLoading}
                 >
                   {showPassword ? '🙈' : '👁️'}
                 </button>
@@ -415,6 +549,7 @@ export default function LoginScreen({ setUserMode }) {
                 onChange={(e) => setMode(e.target.value)}
                 style={styles.select}
                 onKeyPress={handleKeyPress}
+                disabled={isLoading}
               >
                 <option value="" disabled hidden>Select mode</option>
                 <option value="Server">Server Mode (Local Database)</option>
@@ -427,36 +562,56 @@ export default function LoginScreen({ setUserMode }) {
               <div style={styles.serverDiscovery}>
                 <div style={styles.discoveryHeader}>
                   <span style={styles.discoveryTitle}>
-                    {isDiscovering ? 'Searching for servers...' : 'Available Servers'}
+                    {isDiscovering ? `Searching for servers (${discoveryProgress}%)...` : 'Available Servers'}
                   </span>
                   <button
                     onClick={refreshDiscovery}
                     style={styles.refreshButton}
-                    disabled={isDiscovering}
+                    disabled={isDiscovering || isLoading}
                     title="Refresh server list"
                   >
                     {isDiscovering ? '⏳' : '🔄'}
                   </button>
                 </div>
                 
-                {isDiscovering ? (
+                {isDiscovering && (
                   <div style={styles.discoveryStatus}>
-                    <p style={styles.discoveryText}>Scanning network for POS servers...</p>
+                    <p style={styles.discoveryText}>
+                      Scanning {totalIPsToScan} IP addresses for POS servers...
+                      This may take up to 30 seconds.
+                    </p>
+                    <div style={styles.progressBar}>
+                      <div 
+                        style={{
+                          ...styles.progressFill,
+                          width: `${discoveryProgress}%`
+                        }}
+                      />
+                    </div>
                   </div>
-                ) : discoveredServers.length > 0 ? (
+                )}
+                
+                {!isDiscovering && discoveredServers.length > 0 && (
                   <div style={styles.serverList}>
                     {discoveredServers.map((server, index) => (
                       <div
                         key={index}
-                        onClick={() => handleServerSelect(server.ip)}
+                        onClick={() => !isLoading && handleServerSelect(server.ip)}
                         style={{
                           ...styles.serverItem,
-                          ...(serverIP === server.ip ? styles.serverItemSelected : {})
+                          ...(serverIP === server.ip ? styles.serverItemSelected : {}),
+                          ...(isLoading ? styles.serverItemDisabled : {})
                         }}
                       >
                         <div style={styles.serverInfo}>
-                          <span style={styles.serverName}>{server.name}</span>
+                          <span style={styles.serverName}>
+                            {server.name}
+                            {server.type === 'saved' && ' (Saved)'}
+                          </span>
                           <span style={styles.serverIp}>{server.ip}</span>
+                          {server.version && (
+                            <span style={styles.serverVersion}>v{server.version}</span>
+                          )}
                         </div>
                         {serverIP === server.ip && (
                           <span style={styles.selectedIndicator}>✓</span>
@@ -464,7 +619,9 @@ export default function LoginScreen({ setUserMode }) {
                       </div>
                     ))}
                   </div>
-                ) : (
+                )}
+                
+                {!isDiscovering && discoveredServers.length === 0 && !showManualInput && (
                   <div style={styles.discoveryStatus}>
                     <p style={styles.discoveryText}>No servers found automatically</p>
                   </div>
@@ -480,11 +637,15 @@ export default function LoginScreen({ setUserMode }) {
                       onChange={(e) => setManualIP(e.target.value)}
                       onKeyPress={handleKeyPress}
                       style={styles.manualInputField}
+                      disabled={isLoading}
                     />
                     <button
                       onClick={handleManualIPSubmit}
-                      style={styles.manualButton}
-                      disabled={!manualIP.trim()}
+                      style={{
+                        ...styles.manualButton,
+                        ...(isLoading ? styles.manualButtonDisabled : {})
+                      }}
+                      disabled={!manualIP.trim() || isLoading}
                     >
                       Connect
                     </button>
@@ -494,7 +655,11 @@ export default function LoginScreen({ setUserMode }) {
                 {!showManualInput && discoveredServers.length === 0 && !isDiscovering && (
                   <button
                     onClick={() => setShowManualInput(true)}
-                    style={styles.manualToggleButton}
+                    style={{
+                      ...styles.manualToggleButton,
+                      ...(isLoading ? styles.manualToggleButtonDisabled : {})
+                    }}
+                    disabled={isLoading}
                   >
                     Enter Server IP Manually
                   </button>
@@ -508,6 +673,15 @@ export default function LoginScreen({ setUserMode }) {
                 {serverIP && (
                   <p style={styles.serverInfoDisplay}>
                     Selected server: <span style={styles.serverIpDisplay}>{serverIP}</span>
+                    {mode === 'Client' && (
+                      <button
+                        onClick={() => setShowManualInput(true)}
+                        style={styles.changeServerButton}
+                        disabled={isLoading}
+                      >
+                        Change
+                      </button>
+                    )}
                   </p>
                 )}
               </div>
@@ -531,7 +705,9 @@ export default function LoginScreen({ setUserMode }) {
             disabled={isLoading || !username || !password || !mode || (mode === 'Client' && !serverIP)}
           >
             {isLoading ? (
-              <span style={styles.loadingText}>Signing in...</span>
+              <span style={styles.loadingText}>
+                <span style={styles.loadingSpinner}>⏳</span> Signing in...
+              </span>
             ) : (
               'Sign in'
             )}
@@ -548,6 +724,7 @@ export default function LoginScreen({ setUserMode }) {
             <button
               onClick={() => navigate('/signup')}
               style={styles.linkButton}
+              disabled={isLoading}
             >
               Create account
             </button>
@@ -561,6 +738,9 @@ export default function LoginScreen({ setUserMode }) {
             {serverIP && ` • ${serverIP}`}
             {debugInfo && ` • ${navigator.platform}`}
           </p>
+          <p style={styles.debugText}>
+            Discovery: {totalIPsToScan} IPs scanned • Found: {discoveredServers.length} servers
+          </p>
         </div>
       </div>
     </div>
@@ -569,75 +749,70 @@ export default function LoginScreen({ setUserMode }) {
 
 const styles = {
   container: {
-    minHeight: '100vh',
     display: 'flex',
-    alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#f8fafc',
-    padding: '16px',
-    fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+    alignItems: 'center',
+    minHeight: '100vh',
+    backgroundColor: '#f5f5f5',
+    padding: '20px',
+    fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
   },
   card: {
+    backgroundColor: 'white',
+    borderRadius: '12px',
+    boxShadow: '0 4px 20px rgba(0, 0, 0, 0.1)',
     width: '100%',
     maxWidth: '480px',
-    backgroundColor: 'white',
-    borderRadius: '20px',
-    boxShadow: '0 10px 40px rgba(0, 0, 0, 0.08)',
-    overflow: 'hidden',
-    border: '1px solid #e2e8f0',
+    overflow: 'hidden'
   },
   brandSection: {
-    padding: '32px 32px 24px',
+    padding: '40px 40px 20px',
     textAlign: 'center',
-    background: 'linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)',
-    color: 'white',
+    borderBottom: '1px solid #eaeaea'
   },
   icon: {
     fontSize: '48px',
-    marginBottom: '12px',
-    display: 'inline-block',
+    marginBottom: '16px'
   },
   title: {
     fontSize: '28px',
     fontWeight: '700',
-    margin: '0 0 4px 0',
-    letterSpacing: '-0.5px',
+    color: '#333',
+    margin: '0 0 8px'
   },
   subtitle: {
-    fontSize: '14px',
-    opacity: '0.9',
-    margin: '0',
-    fontWeight: '400',
+    fontSize: '16px',
+    color: '#666',
+    margin: 0
   },
   formSection: {
-    padding: '32px',
+    padding: '40px'
   },
   formGroup: {
-    marginBottom: '20px',
+    marginBottom: '24px'
   },
   label: {
     display: 'block',
+    marginBottom: '8px'
   },
   labelText: {
     display: 'block',
     fontSize: '14px',
     fontWeight: '600',
-    color: '#374151',
-    marginBottom: '8px',
+    color: '#333',
+    marginBottom: '8px'
   },
   input: {
     width: '100%',
-    padding: '14px 16px',
+    padding: '12px 16px',
     fontSize: '16px',
-    borderRadius: '12px',
-    border: '2px solid #e5e7eb',
-    backgroundColor: '#f9fafb',
+    border: '1px solid #ddd',
+    borderRadius: '8px',
     boxSizing: 'border-box',
-    transition: 'all 0.2s ease',
-    outline: 'none',
+    transition: 'border-color 0.2s'
   },
   passwordWrapper: {
-    position: 'relative',
+    position: 'relative'
   },
   passwordToggle: {
     position: 'absolute',
@@ -648,278 +823,303 @@ const styles = {
     border: 'none',
     fontSize: '18px',
     cursor: 'pointer',
-    padding: '8px',
-    borderRadius: '8px',
-    transition: 'background-color 0.2s',
+    padding: '4px'
   },
   select: {
     width: '100%',
-    padding: '14px 16px',
+    padding: '12px 16px',
     fontSize: '16px',
-    borderRadius: '12px',
-    border: '2px solid #e5e7eb',
-    backgroundColor: '#f9fafb',
-    color: '#374151',
-    cursor: 'pointer',
-    outline: 'none',
-    WebkitAppearance: 'none',
-    appearance: 'none',
-    backgroundImage: 'url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns=\'http://www.w3.org/2000/svg\' viewBox=\'0 0 24 24\' fill=\'none\' stroke=\'%23374151\' stroke-width=\'2\' stroke-linecap=\'round\' stroke-linejoin=\'round\'%3e%3cpolyline points=\'6 9 12 15 18 9\'%3e%3c/polyline%3e%3c/svg%3e")',
-    backgroundRepeat: 'no-repeat',
-    backgroundPosition: 'right 16px center',
-    backgroundSize: '16px',
+    border: '1px solid #ddd',
+    borderRadius: '8px',
+    backgroundColor: 'white',
+    cursor: 'pointer'
   },
   serverDiscovery: {
     marginTop: '16px',
-    border: '1px solid #e5e7eb',
-    borderRadius: '12px',
-    padding: '16px',
-    backgroundColor: '#f9fafb',
+    border: '1px solid #eaeaea',
+    borderRadius: '8px',
+    padding: '16px'
   },
   discoveryHeader: {
     display: 'flex',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: '12px',
+    marginBottom: '12px'
   },
   discoveryTitle: {
     fontSize: '14px',
     fontWeight: '600',
-    color: '#374151',
+    color: '#333'
   },
   refreshButton: {
-    padding: '6px 12px',
-    fontSize: '14px',
-    backgroundColor: '#e5e7eb',
+    background: 'none',
     border: 'none',
-    borderRadius: '8px',
+    fontSize: '18px',
     cursor: 'pointer',
-    transition: 'background-color 0.2s',
-    minWidth: '40px',
-    height: '32px',
+    padding: '4px 8px'
   },
   discoveryStatus: {
-    textAlign: 'center',
-    padding: '16px',
+    padding: '12px',
+    backgroundColor: '#f8f9fa',
+    borderRadius: '6px',
+    textAlign: 'center'
   },
   discoveryText: {
-    fontSize: '13px',
-    color: '#6b7280',
-    margin: '0',
+    fontSize: '14px',
+    color: '#666',
+    margin: '0 0 12px'
+  },
+  progressBar: {
+    height: '6px',
+    backgroundColor: '#eaeaea',
+    borderRadius: '3px',
+    overflow: 'hidden'
+  },
+  progressFill: {
+    height: '100%',
+    backgroundColor: '#4f46e5',
+    transition: 'width 0.3s ease'
   },
   serverList: {
-    maxHeight: '150px',
-    overflowY: 'auto',
-    marginBottom: '12px',
-    border: '1px solid #e5e7eb',
-    borderRadius: '8px',
-    padding: '4px',
+    maxHeight: '200px',
+    overflowY: 'auto'
   },
   serverItem: {
+    padding: '12px',
+    border: '1px solid #eaeaea',
+    borderRadius: '6px',
+    marginBottom: '8px',
+    cursor: 'pointer',
+    transition: 'all 0.2s',
     display: 'flex',
     justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: '10px 12px',
-    border: '1px solid #e5e7eb',
-    borderRadius: '6px',
-    marginBottom: '6px',
-    cursor: 'pointer',
-    transition: 'all 0.2s ease',
-    backgroundColor: 'white',
+    alignItems: 'center'
   },
   serverItemSelected: {
-    borderColor: '#3b82f6',
-    backgroundColor: '#eff6ff',
+    borderColor: '#4f46e5',
+    backgroundColor: '#eef2ff'
+  },
+  serverItemDisabled: {
+    opacity: 0.6,
+    cursor: 'not-allowed'
   },
   serverInfo: {
     display: 'flex',
     flexDirection: 'column',
-    flex: 1,
+    gap: '4px'
   },
   serverName: {
     fontSize: '14px',
-    fontWeight: '500',
-    color: '#374151',
+    fontWeight: '600',
+    color: '#333'
   },
   serverIp: {
     fontSize: '12px',
-    color: '#6b7280',
-    fontFamily: 'monospace',
-    marginTop: '2px',
+    color: '#666',
+    fontFamily: 'monospace'
+  },
+  serverVersion: {
+    fontSize: '11px',
+    color: '#999',
+    backgroundColor: '#f3f4f6',
+    padding: '2px 6px',
+    borderRadius: '10px',
+    display: 'inline-block',
+    width: 'fit-content'
   },
   selectedIndicator: {
-    color: '#10b981',
+    color: '#4f46e5',
     fontWeight: 'bold',
-    fontSize: '16px',
-    marginLeft: '8px',
+    fontSize: '18px'
   },
   manualInput: {
     display: 'flex',
     gap: '8px',
-    marginTop: '12px',
+    marginTop: '12px'
   },
   manualInputField: {
-    flex: '1',
-    padding: '10px 12px',
+    flex: 1,
+    padding: '12px',
     fontSize: '14px',
-    borderRadius: '8px',
-    border: '1px solid #d1d5db',
-    outline: 'none',
+    border: '1px solid #ddd',
+    borderRadius: '6px'
   },
   manualButton: {
-    padding: '10px 16px',
-    fontSize: '14px',
-    backgroundColor: '#3b82f6',
+    padding: '12px 20px',
+    backgroundColor: '#4f46e5',
     color: 'white',
     border: 'none',
-    borderRadius: '8px',
+    borderRadius: '6px',
     cursor: 'pointer',
-    fontWeight: '500',
-    whiteSpace: 'nowrap',
+    fontWeight: '600'
+  },
+  manualButtonDisabled: {
+    opacity: 0.6,
+    cursor: 'not-allowed'
   },
   manualToggleButton: {
     width: '100%',
-    padding: '10px',
-    fontSize: '14px',
+    padding: '12px',
     backgroundColor: 'transparent',
-    color: '#3b82f6',
-    border: '1px dashed #3b82f6',
-    borderRadius: '8px',
+    color: '#4f46e5',
+    border: '1px solid #4f46e5',
+    borderRadius: '6px',
     cursor: 'pointer',
+    fontSize: '14px',
+    fontWeight: '600',
+    marginTop: '12px'
+  },
+  manualToggleButtonDisabled: {
+    opacity: 0.6,
+    cursor: 'not-allowed'
+  },
+  manualHelper: {
+    marginTop: '16px',
+    padding: '16px',
+    backgroundColor: '#f8f9fa',
+    borderRadius: '8px',
+    border: '1px solid #eaeaea'
+  },
+  helperTitle: {
+    fontSize: '16px',
+    fontWeight: '600',
+    color: '#333',
+    margin: '0 0 8px'
+  },
+  helperText: {
+    fontSize: '14px',
+    color: '#666',
+    margin: '0 0 12px',
+    lineHeight: '1.5'
+  },
+  ipInputGroup: {
+    display: 'flex',
+    gap: '8px',
+    marginBottom: '12px'
+  },
+  ipInput: {
+    flex: 1,
+    padding: '12px',
+    fontSize: '14px',
+    border: '1px solid #ddd',
+    borderRadius: '6px'
+  },
+  testButton: {
+    padding: '12px 20px',
+    backgroundColor: '#10b981',
+    color: 'white',
+    border: 'none',
+    borderRadius: '6px',
+    cursor: 'pointer',
+    fontWeight: '600',
+    whiteSpace: 'nowrap'
+  },
+  testButtonDisabled: {
+    opacity: 0.6,
+    cursor: 'not-allowed'
+  },
+  testResult: {
+    padding: '12px',
+    borderRadius: '6px',
+    fontSize: '14px',
+    marginTop: '8px'
+  },
+  successDetails: {
     marginTop: '8px',
+    fontSize: '12px',
+    opacity: 0.8
   },
   serverInfoDisplay: {
-    fontSize: '13px',
-    color: '#6b7280',
+    fontSize: '14px',
+    color: '#666',
     marginTop: '12px',
-    marginBottom: '0',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px'
   },
   serverIpDisplay: {
     fontFamily: 'monospace',
-    backgroundColor: '#f3f4f6',
-    padding: '2px 6px',
-    borderRadius: '4px',
-    fontSize: '12px',
     fontWeight: '600',
-    color: '#374151',
+    color: '#333'
+  },
+  changeServerButton: {
+    marginLeft: 'auto',
+    padding: '4px 12px',
+    fontSize: '12px',
+    backgroundColor: 'transparent',
+    color: '#4f46e5',
+    border: '1px solid #4f46e5',
+    borderRadius: '4px',
+    cursor: 'pointer'
   },
   button: {
     width: '100%',
-    padding: '16px',
+    padding: '14px',
     fontSize: '16px',
     fontWeight: '600',
+    backgroundColor: '#4f46e5',
     color: 'white',
-    backgroundColor: '#3b82f6',
     border: 'none',
-    borderRadius: '12px',
+    borderRadius: '8px',
     cursor: 'pointer',
-    transition: 'all 0.2s ease',
-    marginTop: '8px',
-    outline: 'none',
+    transition: 'background-color 0.2s',
+    marginTop: '8px'
   },
   buttonDisabled: {
-    backgroundColor: '#9ca3af',
-    cursor: 'not-allowed',
-    opacity: '0.7',
+    opacity: 0.6,
+    cursor: 'not-allowed'
   },
   loadingText: {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: '8px',
+    gap: '8px'
+  },
+  loadingSpinner: {
+    fontSize: '16px'
   },
   divider: {
     display: 'flex',
     alignItems: 'center',
     margin: '24px 0',
+    color: '#999'
   },
   dividerText: {
-    flex: '1',
-    textAlign: 'center',
+    padding: '0 12px',
     fontSize: '14px',
-    color: '#9ca3af',
-    position: 'relative',
+    backgroundColor: 'white'
   },
   footer: {
     textAlign: 'center',
     fontSize: '14px',
-    color: '#6b7280',
-    margin: '24px 0 0 0',
+    color: '#666',
+    margin: 0
   },
   linkButton: {
     background: 'none',
     border: 'none',
-    color: '#3b82f6',
-    fontWeight: '600',
+    color: '#4f46e5',
+    textDecoration: 'underline',
     cursor: 'pointer',
     fontSize: '14px',
-    padding: '0',
-    textDecoration: 'underline',
+    padding: 0
   },
   bottomFooter: {
-    padding: '20px 32px',
-    backgroundColor: '#f9fafb',
-    borderTop: '1px solid #e5e7eb',
-    textAlign: 'center',
+    padding: '16px 40px',
+    borderTop: '1px solid #eaeaea',
+    backgroundColor: '#fafafa'
   },
   footerText: {
     fontSize: '12px',
-    color: '#6b7280',
-    margin: '0',
+    color: '#999',
+    textAlign: 'center',
+    margin: 0
   },
-  // Manual helper styles
-  manualHelper: {
-    marginTop: '16px',
-    padding: '16px',
-    backgroundColor: '#f8fafc',
-    borderRadius: '8px',
-    border: '1px solid #e2e8f0',
-  },
-  helperTitle: {
-    fontSize: '16px',
-    fontWeight: '600',
-    color: '#374151',
-    marginBottom: '8px',
-  },
-  helperText: {
-    fontSize: '14px',
-    color: '#6b7280',
-    marginBottom: '12px',
-    lineHeight: '1.5',
-  },
-  ipInputGroup: {
-    display: 'flex',
-    gap: '8px',
-    marginBottom: '12px',
-  },
-  ipInput: {
-    flex: '1',
-    padding: '10px 12px',
-    fontSize: '14px',
-    borderRadius: '8px',
-    border: '1px solid #d1d5db',
-    outline: 'none',
-  },
-  testButton: {
-    padding: '10px 16px',
-    fontSize: '14px',
-    backgroundColor: '#10b981',
-    color: 'white',
-    border: 'none',
-    borderRadius: '8px',
-    cursor: 'pointer',
-    fontWeight: '500',
-    whiteSpace: 'nowrap',
-  },
-  testResult: {
-    padding: '12px',
-    borderRadius: '8px',
-    fontSize: '14px',
-    marginTop: '8px',
-  },
-  successDetails: {
-    marginTop: '8px',
-    fontSize: '12px',
-    opacity: '0.8',
-  },
+  debugText: {
+    fontSize: '11px',
+    color: '#ccc',
+    textAlign: 'center',
+    margin: '4px 0 0',
+    fontFamily: 'monospace'
+  }
 };
