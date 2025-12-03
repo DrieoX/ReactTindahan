@@ -1,10 +1,16 @@
-import { getDBConnection, db, addUser, getUserByUsername } from '../db';
+import { addUser, getUserByUsername } from '../db';
 import CryptoJS from 'crypto-js';
 
 const hashPassword = (password) => CryptoJS.SHA256(password).toString();
 
-export const registerUser = async (username, password, role, fullName, storeName) => {
+export const registerUser = async (username, password, role, fullName, storeName = '') => {
   try {
+    // Check if username already exists
+    const existingUser = await getUserByUsername(username);
+    if (existingUser) {
+      return { success: false, error: 'Username already exists. Please choose another one.' };
+    }
+
     const password_hash = hashPassword(password);
     const user = {
       username,
@@ -12,9 +18,11 @@ export const registerUser = async (username, password, role, fullName, storeName
       role,
       full_name: fullName,
       store_name: storeName,
+      created_at: new Date().toISOString()
     };
+    
     const user_id = await addUser(user);
-    return { success: true, user_id };
+    return { success: true, user_id, user };
   } catch (err) {
     return { success: false, error: err.message };
   }
@@ -24,10 +32,25 @@ export const loginUser = async (username, password) => {
   try {
     const password_hash = hashPassword(password);
     const user = await getUserByUsername(username);
-    if (user && user.password_hash === password_hash) {
-      return { success: true, user };
+    
+    if (!user) {
+      return { success: false, error: 'Username not found.' };
+    }
+    
+    if (user.password_hash === password_hash) {
+      // Owners can login as either mode (server/client), Staff can only login as client
+      return { 
+        success: true, 
+        user: {
+          id: user.id,
+          username: user.username,
+          role: user.role,
+          full_name: user.full_name,
+          store_name: user.store_name
+        }
+      };
     } else {
-      return { success: false, error: 'Invalid username or password' };
+      return { success: false, error: 'Invalid password.' };
     }
   } catch (err) {
     return { success: false, error: err.message };

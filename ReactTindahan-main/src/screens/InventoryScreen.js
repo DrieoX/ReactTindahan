@@ -10,7 +10,7 @@ export default function InventoryScreen({ userMode }) {
   const [showAddModal, setShowAddModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [showSupplierModal, setShowSupplierModal] = useState(false);
-  const [showCategoryModal, setShowCategoryModal] = useState(false); // new
+  const [showCategoryModal, setShowCategoryModal] = useState(false);
   const [newItem, setNewItem] = useState({ 
     name: '', 
     sku: '', 
@@ -20,6 +20,7 @@ export default function InventoryScreen({ userMode }) {
     threshold: 5,
   });
   const [editingItem, setEditingItem] = useState(null);
+  const [currentStockItem, setCurrentStockItem] = useState(null);
   const [supplierDetails, setSupplierDetails] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [stats, setStats] = useState({
@@ -31,11 +32,11 @@ export default function InventoryScreen({ userMode }) {
   const [showLowStockOnly, setShowLowStockOnly] = useState(false);
 
   const [barcode, setBarcode] = useState('');
-  const [newCategoryName, setNewCategoryName] = useState(''); // new
-  const [editingCategory, setEditingCategory] = useState(null); // new
+  const [newCategoryName, setNewCategoryName] = useState('');
+  const [editingCategory, setEditingCategory] = useState(null);
 
   useEffect(() => {
-    prepopulateCategories(); // Add basic categories if empty
+    prepopulateCategories();
     fetchInventory();
     fetchSuppliers();
     fetchCategories();
@@ -53,7 +54,6 @@ export default function InventoryScreen({ userMode }) {
     return () => window.removeEventListener('keydown', handleGlobalScan);
   }, [barcode]);
 
-  // --- Prepopulate basic grocery categories ---
   const prepopulateCategories = async () => {
     try {
       const count = await db.categories.count();
@@ -219,6 +219,8 @@ export default function InventoryScreen({ userMode }) {
       await db.products.delete(editingItem.product_id);
       await db.inventory.where('product_id').equals(editingItem.product_id).delete();
       await db.resupplied_items.where('product_id').equals(editingItem.product_id).delete();
+      await db.stock_card.where('product_id').equals(editingItem.product_id).delete();
+      await db.sale_items.where('product_id').equals(editingItem.product_id).delete();
 
       setShowEditModal(false);
       setEditingItem(null);
@@ -230,25 +232,45 @@ export default function InventoryScreen({ userMode }) {
 
   const handleSupplierDetails = async (item) => {
     try {
+      // Set the current item for stock card display
+      setCurrentStockItem(item);
+      
+      // Fetch all stock card records for this product
       const stockRecords = await db.stock_card
         .where('product_id')
         .equals(item.product_id)
-        .toArray();
+        .sortBy('transaction_date');
 
+      // If no records found, show empty state
+      if (stockRecords.length === 0) {
+        setSupplierDetails([]);
+        setShowSupplierModal(true);
+        return;
+      }
+
+      // Fetch all supplier info
       const supplierInfo = await Promise.all(stockRecords.map(async (record) => {
         const supplier = record.supplier_id 
           ? await db.suppliers.get(record.supplier_id) 
           : null;
+        
+        // Determine if it's stock-in or stock-out
+        const isStockIn = record.quantity > 0;
+        const isStockOut = record.quantity < 0;
+        
         return {
           name: supplier?.name || 'N/A',
-          resupply_date: record.resupply_date || 'N/A',
-          quantity: record.quantity || 0,
-          unit: item.base_unit || 'pcs',
+          transaction_date: record.transaction_date || record.resupply_date || 'N/A',
+          quantity: record.quantity || 0, // Keep original signed quantity
+          stock_in: isStockIn ? record.quantity : 0,
+          stock_out: isStockOut ? Math.abs(record.quantity) : 0,
+          unit: record.unit_type || item.base_unit || 'pcs',
           unit_cost: record.unit_cost || 0,
           unit_price: record.unit_price || item.unit_price || 0,
           expiration_date: record.expiration_date || 'N/A',
-          transaction_type: record.transaction_type || 'N/A',
-          running_balance: record.running_balance ?? null,
+          transaction_type: record.transaction_type || (isStockIn ? 'RESUPPLY' : 'SALE'),
+          running_balance: record.running_balance || 0,
+          supplier_id: record.supplier_id,
         };
       }));
 
@@ -256,6 +278,7 @@ export default function InventoryScreen({ userMode }) {
       setShowSupplierModal(true);
     } catch (err) {
       console.error('Error fetching supplier details:', err);
+      alert('Error loading stock card data');
     }
   };
 
@@ -294,6 +317,17 @@ export default function InventoryScreen({ userMode }) {
   const handleDeleteCategory = async (category) => {
     if (!window.confirm(`Are you sure you want to delete category "${category.name}"?`)) return;
     try {
+      // Check if any products use this category
+      const productsWithCategory = await db.products
+        .where('category_id')
+        .equals(category.category_id)
+        .toArray();
+      
+      if (productsWithCategory.length > 0) {
+        alert(`Cannot delete category. ${productsWithCategory.length} product(s) use this category. Update those products first.`);
+        return;
+      }
+      
       await db.categories.delete(category.category_id);
       fetchCategories();
     } catch (err) {
@@ -301,12 +335,26 @@ export default function InventoryScreen({ userMode }) {
     }
   };
 
+  // Fixed search logic to include product names
   const filteredInventory = inventory.filter((item) => {
-    if (showLowStockOnly) return item.quantity <= (item.threshold || 5);
+    if (showLowStockOnly && item.quantity > (item.threshold || 5)) return false;
+    
     const q = searchQuery.toLowerCase();
-    if (item.name.toLowerCase().includes(q)) return true;
-    if (item.sku && item.sku.toLowerCase().includes(q)) return true;
-    if (item.suppliers.some((s) => s.name.toLowerCase().includes(q))) return true;
+    if (!q) return true;
+    
+    // Search in product name
+    if (item.name?.toLowerCase().includes(q)) return true;
+    
+    // Search in SKU/barcode
+    if (item.sku?.toLowerCase().includes(q)) return true;
+    
+    // Search in category name
+    const categoryName = categories.find(c => c.category_id === item.category_id)?.name?.toLowerCase();
+    if (categoryName?.includes(q)) return true;
+    
+    // Search in supplier names
+    if (item.suppliers?.some(s => s.name?.toLowerCase().includes(q))) return true;
+    
     return false;
   });
 
@@ -319,12 +367,22 @@ export default function InventoryScreen({ userMode }) {
           <p style={styles.pageSubtitle}>Manage your products, track stock levels, and monitor expiry dates</p>
         </div>
         <div style={styles.headerActions}>
-          <input
-            style={styles.searchInput}
-            placeholder="Search inventory or suppliers..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-          />
+          <div style={styles.searchContainer}>
+            <input
+              style={styles.searchInput}
+              placeholder="Search products, barcode, categories..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+            />
+            {searchQuery && (
+              <button 
+                style={styles.clearSearchButton}
+                onClick={() => setSearchQuery('')}
+              >
+                ✕
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
@@ -335,29 +393,36 @@ export default function InventoryScreen({ userMode }) {
           <p style={styles.statValue}>{stats.totalProducts}</p>
         </div>
         <div
-          style={{...styles.statCard, backgroundColor: '#fffbeb', borderColor: '#f59e0b', cursor: 'pointer'}}
+          style={{...styles.statCard, ...(showLowStockOnly ? styles.lowStockCardActive : styles.lowStockCard)}}
           onClick={() => setShowLowStockOnly(!showLowStockOnly)}
         >
           <h3 style={styles.statTitle}>Low Stock Items</h3>
-          <p style={{...styles.statValue, color: '#b45309'}}>{stats.lowStock}</p>
-          <p style={{fontSize: '0.9rem', color: '#92400e'}}>
+          <p style={styles.lowStockValue}>{stats.lowStock}</p>
+          <p style={styles.lowStockLabel}>
             {showLowStockOnly ? 'Showing Low Stock' : 'Click to View'}
           </p>
         </div>
-        <div style={{...styles.statCard, backgroundColor: '#fef2f2', borderColor: '#ef4444'}}>
+        <div style={{...styles.statCard, ...styles.expiringCard}}>
           <h3 style={styles.statTitle}>Expiring Soon</h3>
-          <p style={{...styles.statValue, color: '#dc2626'}}>{stats.expiringSoon}</p>
+          <p style={styles.expiringValue}>{stats.expiringSoon}</p>
         </div>
-        <div style={{...styles.statCard, backgroundColor: '#f0f9ff', borderColor: '#0ea5e9'}}>
+        <div style={{...styles.statCard, ...styles.valueCard}}>
           <h3 style={styles.statTitle}>Inventory Value</h3>
-          <p style={{...styles.statValue, color: '#0369a1'}}>₱{stats.inventoryValue.toFixed(2)}</p>
+          <p style={styles.valueAmount}>₱{stats.inventoryValue.toFixed(2)}</p>
         </div>
       </div>
 
       {/* Products */}
       <div style={styles.productsSection}>
         <div style={styles.sectionHeader}>
-          <h2 style={styles.sectionTitle}>Products</h2>
+          <div>
+            <h2 style={styles.sectionTitle}>Products</h2>
+            <p style={styles.sectionSubtitle}>
+              {filteredInventory.length} of {inventory.length} products
+              {searchQuery && ` • Searching: "${searchQuery}"`}
+              {showLowStockOnly && ' • Showing low stock only'}
+            </p>
+          </div>
           <div style={styles.sectionActions}>
             <button style={styles.primaryButton} onClick={() => setShowAddModal(true)}>
               Add New Item
@@ -369,37 +434,136 @@ export default function InventoryScreen({ userMode }) {
         </div>
 
         <div style={styles.tableContainer}>
-          <table style={styles.table}>
-            <thead>
-              <tr style={styles.tableHeader}>
-                <th style={styles.tableCell}>PRODUCT</th>
-                <th style={styles.tableCell}>CATEGORY</th>
-                <th style={styles.tableCell}>SKU</th>
-                <th style={styles.tableCell}>UNIT</th>
-                <th style={styles.tableCell}>PRICE</th>
-                <th style={styles.tableCell}>STOCK</th>
-                <th style={styles.tableCell}>THRESHOLD</th>
-                <th style={styles.tableCell}>ACTIONS</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredInventory.map((item) => (
-                <tr key={item.product_id} style={styles.tableRow}>
-                  <td style={styles.tableCell}>{item.name}</td>
-                  <td style={styles.tableCell}>{categories.find(c => c.category_id === item.category_id)?.name || 'N/A'}</td>
-                  <td style={styles.tableCell}>{item.sku || 'N/A'}</td>
-                  <td style={styles.tableCell}>{item.base_unit || 'pcs'}</td>
-                  <td style={styles.tableCell}>₱{item.unit_price || '0.00'}</td>
-                  <td style={styles.tableCell}>{item.quantity || 0}</td>
-                  <td style={styles.tableCell}>{item.threshold || 5}</td>
-                  <td style={styles.tableCell}>
-                    <button style={styles.editButton} onClick={() => handleEditItem(item)}>Edit</button>
-                    <button style={styles.viewButton} onClick={() => handleSupplierDetails(item)}>View</button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          {filteredInventory.length === 0 ? (
+            <div style={styles.emptyState}>
+              <div style={styles.emptyStateIcon}>📦</div>
+              <h3 style={styles.emptyStateTitle}>No products found</h3>
+              <p style={styles.emptyStateText}>
+                {searchQuery 
+                  ? `No products matching "${searchQuery}"`
+                  : showLowStockOnly 
+                    ? 'No low stock products'
+                    : 'Add your first product to get started'}
+              </p>
+              {searchQuery && (
+                <button 
+                  style={styles.clearFilterButton}
+                  onClick={() => {
+                    setSearchQuery('');
+                    setShowLowStockOnly(false);
+                  }}
+                >
+                  Clear filters
+                </button>
+              )}
+            </div>
+          ) : (
+            <>
+              {/* Mobile/Tablet View */}
+              <div style={styles.mobileView}>
+                {filteredInventory.map((item) => (
+                  <div key={item.product_id} style={styles.mobileCard}>
+                    <div style={styles.mobileCardHeader}>
+                      <div>
+                        <h4 style={styles.mobileProductName}>{item.name}</h4>
+                        <p style={styles.mobileProductSku}>
+                          SKU: {item.sku || 'N/A'} • {categories.find(c => c.category_id === item.category_id)?.name || 'Uncategorized'}
+                        </p>
+                      </div>
+                      <div style={styles.mobilePrice}>
+                        ₱{item.unit_price || '0.00'}
+                      </div>
+                    </div>
+                    
+                    <div style={styles.mobileCardDetails}>
+                      <div style={styles.mobileDetail}>
+                        <span style={styles.mobileDetailLabel}>Unit:</span>
+                        <span style={styles.mobileDetailValue}>{item.base_unit || 'pcs'}</span>
+                      </div>
+                      <div style={styles.mobileDetail}>
+                        <span style={styles.mobileDetailLabel}>Stock:</span>
+                        <span style={{
+                          ...styles.mobileDetailValue,
+                          color: item.quantity <= (item.threshold || 5) ? '#dc2626' : '#16a34a',
+                          fontWeight: '600'
+                        }}>
+                          {item.quantity || 0}
+                        </span>
+                      </div>
+                      <div style={styles.mobileDetail}>
+                        <span style={styles.mobileDetailLabel}>Threshold:</span>
+                        <span style={styles.mobileDetailValue}>{item.threshold || 5}</span>
+                      </div>
+                    </div>
+                    
+                    <div style={styles.mobileCardActions}>
+                      <button style={styles.mobileEditButton} onClick={() => handleEditItem(item)}>
+                        Edit
+                      </button>
+                      <button style={styles.mobileViewButton} onClick={() => handleSupplierDetails(item)}>
+                        View Details
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Desktop View */}
+              <div style={styles.desktopView}>
+                <table style={styles.table}>
+                  <thead>
+                    <tr style={styles.tableHeader}>
+                      <th style={styles.tableCell}>PRODUCT</th>
+                      <th style={styles.tableCell}>CATEGORY</th>
+                      <th style={styles.tableCell}>SKU</th>
+                      <th style={styles.tableCell}>UNIT</th>
+                      <th style={styles.tableCell}>PRICE</th>
+                      <th style={styles.tableCell}>STOCK</th>
+                      <th style={styles.tableCell}>THRESHOLD</th>
+                      <th style={styles.tableCell}>ACTIONS</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredInventory.map((item) => (
+                      <tr key={item.product_id} style={{
+                        ...styles.tableRow,
+                        backgroundColor: item.quantity <= (item.threshold || 5) ? '#fef2f2' : 'transparent'
+                      }}>
+                        <td style={styles.tableCell}>
+                          <div style={styles.productNameCell}>
+                            <span style={styles.productName}>{item.name}</span>
+                            {item.quantity <= (item.threshold || 5) && (
+                              <span style={styles.lowStockBadge}>Low Stock</span>
+                            )}
+                          </div>
+                        </td>
+                        <td style={styles.tableCell}>
+                          {categories.find(c => c.category_id === item.category_id)?.name || 'N/A'}
+                        </td>
+                        <td style={styles.tableCell}>{item.sku || 'N/A'}</td>
+                        <td style={styles.tableCell}>{item.base_unit || 'pcs'}</td>
+                        <td style={styles.tableCell}>₱{item.unit_price || '0.00'}</td>
+                        <td style={{
+                          ...styles.tableCell,
+                          color: item.quantity <= (item.threshold || 5) ? '#dc2626' : '#16a34a',
+                          fontWeight: '600'
+                        }}>
+                          {item.quantity || 0}
+                        </td>
+                        <td style={styles.tableCell}>{item.threshold || 5}</td>
+                        <td style={styles.tableCell}>
+                          <div style={styles.actionButtons}>
+                            <button style={styles.editButton} onClick={() => handleEditItem(item)}>Edit</button>
+                            <button style={styles.viewButton} onClick={() => handleSupplierDetails(item)}>View</button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
         </div>
       </div>
 
@@ -410,6 +574,7 @@ export default function InventoryScreen({ userMode }) {
           onClose={() => {
             setShowAddModal(false);
             setShowEditModal(false);
+            setEditingItem(null);
           }}
           onSubmit={showAddModal ? handleAddItem : handleSaveEdit}
           onDelete={showEditModal ? handleDeleteItem : null}
@@ -422,20 +587,32 @@ export default function InventoryScreen({ userMode }) {
       )}
 
       {showSupplierModal && (
-        <SupplierModal suppliers={supplierDetails} onClose={() => setShowSupplierModal(false)} />
+        <SupplierModal 
+          suppliers={supplierDetails} 
+          inventory={currentStockItem} 
+          onClose={() => {
+            setShowSupplierModal(false);
+            setCurrentStockItem(null);
+            setSupplierDetails([]);
+          }} 
+        />
       )}
 
       {showCategoryModal && (
         <CategoryModal 
           visible={showCategoryModal} 
-          onClose={() => setShowCategoryModal(false)} 
+          onClose={() => {
+            setShowCategoryModal(false);
+            setEditingCategory(null);
+            setNewCategoryName('');
+          }} 
           newCategoryName={newCategoryName}
           setNewCategoryName={setNewCategoryName}
           onSubmit={editingCategory ? handleSaveCategory : handleAddCategory}
           editingCategory={editingCategory}
           onDelete={editingCategory ? handleDeleteCategory : null}
-          categories={categories} // pass categories for modal table
-          handleEditCategory={handleEditCategory} // edit from modal
+          categories={categories}
+          handleEditCategory={handleEditCategory}
         />
       )}
     </div>
@@ -444,23 +621,6 @@ export default function InventoryScreen({ userMode }) {
 
 function ProductModal({ visible, onClose, onSubmit, onDelete, item, setItem, title, isEdit, categories }) {
   if (!visible) return null;
-
-  const getUnitOptions = (base_unit) => {
-    switch(base_unit) {
-      case 'pcs':
-        return ['pcs', 'dozen', 'boxes', 'packs'];
-      case 'grams':
-      case 'kilos':
-        return ['grams', 'kilos'];
-      case 'ml':
-      case 'liters':
-        return ['ml', 'liters'];
-      default:
-        return [base_unit];
-    }
-  };
-
-  const unitOptions = getUnitOptions(item?.base_unit || 'pcs');
 
   return (
     <div style={styles.modalOverlay}>
@@ -521,16 +681,19 @@ function ProductModal({ visible, onClose, onSubmit, onDelete, item, setItem, tit
               placeholder="0.00"
               value={item?.unit_price?.toString() || ''}
               type="number"
+              step="0.01"
+              min="0"
               onChange={(e) => setItem({ ...item, unit_price: e.target.value })}
               style={styles.input}
             />
           </div>
           <div style={styles.inputGroup}>
-            <label style={styles.inputLabel}>Threshold *</label>
+            <label style={styles.inputLabel}>Low Stock Threshold *</label>
             <input
               placeholder="5"
               value={item?.threshold?.toString() || ''}
               type="number"
+              min="1"
               onChange={(e) => setItem({ ...item, threshold: e.target.value })}
               style={styles.input}
             />
@@ -557,51 +720,192 @@ function ProductModal({ visible, onClose, onSubmit, onDelete, item, setItem, tit
 
 function SupplierModal({ suppliers, inventory, onClose }) {
   const currentStock = inventory?.quantity ?? 0;
+  const productName = inventory?.name || 'Product';
+  const productSku = inventory?.sku || 'N/A';
+
+  // Calculate totals from raw data
+  const totalStockIn = suppliers.reduce((sum, item) => sum + (item.stock_in > 0 ? item.stock_in : 0), 0);
+  const totalStockOut = suppliers.reduce((sum, item) => sum + (item.stock_out > 0 ? item.stock_out : 0), 0);
+  const totalCost = suppliers.reduce((sum, item) => sum + (item.unit_cost || 0) * (item.stock_in > 0 ? item.stock_in : 0), 0);
+  const totalValue = suppliers.reduce((sum, item) => sum + (item.unit_price || 0) * (item.stock_in > 0 ? item.stock_in : 0), 0);
 
   return (
     <div style={styles.modalOverlay}>
       <div style={styles.modalContainer}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-          <h2 style={styles.modalHeader}>Stock Card</h2>
-          <div style={{ fontWeight: 'bold', color: '#1e293b', fontSize: '16px' }}>
-            Current Stock: {currentStock}
+          <div>
+            <h2 style={styles.modalHeader}>Stock Card - {productName}</h2>
+            <p style={{ color: '#64748b', fontSize: '14px' }}>SKU: {productSku}</p>
+          </div>
+          <div style={{ 
+            backgroundColor: '#f8fafc', 
+            padding: '12px 16px', 
+            borderRadius: '8px',
+            textAlign: 'center'
+          }}>
+            <div style={{ fontWeight: 'bold', color: '#1e293b', fontSize: '16px' }}>
+              Current Stock: {currentStock}
+            </div>
+            <div style={{ fontSize: '12px', color: '#64748b', marginTop: '4px' }}>
+              (Total In: {totalStockIn} - Total Out: {totalStockOut})
+            </div>
           </div>
         </div>
 
         <div style={styles.modalContent}>
           {suppliers.length === 0 ? (
-            <p style={styles.noDataText}>No stock card records available</p>
-          ) : (
-            <div style={styles.tableContainer}>
-              <table style={styles.table}>
-                <thead>
-                  <tr style={styles.tableHeader}>
-                    <th style={styles.tableCell}>Supplier</th>
-                    <th style={styles.tableCell}>Transaction Date</th>
-                    <th style={styles.tableCell}>Stock-in</th>
-                    <th style={styles.tableCell}>Stock-out</th>
-                    <th style={styles.tableCell}>Units</th>
-                    <th style={styles.tableCell}>Expiry Date</th>
-                    <th style={styles.tableCell}>Unit Cost</th>
-                    <th style={styles.tableCell}>Unit Price</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {suppliers.map((s, idx) => (
-                    <tr key={idx} style={styles.tableRow}>
-                      <td style={styles.tableCell}>{s.name}</td>
-                      <td style={styles.tableCell}>{s.resupply_date || 'N/A'}</td>
-                      <td style={styles.tableCell}>{s.quantity}</td>
-                      <td style={styles.tableCell}>{s.stockout || 0}</td>
-                      <td style={styles.tableCell}>{s.unit}</td>
-                      <td style={styles.tableCell}>{s.expiration_date || 'N/A'}</td>
-                      <td style={styles.tableCell}>₱{(s.unit_cost || 0).toFixed(2)}</td>
-                      <td style={styles.tableCell}>₱{(s.unit_price || 0).toFixed(2)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+            <div style={{ textAlign: 'center', padding: '40px' }}>
+              <div style={{ fontSize: '48px', marginBottom: '16px' }}>📊</div>
+              <p style={{ fontSize: '16px', color: '#64748b' }}>No stock transactions found for this product.</p>
+              <p style={{ fontSize: '14px', color: '#94a3b8' }}>Stock card records will appear after resupply or sales.</p>
             </div>
+          ) : (
+            <>
+              <div style={styles.tableContainer}>
+                <table style={styles.table}>
+                  <thead>
+                    <tr style={styles.tableHeader}>
+                      <th style={styles.tableCell}>Date/Time</th>
+                      <th style={styles.tableCell}>Transaction</th>
+                      <th style={styles.tableCell}>Supplier</th>
+                      <th style={styles.tableCell}>Stock-in</th>
+                      <th style={styles.tableCell}>Stock-out</th>
+                      <th style={styles.tableCell}>Unit Cost</th>
+                      <th style={styles.tableCell}>Unit Price</th>
+                      <th style={styles.tableCell}>Expiry Date</th>
+                      <th style={styles.tableCell}>Running Balance</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {suppliers.map((s, idx) => (
+                      <tr key={idx} style={{
+                        ...styles.tableRow,
+                        backgroundColor: s.transaction_type === 'RESUPPLY' ? '#f0fdf4' : 
+                                        s.transaction_type === 'SALE' ? '#fef2f2' : 'transparent'
+                      }}>
+                        <td style={styles.tableCell}>{s.transaction_date}</td>
+                        <td style={styles.tableCell}>
+                          <span style={{
+                            padding: '4px 8px',
+                            borderRadius: '4px',
+                            fontSize: '12px',
+                            fontWeight: '500',
+                            backgroundColor: s.transaction_type === 'RESUPPLY' ? '#10b981' : 
+                                          s.transaction_type === 'SALE' ? '#ef4444' : '#6b7280',
+                            color: 'white'
+                          }}>
+                            {s.transaction_type}
+                          </span>
+                        </td>
+                        <td style={styles.tableCell}>{s.name || '-'}</td>
+                        <td style={styles.tableCell}>
+                          {s.stock_in > 0 ? (
+                            <span style={{ color: '#10b981', fontWeight: '600' }}>+{s.stock_in}</span>
+                          ) : '-'}
+                        </td>
+                        <td style={styles.tableCell}>
+                          {s.stock_out > 0 ? (
+                            <span style={{ color: '#ef4444', fontWeight: '600' }}>-{s.stock_out}</span>
+                          ) : '-'}
+                        </td>
+                        <td style={styles.tableCell}>
+                          {s.unit_cost > 0 ? `₱${s.unit_cost.toFixed(2)}` : '-'}
+                        </td>
+                        <td style={styles.tableCell}>
+                          {s.unit_price > 0 ? `₱${s.unit_price.toFixed(2)}` : '-'}
+                        </td>
+                        <td style={styles.tableCell}>
+                          {s.expiration_date && s.expiration_date !== 'N/A' ? s.expiration_date : '-'}
+                        </td>
+                        <td style={styles.tableCell}>
+                          <span style={{
+                            fontWeight: '600',
+                            color: s.running_balance > 0 ? '#1e293b' : '#ef4444'
+                          }}>
+                            {s.running_balance}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot>
+                    <tr style={{ 
+                      backgroundColor: '#f8fafc', 
+                      borderTop: '2px solid #e2e8f0' 
+                    }}>
+                      <td colSpan="3" style={{ 
+                        ...styles.tableCell, 
+                        fontWeight: '600',
+                        textAlign: 'right'
+                      }}>
+                        Totals:
+                      </td>
+                      <td style={{ 
+                        ...styles.tableCell, 
+                        color: '#10b981',
+                        fontWeight: '600'
+                      }}>
+                        +{totalStockIn}
+                      </td>
+                      <td style={{ 
+                        ...styles.tableCell, 
+                        color: '#ef4444',
+                        fontWeight: '600'
+                      }}>
+                        -{totalStockOut}
+                      </td>
+                      <td style={{ 
+                        ...styles.tableCell, 
+                        fontWeight: '600'
+                      }}>
+                        ₱{totalCost.toFixed(2)}
+                      </td>
+                      <td style={{ 
+                        ...styles.tableCell, 
+                        fontWeight: '600'
+                      }}>
+                        ₱{totalValue.toFixed(2)}
+                      </td>
+                      <td colSpan="2" style={{ 
+                        ...styles.tableCell, 
+                        fontWeight: '600',
+                        color: '#1e293b'
+                      }}>
+                        Net Stock: {currentStock}
+                      </td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+              
+              {/* Summary Stats */}
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+                gap: '16px',
+                marginTop: '20px',
+                padding: '16px',
+                backgroundColor: '#f8fafc',
+                borderRadius: '8px'
+              }}>
+                <div>
+                  <div style={{ fontSize: '12px', color: '#64748b' }}>Total Stock-in</div>
+                  <div style={{ fontSize: '18px', fontWeight: '600', color: '#10b981' }}>+{totalStockIn}</div>
+                </div>
+                <div>
+                  <div style={{ fontSize: '12px', color: '#64748b' }}>Total Stock-out</div>
+                  <div style={{ fontSize: '18px', fontWeight: '600', color: '#ef4444' }}>-{totalStockOut}</div>
+                </div>
+                <div>
+                  <div style={{ fontSize: '12px', color: '#64748b' }}>Total Cost</div>
+                  <div style={{ fontSize: '18px', fontWeight: '600', color: '#1e293b' }}>₱{totalCost.toFixed(2)}</div>
+                </div>
+                <div>
+                  <div style={{ fontSize: '12px', color: '#64748b' }}>Total Value</div>
+                  <div style={{ fontSize: '18px', fontWeight: '600', color: '#1e293b' }}>₱{totalValue.toFixed(2)}</div>
+                </div>
+              </div>
+            </>
           )}
         </div>
 
@@ -671,11 +975,14 @@ function CategoryModal({ visible, onClose, newCategoryName, setNewCategoryName, 
 
 const styles = {
   container: { 
-    padding: '20px', 
+    padding: '16px', 
     backgroundColor: '#f8fafc', 
     minHeight: '100vh',
     maxWidth: '1400px',
-    margin: '0 auto'
+    margin: '0 auto',
+    '@media (max-width: 768px)': {
+      padding: '12px',
+    },
   },
   header: {
     display: 'flex',
@@ -683,35 +990,76 @@ const styles = {
     alignItems: 'flex-start',
     marginBottom: '24px',
     flexWrap: 'wrap',
-    gap: '16px'
+    gap: '16px',
+    '@media (max-width: 768px)': {
+      flexDirection: 'column',
+      gap: '12px',
+    },
   },
   pageTitle: {
     fontSize: '28px',
     fontWeight: 'bold',
     color: '#1e293b',
     marginBottom: '8px',
+    '@media (max-width: 768px)': {
+      fontSize: '24px',
+    },
   },
   pageSubtitle: {
     fontSize: '16px',
     color: '#64748b',
+    '@media (max-width: 768px)': {
+      fontSize: '14px',
+    },
   },
   headerActions: {
     display: 'flex',
     gap: '12px',
+    '@media (max-width: 768px)': {
+      width: '100%',
+    },
+  },
+  searchContainer: {
+    position: 'relative',
+    width: '100%',
+    maxWidth: '400px',
+    '@media (max-width: 768px)': {
+      maxWidth: '100%',
+    },
   },
   searchInput: {
     border: '1px solid #d1d5db',
     borderRadius: '8px',
     padding: '10px 16px',
+    paddingRight: '40px',
     backgroundColor: '#fff',
-    width: '300px',
+    width: '100%',
     fontSize: '14px',
+    boxSizing: 'border-box',
+  },
+  clearSearchButton: {
+    position: 'absolute',
+    right: '10px',
+    top: '50%',
+    transform: 'translateY(-50%)',
+    background: 'none',
+    border: 'none',
+    color: '#64748b',
+    cursor: 'pointer',
+    fontSize: '16px',
+    padding: '4px',
   },
   statsContainer: {
     display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+    gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
     gap: '16px',
     marginBottom: '24px',
+    '@media (max-width: 640px)': {
+      gridTemplateColumns: 'repeat(2, 1fr)',
+    },
+    '@media (max-width: 480px)': {
+      gridTemplateColumns: '1fr',
+    },
   },
   statCard: {
     backgroundColor: '#fff',
@@ -719,6 +1067,27 @@ const styles = {
     borderRadius: '12px',
     padding: '20px',
     boxShadow: '0 1px 3px rgba(0, 0, 0, 0.05)',
+    '@media (max-width: 768px)': {
+      padding: '16px',
+    },
+  },
+  lowStockCard: {
+    backgroundColor: '#fffbeb',
+    borderColor: '#f59e0b',
+    cursor: 'pointer',
+  },
+  lowStockCardActive: {
+    backgroundColor: '#fef3c7',
+    borderColor: '#f59e0b',
+    cursor: 'pointer',
+  },
+  expiringCard: {
+    backgroundColor: '#fef2f2',
+    borderColor: '#ef4444',
+  },
+  valueCard: {
+    backgroundColor: '#f0f9ff',
+    borderColor: '#0ea5e9',
   },
   statTitle: {
     fontSize: '14px',
@@ -732,9 +1101,27 @@ const styles = {
     color: '#1e293b',
     marginBottom: '4px',
   },
-  statChange: {
-    fontSize: '12px',
-    color: '#64748b',
+  lowStockValue: {
+    fontSize: '24px',
+    fontWeight: 'bold',
+    color: '#b45309',
+    marginBottom: '4px',
+  },
+  lowStockLabel: {
+    fontSize: '0.9rem',
+    color: '#92400e',
+  },
+  expiringValue: {
+    fontSize: '24px',
+    fontWeight: 'bold',
+    color: '#dc2626',
+    marginBottom: '4px',
+  },
+  valueAmount: {
+    fontSize: '24px',
+    fontWeight: 'bold',
+    color: '#0369a1',
+    marginBottom: '4px',
   },
   productsSection: {
     backgroundColor: '#fff',
@@ -742,23 +1129,38 @@ const styles = {
     borderRadius: '12px',
     padding: '20px',
     boxShadow: '0 1px 3px rgba(0, 0, 0, 0.05)',
+    '@media (max-width: 768px)': {
+      padding: '16px',
+    },
   },
   sectionHeader: {
     display: 'flex',
     justifyContent: 'space-between',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     marginBottom: '20px',
     flexWrap: 'wrap',
-    gap: '12px'
+    gap: '12px',
+    '@media (max-width: 768px)': {
+      flexDirection: 'column',
+      alignItems: 'stretch',
+    },
   },
   sectionTitle: {
     fontSize: '18px',
     fontWeight: '600',
     color: '#1e293b',
+    marginBottom: '4px',
+  },
+  sectionSubtitle: {
+    fontSize: '14px',
+    color: '#64748b',
   },
   sectionActions: {
     display: 'flex',
     gap: '8px',
+    '@media (max-width: 768px)': {
+      width: '100%',
+    },
   },
   primaryButton: {
     backgroundColor: '#4f46e5',
@@ -769,6 +1171,10 @@ const styles = {
     cursor: 'pointer',
     fontSize: '14px',
     fontWeight: '500',
+    whiteSpace: 'nowrap',
+    '@media (max-width: 768px)': {
+      flex: 1,
+    },
   },
   secondaryButton: {
     backgroundColor: '#f1f5f9',
@@ -779,9 +1185,100 @@ const styles = {
     cursor: 'pointer',
     fontSize: '14px',
     fontWeight: '500',
+    whiteSpace: 'nowrap',
+    '@media (max-width: 768px)': {
+      flex: 1,
+    },
   },
   tableContainer: {
     overflowX: 'auto',
+  },
+  desktopView: {
+    display: 'block',
+    '@media (max-width: 1024px)': {
+      display: 'none',
+    },
+  },
+  mobileView: {
+    display: 'none',
+    '@media (max-width: 1024px)': {
+      display: 'block',
+    },
+  },
+  mobileCard: {
+    backgroundColor: '#f8fafc',
+    border: '1px solid #e2e8f0',
+    borderRadius: '8px',
+    padding: '16px',
+    marginBottom: '12px',
+  },
+  mobileCardHeader: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: '12px',
+  },
+  mobileProductName: {
+    fontSize: '16px',
+    fontWeight: '600',
+    color: '#1e293b',
+    marginBottom: '4px',
+  },
+  mobileProductSku: {
+    fontSize: '12px',
+    color: '#64748b',
+  },
+  mobilePrice: {
+    fontSize: '16px',
+    fontWeight: '600',
+    color: '#4f46e5',
+  },
+  mobileCardDetails: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(3, 1fr)',
+    gap: '12px',
+    marginBottom: '12px',
+    '@media (max-width: 480px)': {
+      gridTemplateColumns: 'repeat(2, 1fr)',
+    },
+  },
+  mobileDetail: {
+    display: 'flex',
+    flexDirection: 'column',
+  },
+  mobileDetailLabel: {
+    fontSize: '11px',
+    color: '#64748b',
+    marginBottom: '2px',
+  },
+  mobileDetailValue: {
+    fontSize: '14px',
+    color: '#1e293b',
+    fontWeight: '500',
+  },
+  mobileCardActions: {
+    display: 'flex',
+    gap: '8px',
+  },
+  mobileEditButton: {
+    backgroundColor: '#3b82f6',
+    color: '#fff',
+    border: 'none',
+    padding: '8px 16px',
+    borderRadius: '4px',
+    cursor: 'pointer',
+    fontSize: '12px',
+    flex: 1,
+  },
+  mobileViewButton: {
+    backgroundColor: '#10b981',
+    color: '#fff',
+    border: 'none',
+    padding: '8px 16px',
+    borderRadius: '4px',
+    cursor: 'pointer',
+    fontSize: '12px',
+    flex: 1,
   },
   table: {
     width: '100%',
@@ -793,35 +1290,34 @@ const styles = {
   },
   tableRow: {
     borderBottom: '1px solid #e2e8f0',
-  },
-  detailsRow: {
-    backgroundColor: '#f8fafc',
+    '&:hover': {
+      backgroundColor: '#f8fafc',
+    },
   },
   tableCell: {
     padding: '12px 16px',
     textAlign: 'left',
     fontSize: '14px',
+    '@media (max-width: 1200px)': {
+      padding: '10px 12px',
+    },
   },
-  detailsCell: {
-    padding: '8px 16px',
-  },
-  productInfo: {
+  productNameCell: {
     display: 'flex',
     flexDirection: 'column',
+    gap: '4px',
   },
   productName: {
     fontWeight: '500',
     color: '#1e293b',
   },
-  productId: {
-    fontSize: '12px',
-    color: '#64748b',
-  },
-  productDetails: {
-    display: 'flex',
-    gap: '16px',
-    fontSize: '12px',
-    color: '#64748b',
+  lowStockBadge: {
+    backgroundColor: '#fef2f2',
+    color: '#dc2626',
+    fontSize: '11px',
+    padding: '2px 6px',
+    borderRadius: '10px',
+    display: 'inline-block',
   },
   actionButtons: {
     display: 'flex',
@@ -845,6 +1341,34 @@ const styles = {
     cursor: 'pointer',
     fontSize: '12px',
   },
+  emptyState: {
+    textAlign: 'center',
+    padding: '40px 20px',
+  },
+  emptyStateIcon: {
+    fontSize: '48px',
+    marginBottom: '16px',
+  },
+  emptyStateTitle: {
+    fontSize: '18px',
+    fontWeight: '600',
+    color: '#1e293b',
+    marginBottom: '8px',
+  },
+  emptyStateText: {
+    fontSize: '14px',
+    color: '#64748b',
+    marginBottom: '16px',
+  },
+  clearFilterButton: {
+    backgroundColor: '#f1f5f9',
+    color: '#475569',
+    border: '1px solid #e2e8f0',
+    padding: '8px 16px',
+    borderRadius: '6px',
+    cursor: 'pointer',
+    fontSize: '14px',
+  },
   modalOverlay: {
     position: 'fixed',
     top: 0,
@@ -867,6 +1391,10 @@ const styles = {
     maxHeight: '90vh',
     overflowY: 'auto',
     boxShadow: '0 10px 25px rgba(0, 0, 0, 0.15)',
+    '@media (max-width: 768px)': {
+      padding: '20px',
+      maxWidth: '95%',
+    },
   },
   modalHeader: {
     fontSize: '20px',
@@ -893,11 +1421,15 @@ const styles = {
     borderRadius: '6px',
     border: '1px solid #d1d5db',
     fontSize: '14px',
+    boxSizing: 'border-box',
   },
   modalButtons: {
     display: 'flex',
     justifyContent: 'flex-end',
     gap: '12px',
+    '@media (max-width: 480px)': {
+      flexDirection: 'column',
+    },
   },
   submitButton: {
     backgroundColor: '#4f46e5',
@@ -908,6 +1440,9 @@ const styles = {
     cursor: 'pointer',
     fontSize: '14px',
     fontWeight: '500',
+    '@media (max-width: 480px)': {
+      width: '100%',
+    },
   },
   deleteButton: {
     backgroundColor: '#ef4444',
@@ -918,6 +1453,9 @@ const styles = {
     cursor: 'pointer',
     fontSize: '14px',
     fontWeight: '500',
+    '@media (max-width: 480px)': {
+      width: '100%',
+    },
   },
   cancelButton: {
     backgroundColor: '#f1f5f9',
@@ -928,35 +1466,9 @@ const styles = {
     cursor: 'pointer',
     fontSize: '14px',
     fontWeight: '500',
-  },
-  supplierDetails: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '16px',
-  },
-  supplierDetailCard: {
-    border: '1px solid #e2e8f0',
-    borderRadius: '8px',
-    padding: '16px',
-  },
-  supplierDetailGrid: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(2, 1fr)',
-    gap: '12px',
-  },
-  detailItem: {
-    display: 'flex',
-    flexDirection: 'column',
-  },
-  detailLabel: {
-    fontSize: '12px',
-    color: '#64748b',
-    marginBottom: '4px',
-  },
-  detailValue: {
-    fontSize: '14px',
-    color: '#1e293b',
-    fontWeight: '500',
+    '@media (max-width: 480px)': {
+      width: '100%',
+    },
   },
   noDataText: {
     color: '#94a3b8',

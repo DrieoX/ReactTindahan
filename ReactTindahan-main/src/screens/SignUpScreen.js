@@ -5,26 +5,46 @@ import { registerUser } from '../services/UserService';
 export default function SignupScreen() {
   const navigate = useNavigate();
 
+  const [username, setUsername] = useState('');
   const [fullName, setFullName] = useState('');
   const [storeName, setStoreName] = useState('');
-  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [role, setRole] = useState('Staff'); // Default to Staff
+  const [isOwnerSignup, setIsOwnerSignup] = useState(false);
+
+  const handleRoleChange = (selectedRole) => {
+    setRole(selectedRole);
+    setIsOwnerSignup(selectedRole === 'Owner');
+  };
 
   const handleRegister = async () => {
-    if (!fullName || !storeName || !email || !password || !confirmPassword) {
-      alert('Please fill out all fields.');
+    // Basic validation
+    if (!username || !fullName || !password || !confirmPassword) {
+      alert('Please fill out all required fields.');
       return;
     }
+
+    // If owner, store name is required
+    if (role === 'Owner' && !storeName) {
+      alert('Store name is required for owners.');
+      return;
+    }
+
     if (password !== confirmPassword) {
       alert('Passwords do not match.');
       return;
     }
 
+    if (password.length < 6) {
+      alert('Password must be at least 6 characters long.');
+      return;
+    }
+
     try {
-      const result = await registerUser(email, password, 'Owner', fullName, storeName);
+      const result = await registerUser(username, password, role, fullName, role === 'Owner' ? storeName : '');
       if (result.success) {
-        alert('User registered! Please login.');
+        alert(`Account created successfully! You are registered as ${role}. Please login.`);
         navigate('/');
       } else {
         alert(result.error);
@@ -44,44 +64,78 @@ export default function SignupScreen() {
         Start managing your business with our POS system
       </p>
 
+      {/* Role Selection */}
+      <div style={styles.roleContainer}>
+        <button
+          style={{
+            ...styles.roleButton,
+            ...(role === 'Owner' ? styles.activeRoleButton : {})
+          }}
+          onClick={() => handleRoleChange('Owner')}
+        >
+          Register as Owner
+        </button>
+        <button
+          style={{
+            ...styles.roleButton,
+            ...(role === 'Staff' ? styles.activeRoleButton : {})
+          }}
+          onClick={() => handleRoleChange('Staff')}
+        >
+          Register as Staff
+        </button>
+      </div>
+
+      <div style={styles.roleInfo}>
+        {role === 'Owner' ? 
+          "As an owner, you'll have full access to manage your store, inventory, and staff." : 
+          "As staff, you'll have limited access to process sales and view assigned tasks."}
+      </div>
+
       <input
         type="text"
-        placeholder="Full Name"
+        placeholder="Username *"
+        value={username}
+        onChange={(e) => setUsername(e.target.value)}
+        style={styles.input}
+      />
+      
+      <input
+        type="text"
+        placeholder="Full Name *"
         value={fullName}
         onChange={(e) => setFullName(e.target.value)}
         style={styles.input}
       />
-      <input
-        type="text"
-        placeholder="Name of the Store"
-        value={storeName}
-        onChange={(e) => setStoreName(e.target.value)}
-        style={styles.input}
-      />
-      <input
-        type="email"
-        placeholder="Email address"
-        value={email}
-        onChange={(e) => setEmail(e.target.value)}
-        style={styles.input}
-      />
+      
+      {isOwnerSignup && (
+        <input
+          type="text"
+          placeholder="Store Name *"
+          value={storeName}
+          onChange={(e) => setStoreName(e.target.value)}
+          style={styles.input}
+        />
+      )}
+      
       <input
         type="password"
-        placeholder="Password"
+        placeholder="Password (min. 6 characters) *"
         value={password}
         onChange={(e) => setPassword(e.target.value)}
         style={styles.input}
       />
+      
       <input
         type="password"
-        placeholder="Confirm Password"
+        placeholder="Confirm Password *"
         value={confirmPassword}
         onChange={(e) => setConfirmPassword(e.target.value)}
         style={styles.input}
       />
 
       <button style={styles.button} onClick={handleRegister}>
-        Create account
+        Create {role} Account
       </button>
 
       <p style={styles.footer}>
@@ -145,4 +199,32 @@ const styles = {
     textAlign: 'center',
   },
   link: { color: '#3B82F6', fontWeight: '500', cursor: 'pointer' },
+  roleContainer: {
+    display: 'flex',
+    gap: '10px',
+    marginBottom: '15px'
+  },
+  roleButton: {
+    flex: 1,
+    padding: '10px',
+    border: '2px solid #ddd',
+    backgroundColor: '#f5f5f5',
+    borderRadius: '6px',
+    cursor: 'pointer',
+    fontSize: '14px',
+    fontWeight: '500'
+  },
+  activeRoleButton: {
+    backgroundColor: '#4CAF50',
+    color: 'white',
+    borderColor: '#4CAF50'
+  },
+  roleInfo: {
+    padding: '10px',
+    backgroundColor: '#f0f8ff',
+    borderRadius: '6px',
+    marginBottom: '20px',
+    fontSize: '14px',
+    color: '#333'
+  },
 };

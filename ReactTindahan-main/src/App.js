@@ -29,6 +29,7 @@ function ClientStack({ handleLogout, userMode }) {
         <Route path="/dashboard" element={<DashboardScreen />} />
         <Route path="/inventory" element={<InventoryScreen />} />
         <Route path="/resupply" element={<ResupplyScreen />} />
+        <Route path="/sales" element={<SalesScreen />} />
         <Route path="/suppliers" element={<SuppliersScreen />} />
         <Route path="*" element={<Navigate to="/dashboard" />} />
       </Routes>
@@ -97,7 +98,7 @@ export default function App() {
     // Prevent blank flash
     return (
       <div style={{ textAlign: 'center', marginTop: '40vh', fontSize: 20 }}>
-        Loading SmartTindahan...
+        Loading TindaTrack...
       </div>
     );
   }

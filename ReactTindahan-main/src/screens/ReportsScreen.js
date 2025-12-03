@@ -3,24 +3,28 @@ import { db } from '../db';
 
 export const addReport = async (report) => {
   await db.backup.add(report);
-
-  await fetch('http://localhost:5000/api/reports', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(report),
-  });
+  // Removed the fetch call to backend
 };
 
 export default function ReportsScreen({ userMode }) {
   const [report, setReport] = useState([]);
   const [resupplyReport, setResupplyReport] = useState([]);
   const [timeFilter, setTimeFilter] = useState('daily');
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
   const mode = userMode || 'client';
+
+  useEffect(() => {
+    // Set default date range to today when component mounts
+    const today = new Date().toISOString().split('T')[0];
+    setStartDate(today);
+    setEndDate(today);
+  }, []);
 
   useEffect(() => {
     fetchReport();
     fetchResupplyReport();
-  }, [timeFilter]);
+  }, [timeFilter, startDate, endDate]);
 
   const isToday = (dateStr) => {
     if (!dateStr) return false;
@@ -53,7 +57,20 @@ export default function ReportsScreen({ userMode }) {
     return date.getFullYear() === now.getFullYear();
   };
 
+  const isInDateRange = (dateStr) => {
+    if (!startDate || !endDate) return false;
+    const date = new Date(dateStr);
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+    end.setHours(23, 59, 59, 999); // Include the entire end date
+    return date >= start && date <= end;
+  };
+
   const matchesFilter = (dateStr) => {
+    if (timeFilter === 'custom' && startDate && endDate) {
+      return isInDateRange(dateStr);
+    }
+    
     switch (timeFilter) {
       case 'weekly':
         return isThisWeek(dateStr);
@@ -64,6 +81,208 @@ export default function ReportsScreen({ userMode }) {
       default:
         return isToday(dateStr);
     }
+  };
+
+  const handleDateRangeChange = (newStartDate, newEndDate) => {
+    setStartDate(newStartDate);
+    setEndDate(newEndDate);
+    if (timeFilter !== 'custom') {
+      setTimeFilter('custom');
+    }
+  };
+
+  const getDateRangeLabel = () => {
+    if (timeFilter === 'custom' && startDate && endDate) {
+      if (startDate === endDate) {
+        return new Date(startDate).toLocaleDateString();
+      }
+      return `${new Date(startDate).toLocaleDateString()} - ${new Date(endDate).toLocaleDateString()}`;
+    }
+    return new Date().toLocaleDateString();
+  };
+
+  const getDateRangeForExport = () => {
+    if (timeFilter === 'custom' && startDate && endDate) {
+      if (startDate === endDate) {
+        return `${new Date(startDate).toLocaleDateString()}`;
+      }
+      return `${new Date(startDate).toLocaleDateString()} to ${new Date(endDate).toLocaleDateString()}`;
+    }
+    return `${new Date().toLocaleDateString()}`;
+  };
+
+  // Download as CSV - UPDATED: Removed Quantity and Amount columns
+  const downloadCSV = () => {
+    if (report.length === 0) {
+      alert('No data to download');
+      return;
+    }
+
+    const headers = ['Date', 'Customer', 'Product', 'Total Items', 'Total Sale'];
+    
+    // Flatten all sales data
+    const csvData = report.flatMap(sale => {
+      const totalItemsInSale = sale.items.reduce((sum, item) => sum + item.quantity, 0);
+      return sale.items.map((item, index) => [
+        sale.sales_date,
+        'Cash', // Customer name
+        item.name,
+        index === 0 ? totalItemsInSale : '', // Total items (only show in first row per sale)
+        index === 0 ? `₱${sale.totalAmount.toFixed(2)}` : '' // Total sale (only show in first row per sale)
+      ]);
+    });
+
+    // Add summary row
+    const totalRevenue = report.reduce((sum, r) => sum + (r.totalAmount || 0), 0);
+    const totalTransactions = report.length;
+    const totalItemsSold = report.reduce((sum, sale) => 
+      sum + sale.items.reduce((itemSum, item) => itemSum + item.quantity, 0), 0
+    );
+    
+    const csvContent = [
+      ['SmartTindahan - Sales Report'],
+      ['Date Range:', getDateRangeForExport()],
+      [`Generated on: ${new Date().toLocaleDateString()}`],
+      [],
+      headers,
+      ...csvData,
+      [],
+      ['SUMMARY', '', '', '', ''],
+      ['Grand Total', '', '', '', `₱${totalRevenue.toFixed(2)}`],
+      ['Total Transactions', '', '', '', totalTransactions],
+      ['Total Items Sold', '', '', '', totalItemsSold],
+      ['Average Transaction', '', '', '', `₱${(totalRevenue / totalTransactions).toFixed(2)}`]
+    ].map(row => row.join(',')).join('\n');
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    link.setAttribute('href', url);
+    link.setAttribute('download', `sales_report_${new Date().toISOString().split('T')[0]}.csv`);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  // Download as PDF - UPDATED: Removed Quantity and Amount columns
+  const downloadPDF = () => {
+    if (report.length === 0) {
+      alert('No data to download');
+      return;
+    }
+
+    const printWindow = window.open('', '_blank');
+    const totalRevenue = report.reduce((sum, r) => sum + (r.totalAmount || 0), 0);
+    const totalTransactions = report.length;
+    const totalItemsSold = report.reduce((sum, sale) => 
+      sum + sale.items.reduce((itemSum, item) => itemSum + item.quantity, 0), 0
+    );
+    const averageTransaction = totalRevenue / totalTransactions;
+
+    printWindow.document.write(`
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>Sales Report</title>
+        <style>
+          body { font-family: Arial, sans-serif; margin: 20px; }
+          .header { text-align: center; margin-bottom: 20px; border-bottom: 2px solid #333; padding-bottom: 10px; }
+          .date-info { text-align: center; margin-bottom: 20px; padding: 15px; background: #f8f9fa; border-radius: 5px; }
+          .date-range { font-size: 18px; font-weight: bold; color: #2c3e50; margin-bottom: 5px; }
+          .generated-date { font-size: 14px; color: #7f8c8d; }
+          .summary { background: #f5f5f5; padding: 15px; margin-bottom: 20px; border-radius: 5px; }
+          .summary-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; margin-bottom: 20px; }
+          .summary-item { text-align: center; padding: 10px; }
+          .summary-value { font-size: 18px; font-weight: bold; color: #2c3e50; }
+          .summary-label { font-size: 14px; color: #7f8c8d; }
+          table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
+          th, td { border: 1px solid #ddd; padding: 10px; text-align: left; }
+          th { background-color: #f8f9fa; font-weight: bold; }
+          .total-row { background-color: #e8f5e8; font-weight: bold; }
+          .footer { margin-top: 30px; text-align: center; color: #7f8c8d; font-size: 12px; }
+          @media print {
+            body { margin: 0; }
+            .no-print { display: none; }
+          }
+        </style>
+      </head>
+      <body>
+        <div class="header">
+          <h1>SmartTindahan</h1>
+          <h2>Sales Report</h2>
+        </div>
+
+        <div class="date-info">
+          <div class="date-range">Date Range: ${getDateRangeForExport()}</div>
+          <div class="generated-date">Generated on: ${new Date().toLocaleDateString()}</div>
+        </div>
+
+        <div class="summary">
+          <h3>Summary</h3>
+          <div class="summary-grid">
+            <div class="summary-item">
+              <div class="summary-value">₱${totalRevenue.toFixed(2)}</div>
+              <div class="summary-label">Grand Total</div>
+            </div>
+            <div class="summary-item">
+              <div class="summary-value">${totalTransactions}</div>
+              <div class="summary-label">Total Transactions</div>
+            </div>
+            <div class="summary-item">
+              <div class="summary-value">${totalItemsSold}</div>
+              <div class="summary-label">Total Items Sold</div>
+            </div>
+            <div class="summary-item">
+              <div class="summary-value">₱${averageTransaction.toFixed(2)}</div>
+              <div class="summary-label">Average Transaction</div>
+            </div>
+          </div>
+        </div>
+
+        <h3>Sales Details</h3>
+        <table>
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Customer</th>
+              <th>Product</th>
+              <th>Total Items</th>
+              <th>Total Sale</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${report.map(sale => {
+              const totalItemsInSale = sale.items.reduce((sum, item) => sum + item.quantity, 0);
+              return sale.items.map((item, index) => `
+                <tr>
+                  ${index === 0 ? `<td rowspan="${sale.items.length}">${sale.sales_date}</td>` : ''}
+                  ${index === 0 ? `<td rowspan="${sale.items.length}">Cash</td>` : ''}
+                  <td>${item.name}</td>
+                  ${index === 0 ? `<td rowspan="${sale.items.length}">${totalItemsInSale}</td>` : ''}
+                  ${index === 0 ? `<td rowspan="${sale.items.length}">₱${sale.totalAmount.toFixed(2)}</td>` : ''}
+                </tr>
+              `).join('')
+            }).join('')}
+          </tbody>
+        </table>
+
+        <div class="footer">
+          <p>Generated by SmartTindahan Sales Report System</p>
+        </div>
+
+        <script>
+          window.onload = function() {
+            window.print();
+            setTimeout(function() {
+              window.close();
+            }, 500);
+          };
+        </script>
+      </body>
+      </html>
+    `);
+    printWindow.document.close();
   };
 
   const fetchReport = async () => {
@@ -85,14 +304,27 @@ export default function ReportsScreen({ userMode }) {
       const enriched = Object.entries(groupedSales).map(([sales_id, items]) => {
         const sale = filteredSales.find(s => s.sales_id === parseInt(sales_id));
         const totalAmount = items.reduce((sum, i) => sum + (i.amount || 0), 0);
-        const productDetails = items.map(i => {
+        
+        // Combine items with the same product name
+        const combinedItems = {};
+        items.forEach(i => {
           const product = products.find(p => p.product_id === i.product_id);
-          return {
-            name: product?.name || 'Unknown Product',
-            quantity: i.quantity,
-            amount: i.amount
-          };
+          const productName = product?.name || 'Unknown Product';
+          
+          if (!combinedItems[productName]) {
+            combinedItems[productName] = {
+              name: productName,
+              quantity: 0,
+              amount: 0
+            };
+          }
+          
+          combinedItems[productName].quantity += i.quantity || 0;
+          combinedItems[productName].amount += i.amount || 0;
         });
+        
+        const productDetails = Object.values(combinedItems);
+
         return {
           sales_date: sale?.sales_date,
           items: productDetails,
@@ -147,6 +379,12 @@ export default function ReportsScreen({ userMode }) {
     }
   };
 
+  // Calculate totals for the table footer
+  const totalItemsSold = report.reduce((sum, sale) => 
+    sum + sale.items.reduce((itemSum, item) => itemSum + item.quantity, 0), 0
+  );
+  const grandTotal = report.reduce((sum, r) => sum + (r.totalAmount || 0), 0);
+
   return (
     <div style={styles.container}>
       <div style={styles.headerSection}>
@@ -154,46 +392,81 @@ export default function ReportsScreen({ userMode }) {
         <h2 style={styles.subheader}>Sales Reports</h2>
         <p style={styles.description}>Track your sales performance and analytics</p>
 
-        {/* 🔹 Timeline Selector */}
-        <div style={{ marginTop: 16 }}>
-          <label style={{ marginRight: 8, fontWeight: 600 }}>View By:</label>
+        {/* 🔹 Enhanced Timeline Selector */}
+        <div style={styles.filterContainer}>
+          <label style={styles.filterLabel}>View By:</label>
           <select
             value={timeFilter}
             onChange={(e) => setTimeFilter(e.target.value)}
-            style={{
-              padding: '6px 12px',
-              borderRadius: 8,
-              border: '1px solid #ccc',
-              backgroundColor: '#fff',
-              fontSize: 14
-            }}
+            style={styles.filterSelect}
           >
             <option value="daily">Daily</option>
             <option value="weekly">Weekly</option>
             <option value="monthly">Monthly</option>
             <option value="yearly">Yearly</option>
+            <option value="custom">Custom Date Range</option>
           </select>
+
+          {/* Date Range Selector */}
+          <div style={styles.dateRangeContainer}>
+            <div style={styles.dateInputGroup}>
+              <label style={styles.dateLabel}>From:</label>
+              <input
+                type="date"
+                value={startDate}
+                onChange={(e) => handleDateRangeChange(e.target.value, endDate)}
+                style={styles.dateInput}
+              />
+            </div>
+            <div style={styles.dateInputGroup}>
+              <label style={styles.dateLabel}>To:</label>
+              <input
+                type="date"
+                value={endDate}
+                onChange={(e) => handleDateRangeChange(startDate, e.target.value)}
+                style={styles.dateInput}
+              />
+            </div>
+          </div>
+
+          {/* Download Buttons */}
+          <div style={styles.downloadContainer}>
+            <button 
+              onClick={downloadCSV}
+              style={styles.downloadButton}
+              disabled={report.length === 0}
+            >
+              📥 CSV
+            </button>
+            <button 
+              onClick={downloadPDF}
+              style={styles.downloadButton}
+              disabled={report.length === 0}
+            >
+              📥 PDF
+            </button>
+          </div>
         </div>
       </div>
 
       <div style={styles.metricsContainer}>
         <div style={styles.metricCard}>
           <p style={styles.metricValue}>
-            ₱{report.reduce((sum, r) => sum + (r.totalAmount || 0), 0).toFixed(2)}
+            ₱{grandTotal.toFixed(2)}
           </p>
-          <p style={styles.metricLabel}>Total Revenue</p>
+          <p style={styles.metricLabel}>Grand Total</p>
           <p style={styles.metricSubLabel}>
-            {timeFilter.charAt(0).toUpperCase() + timeFilter.slice(1)}
+            {timeFilter === 'custom' ? 'Custom Range' : timeFilter.charAt(0).toUpperCase() + timeFilter.slice(1)}
           </p>
         </div>
 
         <div style={styles.metricCard}>
           <p style={styles.metricValue}>
-            ₱{report.length > 0 ? (report.reduce((sum, r) => sum + (r.totalAmount || 0), 0) / report.length).toFixed(2) : '0.00'}
+            ₱{report.length > 0 ? (grandTotal / report.length).toFixed(2) : '0.00'}
           </p>
           <p style={styles.metricLabel}>Avg. Transaction</p>
           <p style={styles.metricSubLabel}>
-            {timeFilter.charAt(0).toUpperCase() + timeFilter.slice(1)}
+            {timeFilter === 'custom' ? 'Custom Range' : timeFilter.charAt(0).toUpperCase() + timeFilter.slice(1)}
           </p>
         </div>
 
@@ -201,7 +474,17 @@ export default function ReportsScreen({ userMode }) {
           <p style={styles.metricValue}>{report.length}</p>
           <p style={styles.metricLabel}>Total Transactions</p>
           <p style={styles.metricSubLabel}>
-            {timeFilter.charAt(0).toUpperCase() + timeFilter.slice(1)}
+            {timeFilter === 'custom' ? 'Custom Range' : timeFilter.charAt(0).toUpperCase() + timeFilter.slice(1)}
+          </p>
+        </div>
+
+        <div style={styles.metricCard}>
+          <p style={styles.metricValue}>
+            {totalItemsSold}
+          </p>
+          <p style={styles.metricLabel}>Total Items Sold</p>
+          <p style={styles.metricSubLabel}>
+            {timeFilter === 'custom' ? 'Custom Range' : timeFilter.charAt(0).toUpperCase() + timeFilter.slice(1)}
           </p>
         </div>
       </div>
@@ -214,35 +497,67 @@ export default function ReportsScreen({ userMode }) {
               <div style={styles.dateFilter}>
                 <span style={styles.dateLabel}>Date Range:</span>
                 <span style={styles.dateValue}>
-                  {new Date().toLocaleDateString()}
+                  {getDateRangeLabel()}
                 </span>
               </div>
             </div>
             
             {report.length === 0 ? (
               <div style={styles.placeholderCard}>
-                <p style={styles.placeholderText}>No sales for this {timeFilter}</p>
+                <p style={styles.placeholderText}>No sales for this {timeFilter === 'custom' ? 'date range' : timeFilter}</p>
                 <p style={styles.placeholderSubText}>
                   Sales data will appear here once transactions are recorded
                 </p>
               </div>
             ) : (
-              <div style={styles.reportList}>
-                {report.map((group, index) => (
-                  <div key={index} style={styles.reportItem}>
-                    <div style={styles.reportItemLeft}>
-                      <p style={styles.reportDate}>{group.sales_date}</p>
-                      {group.items.map((item, idx) => (
-                        <p key={idx} style={styles.reportName}>
-                          {item.name} — Qty: {item.quantity} — ₱{item.amount}
-                        </p>
-                      ))}
-                    </div>
-                    <div style={styles.reportItemRight}>
-                      <p style={styles.reportAmount}>Total: ₱{group.totalAmount}</p>
-                    </div>
-                  </div>
-                ))}
+              <div style={styles.tableContainer}>
+                <table style={styles.salesTable}>
+                  <thead>
+                    <tr>
+                      <th style={styles.tableHeader}>Date</th>
+                      <th style={styles.tableHeader}>Product</th>
+                      <th style={styles.tableHeader}>Quantity</th>
+                      <th style={styles.tableHeader}>Amount</th>
+                      <th style={styles.tableHeader}>Total Sale</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {report.map((sale, saleIndex) => (
+                      sale.items.map((item, itemIndex) => (
+                        <tr key={`${saleIndex}-${itemIndex}`} style={itemIndex % 2 === 0 ? styles.tableRowEven : styles.tableRowOdd}>
+                          {itemIndex === 0 && (
+                            <>
+                              <td style={styles.tableCell} rowSpan={sale.items.length}>
+                                {sale.sales_date}
+                              </td>
+                            </>
+                          )}
+                          <td style={styles.tableCell}>{item.name}</td>
+                          <td style={styles.tableCell}>{item.quantity}</td>
+                          <td style={styles.tableCell}>₱{item.amount.toFixed(2)}</td>
+                          {itemIndex === 0 && (
+                            <td style={styles.tableCell} rowSpan={sale.items.length}>
+                              ₱{sale.totalAmount.toFixed(2)}
+                            </td>
+                          )}
+                        </tr>
+                      ))
+                    ))}
+                    {/* Table Footer with Totals - UPDATED: Total Items below Quantity (3rd column), Grand Total below Total Sale (5th column) */}
+                    <tr style={styles.tableFooter}>
+                      <td style={styles.footerCell} colSpan="2">
+                        <strong>Totals:</strong>
+                      </td>
+                      <td style={styles.footerCell}>
+                        <strong>{totalItemsSold}</strong>
+                      </td>
+                      <td style={styles.footerCell}></td>
+                      <td style={styles.footerCell}>
+                        <strong>₱{grandTotal.toFixed(2)}</strong>
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
               </div>
             )}
           </div>
@@ -253,7 +568,7 @@ export default function ReportsScreen({ userMode }) {
             <h3 style={styles.sectionHeader}>Resupply History</h3>
             {resupplyReport.length === 0 ? (
               <div style={styles.placeholderCard}>
-                <p style={styles.placeholderText}>No resupply data for this {timeFilter}</p>
+                <p style={styles.placeholderText}>No resupply data for this {timeFilter === 'custom' ? 'date range' : timeFilter}</p>
                 <p style={styles.placeholderSubText}>
                   Resupply history will appear here once items are restocked
                 </p>
@@ -282,40 +597,212 @@ export default function ReportsScreen({ userMode }) {
 
 const styles = {
   container: {
-    padding: 'clamp(16px, 3vw, 24px)',
+    padding: '16px',
     backgroundColor: '#f5f7f9',
     minHeight: '100vh',
     fontFamily: "'Segoe UI', Tahoma, Geneva, Verdana, sans-serif",
+    '@media (min-width: 768px)': {
+      padding: '24px',
+    },
   },
   headerSection: {
     backgroundColor: '#ffffff',
-    padding: '20px',
+    padding: '16px',
     borderRadius: '12px',
     boxShadow: '0 4px 6px rgba(0, 0, 0, 0.05)',
     marginBottom: '20px',
+    '@media (min-width: 768px)': {
+      padding: '20px',
+    },
   },
   header: {
-    fontSize: 'clamp(20px, 2.5vw, 28px)',
+    fontSize: '24px',
     fontWeight: 'bold',
     marginBottom: '8px',
     color: '#2c3e50',
+    '@media (min-width: 768px)': {
+      fontSize: '28px',
+    },
+    '@media (max-width: 480px)': {
+      fontSize: '20px',
+    },
   },
   subheader: {
-    fontSize: 'clamp(18px, 2vw, 22px)',
+    fontSize: '20px',
     fontWeight: '600',
     marginBottom: '4px',
     color: '#34495e',
+    '@media (min-width: 768px)': {
+      fontSize: '22px',
+    },
+    '@media (max-width: 480px)': {
+      fontSize: '18px',
+    },
   },
   description: {
-    fontSize: 'clamp(14px, 1.5vw, 16px)',
-    marginBottom: '0',
+    fontSize: '14px',
+    marginBottom: '16px',
     color: '#7f8c8d',
+    '@media (min-width: 768px)': {
+      fontSize: '16px',
+    },
+  },
+  filterContainer: {
+    marginTop: '16px',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '12px',
+    backgroundColor: '#f8f9fa',
+    padding: '16px',
+    borderRadius: '10px',
+    border: '1px solid #e9ecef',
+    '@media (min-width: 768px)': {
+      flexDirection: 'row',
+      alignItems: 'center',
+      flexWrap: 'wrap',
+    },
+  },
+  filterSelectorRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '12px',
+    flexWrap: 'wrap',
+    width: '100%',
+    '@media (max-width: 768px)': {
+      flexDirection: 'column',
+      alignItems: 'stretch',
+    },
+  },
+  filterLabel: {
+    fontSize: '14px',
+    fontWeight: '600',
+    color: '#2c3e50',
+    whiteSpace: 'nowrap',
+    '@media (max-width: 480px)': {
+      fontSize: '13px',
+    },
+  },
+  filterSelect: {
+    padding: '10px 16px',
+    borderRadius: '8px',
+    border: '2px solid #3498db',
+    backgroundColor: '#ffffff',
+    fontSize: '14px',
+    fontWeight: '500',
+    color: '#2c3e50',
+    cursor: 'pointer',
+    outline: 'none',
+    transition: 'all 0.2s ease',
+    minWidth: '160px',
+    '@media (max-width: 768px)': {
+      width: '100%',
+      minWidth: 'auto',
+    },
+  },
+  dateRangeContainer: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '12px',
+    width: '100%',
+    '@media (min-width: 768px)': {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: '20px',
+      marginLeft: 'auto',
+    },
+  },
+  dateRangeRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '12px',
+    flexWrap: 'wrap',
+    '@media (max-width: 768px)': {
+      flexDirection: 'column',
+      alignItems: 'stretch',
+      gap: '8px',
+    },
+  },
+  dateInputGroup: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    flex: '1',
+    minWidth: '200px',
+    '@media (max-width: 768px)': {
+      width: '100%',
+      minWidth: 'auto',
+    },
+  },
+  dateLabel: {
+    fontSize: '14px',
+    fontWeight: '600',
+    color: '#2c3e50',
+    minWidth: '50px',
+    '@media (max-width: 480px)': {
+      fontSize: '13px',
+      minWidth: '40px',
+    },
+  },
+  dateInput: {
+    padding: '8px 12px',
+    borderRadius: '6px',
+    border: '1px solid #ddd',
+    fontSize: '14px',
+    flex: '1',
+    minWidth: '140px',
+    '@media (max-width: 768px)': {
+      minWidth: 'auto',
+      width: '100%',
+    },
+  },
+  downloadContainer: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    width: '100%',
+    justifyContent: 'center',
+    '@media (min-width: 768px)': {
+      width: 'auto',
+      marginLeft: 'auto',
+      justifyContent: 'flex-end',
+    },
+  },
+  downloadButton: {
+    padding: '10px 16px',
+    borderRadius: '8px',
+    border: '2px solid #27ae60',
+    backgroundColor: '#27ae60',
+    color: 'white',
+    fontSize: '14px',
+    fontWeight: '600',
+    cursor: 'pointer',
+    transition: 'all 0.2s ease',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '6px',
+    flex: '1',
+    justifyContent: 'center',
+    '@media (min-width: 768px)': {
+      flex: 'none',
+      minWidth: '100px',
+    },
+    '&:disabled': {
+      opacity: '0.5',
+      cursor: 'not-allowed',
+    },
   },
   metricsContainer: {
     display: 'grid',
     gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
-    gap: 'clamp(12px, 2vw, 20px)',
-    marginBottom: '20px',
+    gap: '16px',
+    marginBottom: '24px',
+    '@media (max-width: 640px)': {
+      gridTemplateColumns: 'repeat(2, 1fr)',
+      gap: '12px',
+    },
+    '@media (max-width: 480px)': {
+      gridTemplateColumns: '1fr',
+    },
   },
   metricCard: {
     backgroundColor: '#ffffff',
@@ -324,27 +811,45 @@ const styles = {
     textAlign: 'center',
     boxShadow: '0 4px 6px rgba(0, 0, 0, 0.05)',
     borderLeft: '5px solid #3498db',
+    '@media (max-width: 768px)': {
+      padding: '16px',
+    },
   },
   metricValue: {
-    fontSize: 'clamp(20px, 2.5vw, 28px)',
+    fontSize: '24px',
     fontWeight: 'bold',
     color: '#2c3e50',
     marginBottom: '8px',
+    '@media (min-width: 768px)': {
+      fontSize: '28px',
+    },
+    '@media (max-width: 480px)': {
+      fontSize: '20px',
+    },
   },
   metricLabel: {
-    fontSize: 'clamp(14px, 1.5vw, 16px)',
+    fontSize: '14px',
     color: '#7f8c8d',
     marginBottom: '4px',
     fontWeight: '600',
+    '@media (min-width: 768px)': {
+      fontSize: '16px',
+    },
   },
   metricSubLabel: {
-    fontSize: 'clamp(12px, 1.2vw, 14px)',
+    fontSize: '12px',
     color: '#95a5a6',
+    '@media (min-width: 768px)': {
+      fontSize: '14px',
+    },
   },
   contentContainer: {
     display: 'grid',
-    gridTemplateColumns: '2fr 1fr',
+    gridTemplateColumns: '1fr',
     gap: '20px',
+    '@media (min-width: 1024px)': {
+      gridTemplateColumns: '2fr 1fr',
+    },
   },
   mainSection: {
     display: 'flex',
@@ -362,48 +867,116 @@ const styles = {
     borderRadius: '12px',
     boxShadow: '0 4px 6px rgba(0, 0, 0, 0.05)',
     marginBottom: '0',
+    '@media (max-width: 768px)': {
+      padding: '16px',
+    },
   },
   sectionHeaderContainer: {
     display: 'flex',
     justifyContent: 'space-between',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     marginBottom: '16px',
     flexWrap: 'wrap',
     gap: '10px',
+    '@media (max-width: 480px)': {
+      flexDirection: 'column',
+      alignItems: 'stretch',
+    },
   },
   sectionHeader: {
-    fontSize: 'clamp(16px, 2vw, 18px)',
+    fontSize: '18px',
     fontWeight: '600',
     color: '#2c3e50',
     margin: '0',
+    '@media (max-width: 480px)': {
+      fontSize: '16px',
+    },
   },
   dateFilter: {
     display: 'flex',
     alignItems: 'center',
     gap: '8px',
+    flexWrap: 'wrap',
   },
   dateLabel: {
     fontSize: '14px',
     color: '#7f8c8d',
+    '@media (max-width: 480px)': {
+      fontSize: '13px',
+    },
   },
   dateValue: {
     fontSize: '14px',
     color: '#2c3e50',
     fontWeight: '500',
+    '@media (max-width: 480px)': {
+      fontSize: '13px',
+    },
+  },
+  tableContainer: {
+    overflowX: 'auto',
+    borderRadius: '8px',
+    border: '1px solid #e0e0e0',
+    '@media (max-width: 768px)': {
+      margin: '0 -8px',
+      border: 'none',
+    },
+  },
+  salesTable: {
+    width: '100%',
+    borderCollapse: 'collapse',
+    backgroundColor: '#ffffff',
+    '@media (max-width: 768px)': {
+      minWidth: '600px',
+    },
+  },
+  tableHeader: {
+    backgroundColor: '#3498db',
+    color: 'white',
+    padding: '12px 16px',
+    textAlign: 'left',
+    fontWeight: '600',
+    fontSize: '14px',
+    borderBottom: '1px solid #2980b9',
+    '@media (max-width: 480px)': {
+      padding: '10px 12px',
+      fontSize: '13px',
+    },
+  },
+  tableRowEven: {
+    backgroundColor: '#f8f9fa',
+  },
+  tableRowOdd: {
+    backgroundColor: '#ffffff',
+  },
+  tableCell: {
+    padding: '12px 16px',
+    borderBottom: '1px solid #e0e0e0',
+    fontSize: '14px',
+    color: '#2c3e50',
+    '@media (max-width: 480px)': {
+      padding: '10px 12px',
+      fontSize: '13px',
+    },
+  },
+  tableFooter: {
+    backgroundColor: '#e8f5e8',
+    fontWeight: 'bold',
+  },
+  footerCell: {
+    padding: '12px 16px',
+    borderTop: '2px solid #27ae60',
+    fontSize: '14px',
+    color: '#2c3e50',
+    '@media (max-width: 480px)': {
+      padding: '10px 12px',
+      fontSize: '13px',
+    },
   },
   reportList: {
     display: 'flex',
     flexDirection: 'column',
     gap: '12px',
-  },
-  reportItem: {
-    backgroundColor: '#f8f9fa',
-    padding: '16px',
-    borderRadius: '8px',
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    borderLeft: '4px solid #2ecc71',
   },
   resupplyItem: {
     backgroundColor: '#f8f9fa',
@@ -412,44 +985,57 @@ const styles = {
     borderLeft: '4px solid #e74c3c',
     marginBottom: '12px',
   },
-  reportItemLeft: {
-    flex: 1,
-  },
-  reportItemRight: {
-    textAlign: 'right',
-  },
   reportDate: {
     fontSize: '14px',
     fontWeight: '600',
     color: '#7f8c8d',
     marginBottom: '4px',
+    '@media (max-width: 480px)': {
+      fontSize: '13px',
+    },
   },
   reportName: {
-    fontSize: '16px',
-    fontWeight: 'bold',
+    fontSize: '14px',
+    fontWeight: '500',
     color: '#2c3e50',
     marginBottom: '4px',
+    lineHeight: '1.4',
+    '@media (min-width: 768px)': {
+      fontSize: '16px',
+    },
   },
   reportAmount: {
     fontSize: '16px',
     fontWeight: 'bold',
     color: '#27ae60',
     margin: '0',
+    '@media (max-width: 480px)': {
+      fontSize: '14px',
+    },
   },
   placeholderCard: {
     backgroundColor: '#f8f9fa',
     padding: '30px 20px',
     borderRadius: '8px',
     textAlign: 'center',
+    '@media (max-width: 768px)': {
+      padding: '24px 16px',
+    },
   },
   placeholderText: {
     fontSize: '16px',
     color: '#7f8c8d',
     marginBottom: '8px',
     fontWeight: '500',
+    '@media (max-width: 480px)': {
+      fontSize: '14px',
+    },
   },
   placeholderSubText: {
     fontSize: '14px',
     color: '#95a5a6',
+    '@media (max-width: 480px)': {
+      fontSize: '13px',
+    },
   },
 };

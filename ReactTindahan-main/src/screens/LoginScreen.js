@@ -5,20 +5,24 @@ import { loginUser } from '../services/UserService';
 export default function LoginScreen({ setUserMode }) {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
-  const [mode, setMode] = useState('Client');
   const navigate = useNavigate();
 
   const handleLogin = async () => {
+    if (!username || !password) {
+      alert('Please enter both username and password.');
+      return;
+    }
+
     const result = await loginUser(username, password);
     if (result.success) {
-      const normalizedMode = mode.toLowerCase();
-      alert(`Welcome! Logged in as ${result.user.role} in ${mode} mode`);
-
-      // ✅ Save to localStorage (persistent across refresh)
+      const userRole = result.user.role;
+      alert(`Welcome ${result.user.full_name}! Logged in as ${userRole}`);
+      
+      // Save to localStorage
       localStorage.setItem("user", JSON.stringify(result.user));
-      localStorage.setItem("userMode", normalizedMode);
-
-      setUserMode(normalizedMode);
+      localStorage.setItem("userMode", userRole === 'Owner' ? 'server' : 'client');
+      
+      setUserMode(userRole === 'Owner' ? 'server' : 'client');
       navigate('/dashboard', { replace: true });
     } else {
       alert(result.error);
@@ -31,10 +35,10 @@ export default function LoginScreen({ setUserMode }) {
       <h2 style={styles.title}>Sign in to your account</h2>
       <p style={styles.subtitle}>Access your POS system</p>
 
-      <label style={styles.label}>Email address</label>
+      <label style={styles.label}>Username</label>
       <input
-        type="email"
-        placeholder="Enter your email"
+        type="text"
+        placeholder="Enter your username"
         value={username}
         onChange={(e) => setUsername(e.target.value)}
         style={styles.input}
@@ -49,21 +53,12 @@ export default function LoginScreen({ setUserMode }) {
         style={styles.input}
       />
 
-      <select
-        value={mode}
-        onChange={(e) => setMode(e.target.value)}
-        style={styles.select}
-      >
-        <option value="Server">Server</option>
-        <option value="Client">Client</option>
-      </select>
-
       <button style={styles.button} onClick={handleLogin}>
         Sign in
       </button>
 
       <p style={styles.footer}>
-        Don’t have an account?{' '}
+        Don't have an account?{' '}
         <span
           style={styles.link}
           onClick={() => navigate('/signup')}

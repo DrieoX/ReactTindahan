@@ -3,6 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "dependencies": {
+    "@capacitor/android": "^7.4.4",
+    "@capacitor/cli": "^7.4.4",
+    "@capacitor/core": "^7.4.4",
     "@mui/material": "^7.3.2",
     "@mui/x-date-pickers": "^8.11.1",
     "@testing-library/dom": "^10.4.1",

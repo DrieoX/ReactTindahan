@@ -149,7 +149,7 @@ export default function DashboardScreen({ userMode }) {
       </div>
 
       {/* Main Content */}
-      <div style={{ padding: '30px' }}>
+      <div style={styles.mainContent}>
         <h2 style={styles.welcomeTitle}>
           Welcome back, {user?.username || 'User'}!
         </h2>
@@ -159,7 +159,7 @@ export default function DashboardScreen({ userMode }) {
 
         {/* Stat Cards */}
         <div style={styles.statCardsContainer}>
-          <div onClick={handleTotalProductsClick} style={{ cursor: 'pointer' }}>
+          <div onClick={handleTotalProductsClick} style={styles.statCardWrapper}>
             <StatCard
               label="Total Products"
               value={stats.totalProducts}
@@ -168,14 +168,16 @@ export default function DashboardScreen({ userMode }) {
               text="#ffffff"
             />
           </div>
-          <StatCard
-            label="Today's Sales"
-            value={`₱${stats.salesToday.toFixed(2)}`}
-            change="+12% from yesterday"
-            bg="#4f46e5"
-            text="#ffffff"
-          />
-          <div onClick={() => setShowLowStockModal(true)} style={{ cursor: 'pointer' }}>
+          <div style={styles.statCardWrapper}>
+            <StatCard
+              label="Today's Sales"
+              value={`₱${stats.salesToday.toFixed(2)}`}
+              change="+12% from yesterday"
+              bg="#4f46e5"
+              text="#ffffff"
+            />
+          </div>
+          <div onClick={() => setShowLowStockModal(true)} style={styles.statCardWrapper}>
             <StatCard
               label="Low Stock Items"
               value={stats.lowStock}
@@ -184,7 +186,7 @@ export default function DashboardScreen({ userMode }) {
               text="#ffffff"
             />
           </div>
-          <div onClick={() => setShowExpiredModal(true)} style={{ cursor: 'pointer' }}>
+          <div onClick={() => setShowExpiredModal(true)} style={styles.statCardWrapper}>
             <StatCard
               label="Expiring Soon"
               value={stats.expired}
@@ -207,25 +209,29 @@ export default function DashboardScreen({ userMode }) {
             {recentSales.length === 0 ? (
               <p style={styles.noDataText}>No recent transactions</p>
             ) : (
-              recentSales.map((sale, index) => (
-                <div key={index} style={styles.transactionCard}>
-                  <div style={styles.transactionHeader}>
-                    <span style={styles.transactionStatus}>Sale Completed</span>
-                    <span style={styles.transactionTime}>
-                      {sale.items} items • {sale.date} {sale.time}
-                    </span>
+              <div style={styles.transactionsList}>
+                {recentSales.map((sale, index) => (
+                  <div key={index} style={styles.transactionCard}>
+                    <div style={styles.transactionHeader}>
+                      <div style={styles.transactionHeaderLeft}>
+                        <span style={styles.transactionStatus}>Sale Completed</span>
+                        <span style={styles.transactionTime}>
+                          {sale.items} items • {sale.date} {sale.time}
+                        </span>
+                      </div>
+                      <span style={styles.transactionAmount}>₱{sale.amount.toFixed(2)}</span>
+                    </div>
+                    <div style={styles.transactionProducts}>
+                      {sale.productNames.slice(0, 2).map((name, i) => (
+                        <span key={i} style={styles.productName}>{name}</span>
+                      ))}
+                      {sale.productNames.length > 2 && (
+                        <span style={styles.moreItems}>+{sale.productNames.length - 2} more</span>
+                      )}
+                    </div>
                   </div>
-                  <div style={styles.transactionProducts}>
-                    {sale.productNames.slice(0, 2).map((name, i) => (
-                      <span key={i} style={styles.productName}>{name}</span>
-                    ))}
-                    {sale.productNames.length > 2 && (
-                      <span style={styles.moreItems}>+{sale.productNames.length - 2} more</span>
-                    )}
-                  </div>
-                  <div style={styles.transactionAmount}>₱{sale.amount.toFixed(2)}</div>
-                </div>
-              ))
+                ))}
+              </div>
             )}
           </div>
 
@@ -274,7 +280,7 @@ export default function DashboardScreen({ userMode }) {
                           ? '⏳'
                           : '📉'}
                       </span>
-                      <div>
+                      <div style={styles.alertContent}>
                         <p style={styles.alertTitle}>
                           {item.type === 'expired'
                             ? 'Product Expired'
@@ -283,15 +289,15 @@ export default function DashboardScreen({ userMode }) {
                             : 'Low Stock Alert'}
                         </p>
                         <p style={styles.alertProduct}>{item.name}</p>
+                        <p style={styles.alertDescription}>
+                          {item.type === 'expired'
+                            ? `Expired on ${item.expiration_date}`
+                            : item.type === 'near-expiry'
+                            ? `Expiring soon on ${item.expiration_date}`
+                            : `Only ${item.quantity} left in stock (Threshold: ${item.threshold})`}
+                        </p>
                       </div>
                     </div>
-                    <p style={styles.alertDescription}>
-                      {item.type === 'expired'
-                        ? `Expired on ${item.expiration_date}`
-                        : item.type === 'near-expiry'
-                        ? `Expiring soon on ${item.expiration_date}`
-                        : `Only ${item.quantity} left in stock (Threshold: ${item.threshold})`}
-                    </p>
                   </div>
                 ))}
               </div>
@@ -308,24 +314,26 @@ export default function DashboardScreen({ userMode }) {
             {lowStockItems.length === 0 ? (
               <p style={styles.noDataText}>No items are low in stock.</p>
             ) : (
-              <table style={styles.table}>
-                <thead>
-                  <tr style={styles.tableHeader}>
-                    <th style={styles.tableCell}>Product</th>
-                    <th style={styles.tableCell}>Quantity</th>
-                    <th style={styles.tableCell}>Threshold</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {lowStockItems.map((item, i) => (
-                    <tr key={i} style={styles.tableRow}>
-                      <td style={styles.tableCell}>{item.name}</td>
-                      <td style={styles.tableCell}>{item.quantity}</td>
-                      <td style={styles.tableCell}>{item.threshold}</td>
+              <div style={styles.tableContainer}>
+                <table style={styles.table}>
+                  <thead>
+                    <tr style={styles.tableHeader}>
+                      <th style={styles.tableCell}>Product</th>
+                      <th style={styles.tableCell}>Quantity</th>
+                      <th style={styles.tableCell}>Threshold</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {lowStockItems.map((item, i) => (
+                      <tr key={i} style={styles.tableRow}>
+                        <td style={styles.tableCell}>{item.name}</td>
+                        <td style={styles.tableCell}>{item.quantity}</td>
+                        <td style={styles.tableCell}>{item.threshold}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             )}
             <div style={styles.modalButtons}>
               <button style={styles.cancelButton} onClick={() => setShowLowStockModal(false)}>
@@ -344,26 +352,28 @@ export default function DashboardScreen({ userMode }) {
             {expiredItems.length === 0 ? (
               <p style={styles.noDataText}>No expired or near expiry items.</p>
             ) : (
-              <table style={styles.table}>
-                <thead>
-                  <tr style={styles.tableHeader}>
-                    <th style={styles.tableCell}>Product</th>
-                    <th style={styles.tableCell}>Status</th>
-                    <th style={styles.tableCell}>Expiry Date</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {expiredItems.map((item, i) => (
-                    <tr key={i} style={styles.tableRow}>
-                      <td style={styles.tableCell}>{item.name}</td>
-                      <td style={styles.tableCell}>
-                        {item.type === 'expired' ? 'Expired' : 'Near Expiry'}
-                      </td>
-                      <td style={styles.tableCell}>{item.expiration_date}</td>
+              <div style={styles.tableContainer}>
+                <table style={styles.table}>
+                  <thead>
+                    <tr style={styles.tableHeader}>
+                      <th style={styles.tableCell}>Product</th>
+                      <th style={styles.tableCell}>Status</th>
+                      <th style={styles.tableCell}>Expiry Date</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {expiredItems.map((item, i) => (
+                      <tr key={i} style={styles.tableRow}>
+                        <td style={styles.tableCell}>{item.name}</td>
+                        <td style={styles.tableCell}>
+                          {item.type === 'expired' ? 'Expired' : 'Near Expiry'}
+                        </td>
+                        <td style={styles.tableCell}>{item.expiration_date}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             )}
             <div style={styles.modalButtons}>
               <button style={styles.cancelButton} onClick={() => setShowExpiredModal(false)}>
@@ -392,59 +402,420 @@ const styles = {
     minHeight: '100vh',
   },
   header: {
-    height: 'clamp(60px, 10vh, 100px)',
+    height: 'auto',
+    minHeight: '80px',
     display: 'flex',
     justifyContent: 'space-between',
     alignItems: 'center',
-    padding: '0 clamp(12px, 3vw, 30px)',
+    padding: '16px 20px',
     borderBottom: '1px solid #e2e8f0',
     backgroundColor: '#ffffff',
     flexWrap: 'wrap',
-    gap: '0.5rem',
+    gap: '16px',
+    '@media (max-width: 768px)': {
+      flexDirection: 'column',
+      alignItems: 'flex-start',
+      padding: '12px 16px',
+      gap: '12px',
+    },
   },
-  headerLeft: { flex: 1, minWidth: '200px' },
-  pageTitle: { fontSize: 'clamp(18px, 2vw, 24px)', fontWeight: 'bold', color: '#1e293b', marginBottom: '4px' },
-  pageSubtitle: { fontSize: 'clamp(14px, 1.5vw, 16px)', color: '#64748b' },
-  userSection: { display: 'flex', alignItems: 'center', gap: 'clamp(8px, 2vw, 20px)', flexWrap: 'wrap', justifyContent: 'flex-end' },
-  notificationIcon: { fontSize: '20px' },
-  logoutIcon: { fontSize: '20px', cursor: 'pointer' },
-  headerText: { fontWeight: 600, color: '#111827', fontSize: 'clamp(14px, 1.5vw, 16px)' },
-  welcomeTitle: { fontSize: '24px', fontWeight: 'bold', marginBottom: '4px', color: '#1e293b' },
-  welcomeSubtitle: { fontSize: '16px', color: '#64748b', marginBottom: '20px' },
-  statCardsContainer: { display: 'flex', flexWrap: 'wrap', gap: '16px', marginBottom: '30px' },
-  statCard: { padding: '20px', borderRadius: '12px', flex: '1 1 200px', minWidth: '200px', boxShadow: '0 4px 6px rgba(0, 0, 0, 0.05)' },
-  statLabel: { fontSize: '14px', opacity: 0.9, marginBottom: '8px' },
-  statValue: { fontSize: '24px', fontWeight: 'bold', marginBottom: '4px' },
-  statChange: { fontSize: '12px', opacity: 0.9 },
-  dashboardGrid: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px', marginBottom: '30px' },
-  recentTransactions: { backgroundColor: '#ffffff', borderRadius: '12px', padding: '20px', boxShadow: '0 4px 6px rgba(0, 0, 0, 0.05)', height: 'fit-content' },
-  alertsSection: { backgroundColor: '#ffffff', borderRadius: '12px', padding: '20px', boxShadow: '0 4px 6px rgba(0, 0, 0, 0.05)', height: 'fit-content' },
-  sectionHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' },
-  sectionTitle: { fontSize: '18px', fontWeight: '600', color: '#1e293b', marginBottom: '0' },
-  viewAllButton: { backgroundColor: 'transparent', border: 'none', color: '#4f46e5', fontSize: '14px', fontWeight: '500', cursor: 'pointer' },
-  transactionCard: { border: '1px solid #e2e8f0', borderRadius: '8px', padding: '16px', marginBottom: '12px' },
-  transactionHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' },
-  transactionStatus: { fontWeight: '500', color: '#1e293b' },
-  transactionTime: { fontSize: '12px', color: '#64748b' },
-  transactionProducts: { display: 'flex', flexWrap: 'wrap', gap: '4px', marginBottom: '8px' },
-  productName: { fontSize: '12px', backgroundColor: '#f1f5f9', padding: '2px 6px', borderRadius: '4px', color: '#475569' },
-  moreItems: { fontSize: '12px', color: '#64748b' },
-  transactionAmount: { fontWeight: '600', color: '#4f46e5', fontSize: '14px' },
-  alertsList: { display: 'flex', flexDirection: 'column', gap: '12px' },
-  alertCard: { borderRadius: '8px', padding: '16px' },
-  alertHeader: { display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '8px' },
-  alertIcon: { width: '32px', height: '32px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '16px' },
-  alertTitle: { fontWeight: '600', color: '#1e293b', margin: '0', fontSize: '14px' },
-  alertProduct: { fontWeight: '500', color: '#475569', margin: '0', fontSize: '13px' },
-  alertDescription: { margin: '0', fontSize: '12px', color: '#64748b' },
-  noDataText: { color: '#94a3b8', fontSize: '14px', fontStyle: 'italic' },
-  modalOverlay: { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.3)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 },
-  modalContainer: { backgroundColor: '#fff', borderRadius: '12px', padding: '24px', width: '90%', maxWidth: '600px', maxHeight: '80vh', overflowY: 'auto', boxShadow: '0 4px 10px rgba(0,0,0,0.2)' },
-  modalHeader: { fontSize: '20px', fontWeight: 'bold', marginBottom: '16px', color: '#1e293b' },
-  table: { width: '100%', borderCollapse: 'collapse', marginBottom: '16px' },
-  tableHeader: { backgroundColor: '#f1f5f9' },
-  tableCell: { textAlign: 'left', padding: '8px', borderBottom: '1px solid #e2e8f0', fontSize: '14px', color: '#334155' },
-  tableRow: { backgroundColor: '#fff' },
-  modalButtons: { display: 'flex', justifyContent: 'flex-end', gap: '12px' },
-  cancelButton: { backgroundColor: '#ef4444', color: '#fff', border: 'none', padding: '10px 16px', borderRadius: '8px', cursor: 'pointer' },
+  headerLeft: {
+    flex: 1,
+    minWidth: '200px',
+  },
+  pageTitle: {
+    fontSize: '24px',
+    fontWeight: 'bold',
+    color: '#1e293b',
+    marginBottom: '4px',
+    '@media (max-width: 768px)': {
+      fontSize: '20px',
+    },
+  },
+  pageSubtitle: {
+    fontSize: '16px',
+    color: '#64748b',
+    '@media (max-width: 768px)': {
+      fontSize: '14px',
+    },
+  },
+  userSection: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '20px',
+    flexWrap: 'wrap',
+    justifyContent: 'flex-end',
+    '@media (max-width: 768px)': {
+      width: '100%',
+      justifyContent: 'space-between',
+      marginTop: '8px',
+    },
+  },
+  notificationIcon: {
+    fontSize: '20px',
+  },
+  logoutIcon: {
+    fontSize: '20px',
+    cursor: 'pointer',
+  },
+  headerText: {
+    fontWeight: 600,
+    color: '#111827',
+    fontSize: '16px',
+  },
+  mainContent: {
+    padding: '20px',
+    '@media (max-width: 768px)': {
+      padding: '16px',
+    },
+  },
+  welcomeTitle: {
+    fontSize: '24px',
+    fontWeight: 'bold',
+    marginBottom: '4px',
+    color: '#1e293b',
+    '@media (max-width: 768px)': {
+      fontSize: '20px',
+    },
+  },
+  welcomeSubtitle: {
+    fontSize: '16px',
+    color: '#64748b',
+    marginBottom: '24px',
+    '@media (max-width: 768px)': {
+      fontSize: '14px',
+      marginBottom: '20px',
+    },
+  },
+  statCardsContainer: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+    gap: '16px',
+    marginBottom: '30px',
+    '@media (max-width: 768px)': {
+      gridTemplateColumns: 'repeat(2, 1fr)',
+      gap: '12px',
+    },
+    '@media (max-width: 480px)': {
+      gridTemplateColumns: '1fr',
+    },
+  },
+  statCardWrapper: {
+    cursor: 'pointer',
+  },
+  statCard: {
+    padding: '20px',
+    borderRadius: '12px',
+    boxShadow: '0 4px 6px rgba(0, 0, 0, 0.05)',
+    height: '100%',
+    minHeight: '120px',
+    display: 'flex',
+    flexDirection: 'column',
+    justifyContent: 'space-between',
+    '@media (max-width: 768px)': {
+      padding: '16px',
+      minHeight: '110px',
+    },
+  },
+  statLabel: {
+    fontSize: '14px',
+    opacity: 0.9,
+    marginBottom: '8px',
+  },
+  statValue: {
+    fontSize: '24px',
+    fontWeight: 'bold',
+    marginBottom: '4px',
+    '@media (max-width: 768px)': {
+      fontSize: '20px',
+    },
+  },
+  statChange: {
+    fontSize: '12px',
+    opacity: 0.9,
+  },
+  dashboardGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(2, 1fr)',
+    gap: '24px',
+    marginBottom: '30px',
+    '@media (max-width: 1024px)': {
+      gridTemplateColumns: '1fr',
+      gap: '20px',
+    },
+  },
+  recentTransactions: {
+    backgroundColor: '#ffffff',
+    borderRadius: '12px',
+    padding: '20px',
+    boxShadow: '0 4px 6px rgba(0, 0, 0, 0.05)',
+    height: 'fit-content',
+    '@media (max-width: 768px)': {
+      padding: '16px',
+    },
+  },
+  alertsSection: {
+    backgroundColor: '#ffffff',
+    borderRadius: '12px',
+    padding: '20px',
+    boxShadow: '0 4px 6px rgba(0, 0, 0, 0.05)',
+    height: 'fit-content',
+    '@media (max-width: 768px)': {
+      padding: '16px',
+    },
+  },
+  sectionHeader: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: '16px',
+    flexWrap: 'wrap',
+    gap: '8px',
+  },
+  sectionTitle: {
+    fontSize: '18px',
+    fontWeight: '600',
+    color: '#1e293b',
+    marginBottom: '0',
+    '@media (max-width: 768px)': {
+      fontSize: '16px',
+    },
+  },
+  viewAllButton: {
+    backgroundColor: 'transparent',
+    border: 'none',
+    color: '#4f46e5',
+    fontSize: '14px',
+    fontWeight: '500',
+    cursor: 'pointer',
+    padding: '4px 8px',
+    '@media (max-width: 768px)': {
+      fontSize: '13px',
+    },
+  },
+  transactionsList: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '12px',
+  },
+  transactionCard: {
+    border: '1px solid #e2e8f0',
+    borderRadius: '8px',
+    padding: '16px',
+    '@media (max-width: 768px)': {
+      padding: '12px',
+    },
+  },
+  transactionHeader: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: '8px',
+    flexWrap: 'wrap',
+    gap: '8px',
+  },
+  transactionHeaderLeft: {
+    flex: 1,
+  },
+  transactionStatus: {
+    fontWeight: '500',
+    color: '#1e293b',
+    fontSize: '14px',
+    display: 'block',
+    marginBottom: '4px',
+  },
+  transactionTime: {
+    fontSize: '12px',
+    color: '#64748b',
+    display: 'block',
+  },
+  transactionAmount: {
+    fontWeight: '600',
+    color: '#4f46e5',
+    fontSize: '16px',
+    whiteSpace: 'nowrap',
+    '@media (max-width: 768px)': {
+      fontSize: '14px',
+    },
+  },
+  transactionProducts: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    gap: '4px',
+    alignItems: 'center',
+  },
+  productName: {
+    fontSize: '12px',
+    backgroundColor: '#f1f5f9',
+    padding: '4px 8px',
+    borderRadius: '4px',
+    color: '#475569',
+    '@media (max-width: 768px)': {
+      fontSize: '11px',
+      padding: '3px 6px',
+    },
+  },
+  moreItems: {
+    fontSize: '12px',
+    color: '#64748b',
+    '@media (max-width: 768px)': {
+      fontSize: '11px',
+    },
+  },
+  alertsList: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '12px',
+  },
+  alertCard: {
+    borderRadius: '8px',
+    padding: '16px',
+    '@media (max-width: 768px)': {
+      padding: '12px',
+    },
+  },
+  alertHeader: {
+    display: 'flex',
+    alignItems: 'flex-start',
+    gap: '12px',
+    '@media (max-width: 768px)': {
+      gap: '8px',
+    },
+  },
+  alertIcon: {
+    width: '32px',
+    height: '32px',
+    borderRadius: '50%',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    fontSize: '16px',
+    flexShrink: 0,
+    '@media (max-width: 768px)': {
+      width: '28px',
+      height: '28px',
+      fontSize: '14px',
+    },
+  },
+  alertContent: {
+    flex: 1,
+  },
+  alertTitle: {
+    fontWeight: '600',
+    color: '#1e293b',
+    margin: '0 0 4px 0',
+    fontSize: '14px',
+    '@media (max-width: 768px)': {
+      fontSize: '13px',
+    },
+  },
+  alertProduct: {
+    fontWeight: '500',
+    color: '#475569',
+    margin: '0 0 4px 0',
+    fontSize: '13px',
+    '@media (max-width: 768px)': {
+      fontSize: '12px',
+    },
+  },
+  alertDescription: {
+    margin: '0',
+    fontSize: '12px',
+    color: '#64748b',
+    '@media (max-width: 768px)': {
+      fontSize: '11px',
+    },
+  },
+  noDataText: {
+    color: '#94a3b8',
+    fontSize: '14px',
+    fontStyle: 'italic',
+    textAlign: 'center',
+    padding: '20px',
+  },
+  modalOverlay: {
+    position: 'fixed',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.3)',
+    display: 'flex',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 1000,
+    padding: '16px',
+  },
+  modalContainer: {
+    backgroundColor: '#fff',
+    borderRadius: '12px',
+    padding: '24px',
+    width: '100%',
+    maxWidth: '600px',
+    maxHeight: '80vh',
+    overflowY: 'auto',
+    boxShadow: '0 4px 10px rgba(0,0,0,0.2)',
+    '@media (max-width: 768px)': {
+      padding: '20px',
+      maxWidth: '95%',
+    },
+  },
+  modalHeader: {
+    fontSize: '20px',
+    fontWeight: 'bold',
+    marginBottom: '16px',
+    color: '#1e293b',
+    '@media (max-width: 768px)': {
+      fontSize: '18px',
+    },
+  },
+  tableContainer: {
+    overflowX: 'auto',
+    marginBottom: '16px',
+  },
+  table: {
+    width: '100%',
+    borderCollapse: 'collapse',
+    minWidth: '300px',
+  },
+  tableHeader: {
+    backgroundColor: '#f1f5f9',
+  },
+  tableCell: {
+    textAlign: 'left',
+    padding: '12px 16px',
+    borderBottom: '1px solid #e2e8f0',
+    fontSize: '14px',
+    color: '#334155',
+    '@media (max-width: 768px)': {
+      padding: '10px 12px',
+      fontSize: '13px',
+    },
+  },
+  tableRow: {
+    backgroundColor: '#fff',
+    '&:hover': {
+      backgroundColor: '#f8fafc',
+    },
+  },
+  modalButtons: {
+    display: 'flex',
+    justifyContent: 'flex-end',
+    gap: '12px',
+  },
+  cancelButton: {
+    backgroundColor: '#ef4444',
+    color: '#fff',
+    border: 'none',
+    padding: '10px 20px',
+    borderRadius: '8px',
+    cursor: 'pointer',
+    fontSize: '14px',
+    fontWeight: '500',
+    '@media (max-width: 768px)': {
+      padding: '8px 16px',
+      fontSize: '13px',
+      width: '100%',
+    },
+  },
 };

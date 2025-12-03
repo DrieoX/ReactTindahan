@@ -26,11 +26,11 @@ export default function MainLayout({ children, userMode, handleLogout }) {
     { name: 'Inventory', label: 'Inventory', icon: <FaBoxes /> },
     { name: 'Resupply', label: 'Resupply', icon: <FaRedo /> },
     { name: 'Suppliers', label: 'Suppliers', icon: <FaTruck /> },
+    { name: 'Sales', label: 'Sales', icon: <FaCashRegister /> },
   ];
 
   if (mode === 'server') {
     menuItems.push(
-      { name: 'Sales', label: 'Sales', icon: <FaCashRegister /> },
       { name: 'Reports', label: 'Reports', icon: <FaChartBar /> }
     );
   }
@@ -51,7 +51,9 @@ export default function MainLayout({ children, userMode, handleLogout }) {
       <div
         style={{
           ...styles.sidebar,
-          left: sidebarVisible ? 0 : -SIDEBAR_WIDTH,
+          left: sidebarVisible ? 0 : -SIDEBAR_WIDTH - 20, // Move further left to ensure complete hiding
+          opacity: sidebarVisible ? 1 : 0,
+          pointerEvents: sidebarVisible ? 'auto' : 'none',
         }}
       >
         {/* Menu Items */}
@@ -162,6 +164,7 @@ const styles = {
     flexDirection: 'row',
     position: 'relative',
     minHeight: '100vh',
+    overflow: 'hidden',
   },
   topBar: {
     position: 'fixed',
@@ -187,12 +190,13 @@ const styles = {
     width: SIDEBAR_WIDTH,
     backgroundColor: '#f3f4f6',
     padding: '20px 12px',
-    transition: 'left 0.3s ease',
+    transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)', // Smoother easing
     zIndex: 30,
-    boxShadow: '2px 0 5px rgba(0,0,0,0.2)',
+    boxShadow: '2px 0 10px rgba(0,0,0,0.15)',
     overflowY: 'auto',
     display: 'flex',
     flexDirection: 'column',
+    transform: 'translateX(0)', // Added transform for better hiding
   },
   overlay: {
     position: 'fixed',
@@ -200,8 +204,9 @@ const styles = {
     left: 0,
     right: 0,
     bottom: 0,
-    backgroundColor: 'rgba(0, 0, 0, 0.3)',
+    backgroundColor: 'rgba(0, 0, 0, 0.4)',
     zIndex: 25,
+    backdropFilter: 'blur(2px)',
   },
   menuButton: {
     display: 'flex',
@@ -217,6 +222,7 @@ const styles = {
     backgroundColor: '#fff',
     transition: 'all 0.2s ease',
     gap: '12px',
+    boxSizing: 'border-box',
   },
   icon: {
     fontSize: '16px',
@@ -225,6 +231,7 @@ const styles = {
     alignItems: 'center',
     justifyContent: 'center',
     transition: 'color 0.2s ease',
+    flexShrink: 0,
   },
   logoutIcon: {
     fontSize: '16px',
@@ -233,6 +240,7 @@ const styles = {
     alignItems: 'center',
     justifyContent: 'center',
     color: '#ffffff',
+    flexShrink: 0,
   },
   divider: {
     width: '100%',
@@ -246,6 +254,8 @@ const styles = {
   logoutSection: {
     marginTop: 'auto',
     paddingTop: '10px',
+    width: '100%',
+    boxSizing: 'border-box',
   },
   sidebarLogoutButton: {
     display: 'flex',
@@ -262,6 +272,7 @@ const styles = {
     fontWeight: 600,
     transition: 'all 0.3s ease',
     gap: '12px',
+    boxSizing: 'border-box',
   },
   menuTitle: {
     fontSize: 18,
@@ -272,6 +283,9 @@ const styles = {
     cursor: 'pointer',
     display: 'flex',
     alignItems: 'center',
+    padding: '8px 12px',
+    borderRadius: 6,
+    transition: 'background-color 0.2s ease',
   },
   mainContent: {
     flex: 1,
@@ -280,5 +294,6 @@ const styles = {
     width: '100%',
     height: 'calc(100vh - 50px)',
     overflowY: 'auto',
+    boxSizing: 'border-box',
   },
 };
