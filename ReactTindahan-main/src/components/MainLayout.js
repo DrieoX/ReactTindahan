@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { FaDatabase } from 'react-icons/fa';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { 
   FaHome,
@@ -20,6 +21,8 @@ export default function MainLayout({ children, userMode, handleLogout }) {
   const [isLogoutClicked, setIsLogoutClicked] = useState(false);
 
   const mode = userMode ? userMode.toLowerCase() : 'client';
+  const user = JSON.parse(localStorage.getItem('user') || '{}');
+  const isOwner = user?.role === 'Owner';
 
   const menuItems = [
     { name: 'Dashboard', label: 'Home', icon: <FaHome /> },
@@ -29,10 +32,18 @@ export default function MainLayout({ children, userMode, handleLogout }) {
     { name: 'Sales', label: 'Sales', icon: <FaCashRegister /> },
   ];
 
+  // Add Reports for server mode
   if (mode === 'server') {
     menuItems.push(
       { name: 'Reports', label: 'Reports', icon: <FaChartBar /> }
     );
+    
+    // Add Backup for owners only in server mode
+    if (isOwner) {
+      menuItems.push(
+        { name: 'Backup', label: 'Backup', icon: <FaDatabase /> }
+      );
+    }
   }
 
   const currentPath = location.pathname.toLowerCase();
@@ -51,11 +62,24 @@ export default function MainLayout({ children, userMode, handleLogout }) {
       <div
         style={{
           ...styles.sidebar,
-          left: sidebarVisible ? 0 : -SIDEBAR_WIDTH - 20, // Move further left to ensure complete hiding
+          left: sidebarVisible ? 0 : -SIDEBAR_WIDTH - 20,
           opacity: sidebarVisible ? 1 : 0,
           pointerEvents: sidebarVisible ? 'auto' : 'none',
         }}
       >
+        {/* User Info */}
+        <div style={styles.userInfo}>
+          <div style={styles.userAvatar}>
+            {user?.username?.charAt(0).toUpperCase() || 'U'}
+          </div>
+          <div style={styles.userDetails}>
+            <p style={styles.userName}>{user?.username || 'User'}</p>
+            <p style={styles.userRole}>{user?.role || 'User'}</p>
+          </div>
+        </div>
+        
+        <div style={styles.divider} />
+
         {/* Menu Items */}
         {menuItems.map((item, index) => {
           const itemPath = `/${item.name.toLowerCase()}`;
@@ -148,8 +172,10 @@ export default function MainLayout({ children, userMode, handleLogout }) {
           Menu
         </button>
 
-        {/* Removed Logout from top bar - keeping spacer for balance */}
-        <div style={styles.topBarSpacer} />
+        <div style={styles.userBadge}>
+          <span style={styles.userBadgeName}>{user?.username || 'User'}</span>
+          <span style={styles.userBadgeRole}>{user?.role || 'User'}</span>
+        </div>
       </div>
 
       {/* Main content */}
@@ -180,8 +206,25 @@ const styles = {
     boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
     zIndex: 20,
   },
-  topBarSpacer: {
-    width: '60px',
+  userBadge: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    backgroundColor: '#e5e7eb',
+    padding: '6px 12px',
+    borderRadius: '20px',
+  },
+  userBadgeName: {
+    fontSize: '14px',
+    fontWeight: '600',
+    color: '#1f2937',
+  },
+  userBadgeRole: {
+    fontSize: '12px',
+    color: '#6b7280',
+    backgroundColor: '#d1d5db',
+    padding: '2px 8px',
+    borderRadius: '10px',
   },
   sidebar: {
     position: 'fixed',
@@ -190,13 +233,50 @@ const styles = {
     width: SIDEBAR_WIDTH,
     backgroundColor: '#f3f4f6',
     padding: '20px 12px',
-    transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)', // Smoother easing
+    transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
     zIndex: 30,
     boxShadow: '2px 0 10px rgba(0,0,0,0.15)',
     overflowY: 'auto',
     display: 'flex',
     flexDirection: 'column',
-    transform: 'translateX(0)', // Added transform for better hiding
+    transform: 'translateX(0)',
+  },
+  userInfo: {
+    display: 'flex',
+    alignItems: 'center',
+    padding: '12px',
+    marginBottom: '16px',
+    backgroundColor: '#ffffff',
+    borderRadius: '8px',
+    boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
+  },
+  userAvatar: {
+    width: '40px',
+    height: '40px',
+    borderRadius: '50%',
+    backgroundColor: '#3b82f6',
+    color: 'white',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    fontWeight: 'bold',
+    fontSize: '18px',
+    marginRight: '12px',
+  },
+  userDetails: {
+    flex: 1,
+  },
+  userName: {
+    fontWeight: '600',
+    fontSize: '14px',
+    color: '#1f2937',
+    margin: 0,
+    marginBottom: '2px',
+  },
+  userRole: {
+    fontSize: '12px',
+    color: '#6b7280',
+    margin: 0,
   },
   overlay: {
     position: 'fixed',

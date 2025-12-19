@@ -7,24 +7,106 @@ export const addReport = async (report) => {
 };
 
 export default function ReportsScreen({ userMode }) {
+  const mode = userMode || 'client';
+  const savedUser = JSON.parse(localStorage.getItem("user") || "{}");
+  const user = savedUser;
+
   const [report, setReport] = useState([]);
   const [resupplyReport, setResupplyReport] = useState([]);
   const [timeFilter, setTimeFilter] = useState('daily');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
-  const mode = userMode || 'client';
+  const [costData, setCostData] = useState({}); // Store product cost data
 
   useEffect(() => {
     // Set default date range to today when component mounts
     const today = new Date().toISOString().split('T')[0];
     setStartDate(today);
     setEndDate(today);
+    
+    // ✅ FIXED: Just log to console
+    console.log(`[AUDIT] VIEW_REPORTS_SCREEN`, {
+      user_id: user?.user_id,
+      username: user?.username,
+      page: 'reports'
+    });
+  }, []);
+
+  useEffect(() => {
+    fetchProductCostData();
   }, []);
 
   useEffect(() => {
     fetchReport();
     fetchResupplyReport();
-  }, [timeFilter, startDate, endDate]);
+  }, [timeFilter, startDate, endDate, costData]);
+
+  // ✅ FIXED Audit logging function - uses console logging
+  const logAudit = async (action, details = {}) => {
+    try {
+      // Simply log to console - no separate audits table needed
+      console.log(`[AUDIT] ${action}`, {
+        user_id: user?.user_id,
+        username: user?.username,
+        details,
+        timestamp: new Date().toISOString()
+      });
+    } catch (error) {
+      console.error('Failed to log audit:', error);
+    }
+  };
+
+  // Fetch product cost data from stock card or resupply records
+  const fetchProductCostData = async () => {
+    try {
+      const resupplyItems = await db.resupplied_items.toArray();
+      const stockCardItems = await db.stock_card.toArray();
+      
+      // First try to get cost from resupply items
+      const costMap = {};
+      
+      // Process resupply items (most recent first to get latest cost)
+      resupplyItems
+        .sort((a, b) => new Date(b.resupply_date) - new Date(a.resupply_date))
+        .forEach(item => {
+          if (item.product_id && item.unit_cost) {
+            if (!costMap[item.product_id] || new Date(item.resupply_date) > new Date(costMap[item.product_id].date)) {
+              costMap[item.product_id] = {
+                cost: item.unit_cost,
+                date: item.resupply_date
+              };
+            }
+          }
+        });
+      
+      // Fallback to stock card if no resupply data
+      stockCardItems
+        .sort((a, b) => new Date(b.transaction_date) - new Date(a.transaction_date))
+        .forEach(item => {
+          if (item.product_id && item.unit_cost && !costMap[item.product_id]) {
+            costMap[item.product_id] = {
+              cost: item.unit_cost,
+              date: item.transaction_date
+            };
+          }
+        });
+      
+      setCostData(costMap);
+      
+      // ✅ FIXED: Just log to console
+      console.log(`[AUDIT] FETCH_COST_DATA`, {
+        products_with_cost: Object.keys(costMap).length,
+        user_id: user?.user_id
+      });
+    } catch (err) {
+      console.error("Error fetching cost data:", err);
+      // ✅ FIXED: Just log to console
+      console.error(`[AUDIT] FETCH_COST_DATA_ERROR`, {
+        error: err.message,
+        user_id: user?.user_id
+      });
+    }
+  };
 
   const isToday = (dateStr) => {
     if (!dateStr) return false;
@@ -83,12 +165,34 @@ export default function ReportsScreen({ userMode }) {
     }
   };
 
-  const handleDateRangeChange = (newStartDate, newEndDate) => {
+  const handleDateRangeChange = async (newStartDate, newEndDate) => {
+    // ✅ FIXED: Just log to console
+    console.log(`[AUDIT] CHANGE_REPORT_FILTER`, {
+      old_filter: timeFilter,
+      new_filter: 'custom',
+      start_date: newStartDate,
+      end_date: newEndDate,
+      user_id: user?.user_id
+    });
+    
     setStartDate(newStartDate);
     setEndDate(newEndDate);
     if (timeFilter !== 'custom') {
       setTimeFilter('custom');
     }
+  };
+
+  const handleTimeFilterChange = async (newFilter) => {
+    // ✅ FIXED: Just log to console
+    console.log(`[AUDIT] CHANGE_REPORT_FILTER`, {
+      old_filter: timeFilter,
+      new_filter: newFilter,
+      start_date: startDate,
+      end_date: endDate,
+      user_id: user?.user_id
+    });
+    
+    setTimeFilter(newFilter);
   };
 
   const getDateRangeLabel = () => {
@@ -111,80 +215,127 @@ export default function ReportsScreen({ userMode }) {
     return `${new Date().toLocaleDateString()}`;
   };
 
-  // Download as CSV - UPDATED: Removed Quantity and Amount columns
-  const downloadCSV = () => {
+  // Download as CSV - UPDATED: Added Cost and Income columns
+  const downloadCSV = async () => {
     if (report.length === 0) {
       alert('No data to download');
       return;
     }
 
-    const headers = ['Date', 'Customer', 'Product', 'Total Items', 'Total Sale'];
-    
-    // Flatten all sales data
-    const csvData = report.flatMap(sale => {
-      const totalItemsInSale = sale.items.reduce((sum, item) => sum + item.quantity, 0);
-      return sale.items.map((item, index) => [
-        sale.sales_date,
-        'Cash', // Customer name
-        item.name,
-        index === 0 ? totalItemsInSale : '', // Total items (only show in first row per sale)
-        index === 0 ? `₱${sale.totalAmount.toFixed(2)}` : '' // Total sale (only show in first row per sale)
-      ]);
-    });
-
-    // Add summary row
+    // Calculate totals
     const totalRevenue = report.reduce((sum, r) => sum + (r.totalAmount || 0), 0);
+    const totalCost = report.reduce((sum, r) => sum + (r.totalCost || 0), 0);
+    const totalIncome = totalRevenue - totalCost;
     const totalTransactions = report.length;
     const totalItemsSold = report.reduce((sum, sale) => 
       sum + sale.items.reduce((itemSum, item) => itemSum + item.quantity, 0), 0
     );
     
+    // ✅ FIXED: Just log to console
+    console.log(`[AUDIT] DOWNLOAD_REPORT_CSV`, {
+      report_type: 'sales_with_income',
+      time_filter: timeFilter,
+      start_date: startDate,
+      end_date: endDate,
+      total_records: report.length,
+      total_revenue: totalRevenue,
+      total_cost: totalCost,
+      total_income: totalIncome,
+      user_id: user?.user_id,
+      username: user?.username
+    });
+
+    const headers = ['Date', 'Product', 'Quantity', 'Selling Price', 'Cost Price', 'Income', 'Total Sale', 'Total Cost', 'Total Income'];
+    
+    // Flatten all sales data
+    const csvData = report.flatMap(sale => {
+      const totalItemsInSale = sale.items.reduce((sum, item) => sum + item.quantity, 0);
+      const saleTotal = sale.totalAmount || 0;
+      const saleCost = sale.totalCost || 0;
+      const saleIncome = saleTotal - saleCost;
+      
+      return sale.items.map((item, index) => [
+        index === 0 ? sale.sales_date : '',
+        item.name,
+        item.quantity,
+        `₱${item.unit_price?.toFixed(2) || '0.00'}`,
+        `₱${item.unit_cost?.toFixed(2) || '0.00'}`,
+        `₱${item.income?.toFixed(2) || '0.00'}`,
+        index === 0 ? `₱${saleTotal.toFixed(2)}` : '',
+        index === 0 ? `₱${saleCost.toFixed(2)}` : '',
+        index === 0 ? `₱${saleIncome.toFixed(2)}` : ''
+      ]);
+    });
+
+    // Add summary rows
     const csvContent = [
-      ['SmartTindahan - Sales Report'],
+      ['SmartTindahan - Income Report (Profit & Loss)'],
       ['Date Range:', getDateRangeForExport()],
       [`Generated on: ${new Date().toLocaleDateString()}`],
-      [],
+      [''],
       headers,
       ...csvData,
-      [],
-      ['SUMMARY', '', '', '', ''],
-      ['Grand Total', '', '', '', `₱${totalRevenue.toFixed(2)}`],
-      ['Total Transactions', '', '', '', totalTransactions],
-      ['Total Items Sold', '', '', '', totalItemsSold],
-      ['Average Transaction', '', '', '', `₱${(totalRevenue / totalTransactions).toFixed(2)}`]
+      [''],
+      ['SUMMARY', '', '', '', '', '', '', '', ''],
+      ['Total Revenue', '', '', '', '', '', `₱${totalRevenue.toFixed(2)}`, '', ''],
+      ['Total Cost', '', '', '', '', '', '', `₱${totalCost.toFixed(2)}`, ''],
+      ['Total Income (Profit)', '', '', '', '', '', '', '', `₱${totalIncome.toFixed(2)}`],
+      ['Total Transactions', '', '', '', '', '', totalTransactions, '', ''],
+      ['Total Items Sold', '', '', '', '', '', totalItemsSold, '', ''],
+      ['Average Transaction Value', '', '', '', '', '', `₱${(totalRevenue / totalTransactions).toFixed(2)}`, '', ''],
+      ['Profit Margin', '', '', '', '', '', `${totalRevenue > 0 ? ((totalIncome / totalRevenue) * 100).toFixed(2) : '0.00'}%`, '', '']
     ].map(row => row.join(',')).join('\n');
 
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement('a');
     const url = URL.createObjectURL(blob);
     link.setAttribute('href', url);
-    link.setAttribute('download', `sales_report_${new Date().toISOString().split('T')[0]}.csv`);
+    link.setAttribute('download', `income_report_${new Date().toISOString().split('T')[0]}.csv`);
     link.style.visibility = 'hidden';
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
   };
 
-  // Download as PDF - UPDATED: Removed Quantity and Amount columns
-  const downloadPDF = () => {
+  // Download as PDF - UPDATED: Added Cost and Income columns
+  const downloadPDF = async () => {
     if (report.length === 0) {
       alert('No data to download');
       return;
     }
 
-    const printWindow = window.open('', '_blank');
+    // Calculate totals
     const totalRevenue = report.reduce((sum, r) => sum + (r.totalAmount || 0), 0);
+    const totalCost = report.reduce((sum, r) => sum + (r.totalCost || 0), 0);
+    const totalIncome = totalRevenue - totalCost;
     const totalTransactions = report.length;
     const totalItemsSold = report.reduce((sum, sale) => 
       sum + sale.items.reduce((itemSum, item) => itemSum + item.quantity, 0), 0
     );
     const averageTransaction = totalRevenue / totalTransactions;
+    const profitMargin = totalRevenue > 0 ? (totalIncome / totalRevenue) * 100 : 0;
+
+    // ✅ FIXED: Just log to console
+    console.log(`[AUDIT] DOWNLOAD_REPORT_PDF`, {
+      report_type: 'income',
+      time_filter: timeFilter,
+      start_date: startDate,
+      end_date: endDate,
+      total_records: report.length,
+      total_revenue: totalRevenue,
+      total_cost: totalCost,
+      total_income: totalIncome,
+      user_id: user?.user_id,
+      username: user?.username
+    });
+
+    const printWindow = window.open('', '_blank');
 
     printWindow.document.write(`
       <!DOCTYPE html>
       <html>
       <head>
-        <title>Sales Report</title>
+        <title>Income Report (Profit & Loss)</title>
         <style>
           body { font-family: Arial, sans-serif; margin: 20px; }
           .header { text-align: center; margin-bottom: 20px; border-bottom: 2px solid #333; padding-bottom: 10px; }
@@ -193,13 +344,34 @@ export default function ReportsScreen({ userMode }) {
           .generated-date { font-size: 14px; color: #7f8c8d; }
           .summary { background: #f5f5f5; padding: 15px; margin-bottom: 20px; border-radius: 5px; }
           .summary-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; margin-bottom: 20px; }
-          .summary-item { text-align: center; padding: 10px; }
-          .summary-value { font-size: 18px; font-weight: bold; color: #2c3e50; }
-          .summary-label { font-size: 14px; color: #7f8c8d; }
+          .summary-item { text-align: center; padding: 10px; border-radius: 5px; }
+          .summary-revenue { background: #e8f5e8; }
+          .summary-cost { background: #ffe6e6; }
+          .summary-income { background: #e8f4fd; }
+          .summary-other { background: #f8f9fa; }
+          .summary-value { font-size: 18px; font-weight: bold; }
+          .revenue-value { color: #2e7d32; }
+          .cost-value { color: #c62828; }
+          .income-value { color: #1565c0; }
+          .summary-label { font-size: 14px; color: #7f8c8d; margin-top: 5px; }
+          .profit-margin { 
+            text-align: center; 
+            padding: 15px; 
+            margin: 20px 0; 
+            border-radius: 5px;
+            font-size: 18px;
+            font-weight: bold;
+            color: ${profitMargin >= 0 ? '#2e7d32' : '#c62828'};
+            background: ${profitMargin >= 0 ? '#e8f5e8' : '#ffe6e6'};
+          }
           table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
           th, td { border: 1px solid #ddd; padding: 10px; text-align: left; }
           th { background-color: #f8f9fa; font-weight: bold; }
+          .income-positive { color: #2e7d32; font-weight: bold; }
+          .income-negative { color: #c62828; font-weight: bold; }
           .total-row { background-color: #e8f5e8; font-weight: bold; }
+          .cost-row { background-color: #fff5f5; }
+          .income-row { background-color: #f0f9ff; }
           .footer { margin-top: 30px; text-align: center; color: #7f8c8d; font-size: 12px; }
           @media print {
             body { margin: 0; }
@@ -210,7 +382,7 @@ export default function ReportsScreen({ userMode }) {
       <body>
         <div class="header">
           <h1>SmartTindahan</h1>
-          <h2>Sales Report</h2>
+          <h2>Income Report (Profit & Loss)</h2>
         </div>
 
         <div class="date-info">
@@ -219,56 +391,90 @@ export default function ReportsScreen({ userMode }) {
         </div>
 
         <div class="summary">
-          <h3>Summary</h3>
+          <h3>Financial Summary</h3>
           <div class="summary-grid">
-            <div class="summary-item">
-              <div class="summary-value">₱${totalRevenue.toFixed(2)}</div>
-              <div class="summary-label">Grand Total</div>
+            <div class="summary-item summary-revenue">
+              <div class="summary-value revenue-value">₱${totalRevenue.toFixed(2)}</div>
+              <div class="summary-label">Total Revenue</div>
             </div>
-            <div class="summary-item">
+            <div class="summary-item summary-cost">
+              <div class="summary-value cost-value">₱${totalCost.toFixed(2)}</div>
+              <div class="summary-label">Total Cost</div>
+            </div>
+            <div class="summary-item summary-income">
+              <div class="summary-value income-value">₱${totalIncome.toFixed(2)}</div>
+              <div class="summary-label">Total Income (Profit)</div>
+            </div>
+            <div class="summary-item summary-other">
               <div class="summary-value">${totalTransactions}</div>
-              <div class="summary-label">Total Transactions</div>
+              <div class="summary-label">Transactions</div>
             </div>
-            <div class="summary-item">
-              <div class="summary-value">${totalItemsSold}</div>
-              <div class="summary-label">Total Items Sold</div>
-            </div>
-            <div class="summary-item">
-              <div class="summary-value">₱${averageTransaction.toFixed(2)}</div>
-              <div class="summary-label">Average Transaction</div>
-            </div>
+          </div>
+          
+          <div class="profit-margin">
+            Profit Margin: ${profitMargin.toFixed(2)}%
           </div>
         </div>
 
-        <h3>Sales Details</h3>
+        <h3>Sales Details with Income Calculation</h3>
         <table>
           <thead>
             <tr>
               <th>Date</th>
-              <th>Customer</th>
               <th>Product</th>
-              <th>Total Items</th>
+              <th>Quantity</th>
+              <th>Selling Price</th>
+              <th>Cost Price</th>
+              <th>Income</th>
               <th>Total Sale</th>
+              <th>Total Cost</th>
+              <th>Total Income</th>
             </tr>
           </thead>
           <tbody>
             ${report.map(sale => {
               const totalItemsInSale = sale.items.reduce((sum, item) => sum + item.quantity, 0);
+              const saleTotal = sale.totalAmount || 0;
+              const saleCost = sale.totalCost || 0;
+              const saleIncome = saleTotal - saleCost;
+              
               return sale.items.map((item, index) => `
                 <tr>
                   ${index === 0 ? `<td rowspan="${sale.items.length}">${sale.sales_date}</td>` : ''}
-                  ${index === 0 ? `<td rowspan="${sale.items.length}">Cash</td>` : ''}
                   <td>${item.name}</td>
-                  ${index === 0 ? `<td rowspan="${sale.items.length}">${totalItemsInSale}</td>` : ''}
-                  ${index === 0 ? `<td rowspan="${sale.items.length}">₱${sale.totalAmount.toFixed(2)}</td>` : ''}
+                  <td>${item.quantity}</td>
+                  <td>₱${item.unit_price?.toFixed(2) || '0.00'}</td>
+                  <td class="cost-row">₱${item.unit_cost?.toFixed(2) || '0.00'}</td>
+                  <td class="income-row ${item.income >= 0 ? 'income-positive' : 'income-negative'}">
+                    ₱${item.income?.toFixed(2) || '0.00'}
+                  </td>
+                  ${index === 0 ? `<td rowspan="${sale.items.length}">₱${saleTotal.toFixed(2)}</td>` : ''}
+                  ${index === 0 ? `<td class="cost-row" rowspan="${sale.items.length}">₱${saleCost.toFixed(2)}</td>` : ''}
+                  ${index === 0 ? `<td class="income-row ${saleIncome >= 0 ? 'income-positive' : 'income-negative'}" rowspan="${sale.items.length}">
+                    ₱${saleIncome.toFixed(2)}
+                  </td>` : ''}
                 </tr>
               `).join('')
             }).join('')}
           </tbody>
+          <tfoot class="total-row">
+            <tr>
+              <td colspan="3"><strong>Grand Totals:</strong></td>
+              <td></td>
+              <td class="cost-row"></td>
+              <td class="income-row"></td>
+              <td><strong>₱${totalRevenue.toFixed(2)}</strong></td>
+              <td class="cost-row"><strong>₱${totalCost.toFixed(2)}</strong></td>
+              <td class="income-row ${totalIncome >= 0 ? 'income-positive' : 'income-negative'}">
+                <strong>₱${totalIncome.toFixed(2)}</strong>
+              </td>
+            </tr>
+          </tfoot>
         </table>
 
         <div class="footer">
-          <p>Generated by SmartTindahan Sales Report System</p>
+          <p>Generated by SmartTindahan Income Report System</p>
+          <p>Profit = Selling Price - Cost Price</p>
         </div>
 
         <script>
@@ -287,6 +493,14 @@ export default function ReportsScreen({ userMode }) {
 
   const fetchReport = async () => {
     try {
+      // ✅ FIXED: Just log to console
+      console.log(`[AUDIT] FETCH_SALES_REPORT`, {
+        time_filter: timeFilter,
+        start_date: startDate,
+        end_date: endDate,
+        user_id: user?.user_id
+      });
+
       const salesData = await db.sale_items.toArray();
       const sales = await db.sales.toArray();
       const products = await db.products.toArray();
@@ -303,24 +517,41 @@ export default function ReportsScreen({ userMode }) {
 
       const enriched = Object.entries(groupedSales).map(([sales_id, items]) => {
         const sale = filteredSales.find(s => s.sales_id === parseInt(sales_id));
-        const totalAmount = items.reduce((sum, i) => sum + (i.amount || 0), 0);
         
-        // Combine items with the same product name
+        // Combine items with the same product name and calculate income
         const combinedItems = {};
+        let saleTotal = 0;
+        let saleTotalCost = 0;
+        
         items.forEach(i => {
           const product = products.find(p => p.product_id === i.product_id);
           const productName = product?.name || 'Unknown Product';
+          const sellingPrice = i.unit_price || product?.unit_price || 0;
+          const costPrice = costData[i.product_id]?.cost || 0;
+          const quantity = i.quantity || 0;
+          const revenue = (sellingPrice * quantity) || 0;
+          const cost = (costPrice * quantity) || 0;
+          const income = revenue - cost;
           
           if (!combinedItems[productName]) {
             combinedItems[productName] = {
               name: productName,
               quantity: 0,
-              amount: 0
+              unit_price: sellingPrice,
+              unit_cost: costPrice,
+              revenue: 0,
+              cost: 0,
+              income: 0
             };
           }
           
-          combinedItems[productName].quantity += i.quantity || 0;
-          combinedItems[productName].amount += i.amount || 0;
+          combinedItems[productName].quantity += quantity;
+          combinedItems[productName].revenue += revenue;
+          combinedItems[productName].cost += cost;
+          combinedItems[productName].income += income;
+          
+          saleTotal += revenue;
+          saleTotalCost += cost;
         });
         
         const productDetails = Object.values(combinedItems);
@@ -328,18 +559,34 @@ export default function ReportsScreen({ userMode }) {
         return {
           sales_date: sale?.sales_date,
           items: productDetails,
-          totalAmount
+          totalAmount: saleTotal,
+          totalCost: saleTotalCost,
+          totalIncome: saleTotal - saleTotalCost
         };
       }).sort((a, b) => new Date(b.sales_date) - new Date(a.sales_date));
 
       setReport(enriched);
     } catch (err) {
       console.error("Error fetching sales report:", err);
+      // ✅ FIXED: Just log to console
+      console.error(`[AUDIT] FETCH_SALES_REPORT_ERROR`, {
+        error: err.message,
+        time_filter: timeFilter,
+        user_id: user?.user_id
+      });
     }
   };
 
   const fetchResupplyReport = async () => {
     try {
+      // ✅ FIXED: Just log to console
+      console.log(`[AUDIT] FETCH_RESUPPLY_REPORT`, {
+        time_filter: timeFilter,
+        start_date: startDate,
+        end_date: endDate,
+        user_id: user?.user_id
+      });
+
       const resuppliedItems = await db.resupplied_items.toArray();
       const products = await db.products.toArray();
       const suppliers = await db.suppliers.toArray();
@@ -357,25 +604,38 @@ export default function ReportsScreen({ userMode }) {
         const productDetails = items.map(i => {
           const product = products.find(p => p.product_id === i.product_id);
           const supplier = suppliers.find(s => s.supplier_id === i.supplier_id);
+          const totalCost = (i.unit_cost || 0) * (i.quantity || 0);
+          
           return {
             product_name: product?.name || 'Unknown Product',
             supplier_name: supplier?.name || 'Unknown Supplier',
             quantity: i.quantity,
             unit_cost: i.unit_cost,
+            total_cost: totalCost,
             expiration_date: i.expiration_date || 'N/A'
           };
         });
+        
         const totalItems = items.reduce((sum, i) => sum + (i.quantity || 0), 0);
+        const totalCost = items.reduce((sum, i) => sum + ((i.unit_cost || 0) * (i.quantity || 0)), 0);
+        
         return {
           resupply_date: date,
           items: productDetails,
-          totalItems
+          totalItems,
+          totalCost
         };
       }).sort((a, b) => new Date(b.resupply_date) - new Date(a.resupply_date));
 
       setResupplyReport(enriched);
     } catch (err) {
       console.error("Error fetching resupply report:", err);
+      // ✅ FIXED: Just log to console
+      console.error(`[AUDIT] FETCH_RESUPPLY_REPORT_ERROR`, {
+        error: err.message,
+        time_filter: timeFilter,
+        user_id: user?.user_id
+      });
     }
   };
 
@@ -383,21 +643,24 @@ export default function ReportsScreen({ userMode }) {
   const totalItemsSold = report.reduce((sum, sale) => 
     sum + sale.items.reduce((itemSum, item) => itemSum + item.quantity, 0), 0
   );
-  const grandTotal = report.reduce((sum, r) => sum + (r.totalAmount || 0), 0);
+  const grandTotalRevenue = report.reduce((sum, r) => sum + (r.totalAmount || 0), 0);
+  const grandTotalCost = report.reduce((sum, r) => sum + (r.totalCost || 0), 0);
+  const grandTotalIncome = grandTotalRevenue - grandTotalCost;
+  const profitMargin = grandTotalRevenue > 0 ? (grandTotalIncome / grandTotalRevenue) * 100 : 0;
 
   return (
     <div style={styles.container}>
       <div style={styles.headerSection}>
         <h1 style={styles.header}>SmartTindahan</h1>
-        <h2 style={styles.subheader}>Sales Reports</h2>
-        <p style={styles.description}>Track your sales performance and analytics</p>
+        <h2 style={styles.subheader}>Income Reports (Profit & Loss)</h2>
+        <p style={styles.description}>Track your sales revenue, costs, and net income</p>
 
         {/* 🔹 Enhanced Timeline Selector */}
         <div style={styles.filterContainer}>
           <label style={styles.filterLabel}>View By:</label>
           <select
             value={timeFilter}
-            onChange={(e) => setTimeFilter(e.target.value)}
+            onChange={(e) => handleTimeFilterChange(e.target.value)}
             style={styles.filterSelect}
           >
             <option value="daily">Daily</option>
@@ -452,9 +715,29 @@ export default function ReportsScreen({ userMode }) {
       <div style={styles.metricsContainer}>
         <div style={styles.metricCard}>
           <p style={styles.metricValue}>
-            ₱{grandTotal.toFixed(2)}
+            ₱{grandTotalRevenue.toFixed(2)}
           </p>
-          <p style={styles.metricLabel}>Grand Total</p>
+          <p style={styles.metricLabel}>Total Revenue</p>
+          <p style={styles.metricSubLabel}>
+            {timeFilter === 'custom' ? 'Custom Range' : timeFilter.charAt(0).toUpperCase() + timeFilter.slice(1)}
+          </p>
+        </div>
+
+        <div style={{...styles.metricCard, backgroundColor: '#fff5f5'}}>
+          <p style={{...styles.metricValue, color: '#c62828'}}>
+            ₱{grandTotalCost.toFixed(2)}
+          </p>
+          <p style={styles.metricLabel}>Total Cost</p>
+          <p style={styles.metricSubLabel}>
+            {timeFilter === 'custom' ? 'Custom Range' : timeFilter.charAt(0).toUpperCase() + timeFilter.slice(1)}
+          </p>
+        </div>
+
+        <div style={{...styles.metricCard, backgroundColor: grandTotalIncome >= 0 ? '#e8f5e8' : '#ffe6e6'}}>
+          <p style={{...styles.metricValue, color: grandTotalIncome >= 0 ? '#2e7d32' : '#c62828'}}>
+            ₱{grandTotalIncome.toFixed(2)}
+          </p>
+          <p style={styles.metricLabel}>Net Income (Profit)</p>
           <p style={styles.metricSubLabel}>
             {timeFilter === 'custom' ? 'Custom Range' : timeFilter.charAt(0).toUpperCase() + timeFilter.slice(1)}
           </p>
@@ -462,27 +745,9 @@ export default function ReportsScreen({ userMode }) {
 
         <div style={styles.metricCard}>
           <p style={styles.metricValue}>
-            ₱{report.length > 0 ? (grandTotal / report.length).toFixed(2) : '0.00'}
+            {profitMargin.toFixed(2)}%
           </p>
-          <p style={styles.metricLabel}>Avg. Transaction</p>
-          <p style={styles.metricSubLabel}>
-            {timeFilter === 'custom' ? 'Custom Range' : timeFilter.charAt(0).toUpperCase() + timeFilter.slice(1)}
-          </p>
-        </div>
-
-        <div style={styles.metricCard}>
-          <p style={styles.metricValue}>{report.length}</p>
-          <p style={styles.metricLabel}>Total Transactions</p>
-          <p style={styles.metricSubLabel}>
-            {timeFilter === 'custom' ? 'Custom Range' : timeFilter.charAt(0).toUpperCase() + timeFilter.slice(1)}
-          </p>
-        </div>
-
-        <div style={styles.metricCard}>
-          <p style={styles.metricValue}>
-            {totalItemsSold}
-          </p>
-          <p style={styles.metricLabel}>Total Items Sold</p>
+          <p style={styles.metricLabel}>Profit Margin</p>
           <p style={styles.metricSubLabel}>
             {timeFilter === 'custom' ? 'Custom Range' : timeFilter.charAt(0).toUpperCase() + timeFilter.slice(1)}
           </p>
@@ -493,7 +758,7 @@ export default function ReportsScreen({ userMode }) {
         <div style={styles.mainSection}>
           <div style={styles.section}>
             <div style={styles.sectionHeaderContainer}>
-              <h3 style={styles.sectionHeader}>Recent Sales</h3>
+              <h3 style={styles.sectionHeader}>Sales with Income Calculation</h3>
               <div style={styles.dateFilter}>
                 <span style={styles.dateLabel}>Date Range:</span>
                 <span style={styles.dateValue}>
@@ -517,8 +782,12 @@ export default function ReportsScreen({ userMode }) {
                       <th style={styles.tableHeader}>Date</th>
                       <th style={styles.tableHeader}>Product</th>
                       <th style={styles.tableHeader}>Quantity</th>
-                      <th style={styles.tableHeader}>Amount</th>
+                      <th style={styles.tableHeader}>Selling Price</th>
+                      <th style={styles.tableHeader}>Cost Price</th>
+                      <th style={styles.tableHeader}>Income</th>
                       <th style={styles.tableHeader}>Total Sale</th>
+                      <th style={styles.tableHeader}>Total Cost</th>
+                      <th style={styles.tableHeader}>Total Income</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -534,26 +803,60 @@ export default function ReportsScreen({ userMode }) {
                           )}
                           <td style={styles.tableCell}>{item.name}</td>
                           <td style={styles.tableCell}>{item.quantity}</td>
-                          <td style={styles.tableCell}>₱{item.amount.toFixed(2)}</td>
+                          <td style={styles.tableCell}>₱{item.unit_price?.toFixed(2) || '0.00'}</td>
+                          <td style={{...styles.tableCell, backgroundColor: '#fff5f5'}}>
+                            ₱{item.unit_cost?.toFixed(2) || '0.00'}
+                          </td>
+                          <td style={{
+                            ...styles.tableCell, 
+                            backgroundColor: '#f0f9ff',
+                            color: item.income >= 0 ? '#2e7d32' : '#c62828',
+                            fontWeight: 'bold'
+                          }}>
+                            ₱{item.income?.toFixed(2) || '0.00'}
+                          </td>
                           {itemIndex === 0 && (
-                            <td style={styles.tableCell} rowSpan={sale.items.length}>
-                              ₱{sale.totalAmount.toFixed(2)}
-                            </td>
+                            <>
+                              <td style={styles.tableCell} rowSpan={sale.items.length}>
+                                ₱{sale.totalAmount.toFixed(2)}
+                              </td>
+                              <td style={{...styles.tableCell, backgroundColor: '#fff5f5'}} rowSpan={sale.items.length}>
+                                ₱{sale.totalCost.toFixed(2)}
+                              </td>
+                              <td style={{
+                                ...styles.tableCell, 
+                                backgroundColor: '#f0f9ff',
+                                color: sale.totalIncome >= 0 ? '#2e7d32' : '#c62828',
+                                fontWeight: 'bold'
+                              }} rowSpan={sale.items.length}>
+                                ₱{sale.totalIncome.toFixed(2)}
+                              </td>
+                            </>
                           )}
                         </tr>
                       ))
                     ))}
-                    {/* Table Footer with Totals - UPDATED: Total Items below Quantity (3rd column), Grand Total below Total Sale (5th column) */}
+                    {/* Table Footer with Totals */}
                     <tr style={styles.tableFooter}>
-                      <td style={styles.footerCell} colSpan="2">
-                        <strong>Totals:</strong>
-                      </td>
-                      <td style={styles.footerCell}>
-                        <strong>{totalItemsSold}</strong>
+                      <td style={styles.footerCell} colSpan="3">
+                        <strong>Grand Totals:</strong>
                       </td>
                       <td style={styles.footerCell}></td>
+                      <td style={{...styles.footerCell, backgroundColor: '#fff5f5'}}></td>
+                      <td style={{...styles.footerCell, backgroundColor: '#f0f9ff'}}></td>
                       <td style={styles.footerCell}>
-                        <strong>₱{grandTotal.toFixed(2)}</strong>
+                        <strong>₱{grandTotalRevenue.toFixed(2)}</strong>
+                      </td>
+                      <td style={{...styles.footerCell, backgroundColor: '#fff5f5'}}>
+                        <strong>₱{grandTotalCost.toFixed(2)}</strong>
+                      </td>
+                      <td style={{
+                        ...styles.footerCell, 
+                        backgroundColor: '#f0f9ff',
+                        color: grandTotalIncome >= 0 ? '#2e7d32' : '#c62828',
+                        fontWeight: 'bold'
+                      }}>
+                        <strong>₱{grandTotalIncome.toFixed(2)}</strong>
                       </td>
                     </tr>
                   </tbody>
@@ -565,7 +868,7 @@ export default function ReportsScreen({ userMode }) {
 
         <div style={styles.sideSection}>
           <div style={styles.section}>
-            <h3 style={styles.sectionHeader}>Resupply History</h3>
+            <h3 style={styles.sectionHeader}>Resupply History (Cost Incurred)</h3>
             {resupplyReport.length === 0 ? (
               <div style={styles.placeholderCard}>
                 <p style={styles.placeholderText}>No resupply data for this {timeFilter === 'custom' ? 'date range' : timeFilter}</p>
@@ -577,13 +880,23 @@ export default function ReportsScreen({ userMode }) {
               <div style={styles.reportList}>
                 {resupplyReport.map((group, index) => (
                   <div key={index} style={styles.resupplyItem}>
-                    <p style={styles.reportDate}>{group.resupply_date}</p>
-                    {group.items.map((item, idx) => (
-                      <p key={idx} style={styles.reportName}>
-                        {item.product_name} — {item.supplier_name} — Qty: {item.quantity}, ₱{item.unit_cost}, Exp: {item.expiration_date}
+                    <div style={styles.resupplyHeader}>
+                      <p style={styles.reportDate}>{group.resupply_date}</p>
+                      <p style={{...styles.reportAmount, color: '#c62828'}}>
+                        Total Cost: ₱{group.totalCost?.toFixed(2) || '0.00'}
                       </p>
+                    </div>
+                    {group.items.map((item, idx) => (
+                      <div key={idx} style={styles.resupplyDetail}>
+                        <p style={styles.reportName}>
+                          <strong>{item.product_name}</strong> from {item.supplier_name}
+                        </p>
+                        <p style={styles.reportDetails}>
+                          Qty: {item.quantity} × ₱{item.unit_cost} = ₱{item.total_cost.toFixed(2)}
+                          {item.expiration_date !== 'N/A' && ` | Exp: ${item.expiration_date}`}
+                        </p>
+                      </div>
                     ))}
-                    <p style={styles.reportAmount}>Total Items: {group.totalItems}</p>
                   </div>
                 ))}
               </div>

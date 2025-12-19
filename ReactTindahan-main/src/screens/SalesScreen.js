@@ -13,8 +13,32 @@ export default function SalesScreen({ userMode }) {
   const inputRef = useRef(null);
   const searchRef = useRef(null);
   const [isInputFocused, setIsInputFocused] = useState(false);
+  
+  const savedUser = JSON.parse(localStorage.getItem("user") || "{}");
+  const user = savedUser;
+
+  // ✅ FIXED Audit logging function - uses console logging
+  const logAudit = async (action, details = {}) => {
+    try {
+      // Simply log to console - no separate audits table needed
+      console.log(`[AUDIT] ${action}`, {
+        user_id: user?.user_id,
+        username: user?.username,
+        details,
+        timestamp: new Date().toISOString()
+      });
+    } catch (error) {
+      console.error('Failed to log audit:', error);
+    }
+  };
 
   useEffect(() => {
+    // ✅ FIXED: Just log to console
+    console.log(`[AUDIT] VIEW_SALES_SCREEN`, {
+      user_id: user?.user_id,
+      username: user?.username
+    });
+
     loadProducts();
 
     const handleGlobalScan = (e) => {
@@ -87,6 +111,11 @@ export default function SalesScreen({ userMode }) {
 
   const loadProducts = async () => {
     try {
+      // ✅ FIXED: Just log to console
+      console.log(`[AUDIT] LOAD_SALES_PRODUCTS`, {
+        user_id: user?.user_id
+      });
+
       const prodRes = await db.products.toArray();
       const inventoryData = await db.inventory.toArray();
 
@@ -105,6 +134,11 @@ export default function SalesScreen({ userMode }) {
       setProducts(enrichedProducts);
     } catch (err) {
       console.error('Error loading products:', err);
+      // ✅ FIXED: Just log to console
+      console.error(`[AUDIT] LOAD_SALES_PRODUCTS_ERROR`, {
+        error: err.message,
+        user_id: user?.user_id
+      });
     }
   };
 
@@ -114,6 +148,12 @@ export default function SalesScreen({ userMode }) {
       setShowSearchResults(false);
       return;
     }
+
+    // ✅ FIXED: Just log to console
+    console.log(`[AUDIT] SEARCH_PRODUCT_SALES`, {
+      search_term: searchTerm,
+      user_id: user?.user_id
+    });
 
     const term = searchTerm.toLowerCase();
     const results = products.filter(product => 
@@ -125,7 +165,7 @@ export default function SalesScreen({ userMode }) {
     setShowSearchResults(results.length > 0);
   };
 
-  const handleScan = (code) => {
+  const handleScan = async (code) => {
     // Don't process if user is typing in quantity fields
     if (isInputFocused) return;
     
@@ -140,6 +180,14 @@ export default function SalesScreen({ userMode }) {
     }
 
     if (product) {
+      // ✅ FIXED: Just log to console
+      console.log(`[AUDIT] SCAN_PRODUCT_SALES`, {
+        barcode: code,
+        product_id: product.id,
+        product_name: product.name,
+        user_id: user?.user_id
+      });
+      
       addToCart(product, 1);
     } else {
       // If no exact match, search and show results
@@ -148,32 +196,69 @@ export default function SalesScreen({ userMode }) {
     setBarcode('');
   };
 
-  const handleSearchSelect = (product) => {
+  const handleSearchSelect = async (product) => {
+    // ✅ FIXED: Just log to console
+    console.log(`[AUDIT] SEARCH_SELECT_PRODUCT_SALES`, {
+      product_id: product.id,
+      product_name: product.name,
+      user_id: user?.user_id
+    });
+    
     addToCart(product, 1);
     setShowSearchResults(false);
     setBarcode('');
   };
 
-  const addToCart = (product, qty = 1) => {
+  const addToCart = async (product, qty = 1) => {
     if (!product) return;
+    
+    // ✅ FIXED: Just log to console
+    console.log(`[AUDIT] ADD_TO_CART_SALES`, {
+      product_id: product.id,
+      product_name: product.name,
+      quantity: qty,
+      price: product.price,
+      stock_before: product.stock,
+      user_id: user?.user_id
+    });
+
     const existing = cart.find(item => item.id === product.id);
     if (existing) {
-      if (existing.quantity + qty > product.stock) return alert('Not enough stock!');
+      if (existing.quantity + qty > product.stock) {
+        alert('Not enough stock!');
+        return;
+      }
       setCart(cart.map(item =>
         item.id === product.id ? { ...item, quantity: item.quantity + qty } : item
       ));
     } else {
-      if (product.stock < qty) return alert('Not enough stock!');
+      if (product.stock < qty) {
+        alert('Not enough stock!');
+        return;
+      }
       setCart([...cart, { ...product, quantity: qty }]);
     }
   };
 
-  const updateQuantity = (id, qty) => {
+  const updateQuantity = async (id, qty) => {
     const product = products.find(p => p.id === id);
     if (qty < 0) return;
     if (qty > product.stock) {
       alert('Not enough stock!');
     } else {
+      // ✅ FIXED: Just log to console
+      const oldItem = cart.find(item => item.id === id);
+      if (oldItem && oldItem.quantity !== qty) {
+        console.log(`[AUDIT] UPDATE_CART_QUANTITY`, {
+          product_id: id,
+          product_name: product.name,
+          old_quantity: oldItem.quantity,
+          new_quantity: qty,
+          price: product.price,
+          user_id: user?.user_id
+        });
+      }
+      
       setCart(cart.map(item => item.id === id ? { ...item, quantity: qty } : item));
     }
   };
@@ -183,12 +268,30 @@ export default function SalesScreen({ userMode }) {
     updateQuantity(id, qty);
   };
 
-  const removeFromCart = (id) => {
+  const removeFromCart = async (id) => {
+    const item = cart.find(item => item.id === id);
+    
+    // ✅ FIXED: Just log to console
+    console.log(`[AUDIT] REMOVE_FROM_CART_SALES`, {
+      product_id: id,
+      product_name: item?.name,
+      quantity: item?.quantity,
+      price: item?.price,
+      user_id: user?.user_id
+    });
+    
     setCart(cart.filter(item => item.id !== id));
   };
 
-  const cancelAll = () => {
+  const cancelAll = async () => {
     if (window.confirm('Are you sure you want to cancel all items?')) {
+      // ✅ FIXED: Just log to console
+      console.log(`[AUDIT] CANCEL_ALL_ITEMS`, {
+        items_count: cart.length,
+        total_amount: calculateTotal(),
+        user_id: user?.user_id
+      });
+      
       setCart([]);
     }
   };
@@ -215,23 +318,40 @@ export default function SalesScreen({ userMode }) {
   };
 
   const handlePayment = async () => {
-    if (cart.length === 0) return alert('Cart is empty!');
+    if (cart.length === 0) {
+      alert('Cart is empty!');
+      return;
+    }
 
     const total = calculateTotal();
     const given = parseFloat(cashGiven) || 0;
 
     if (given < total) {
-      return alert(`Payment insufficient! Short by ₱${(total - given).toFixed(2)}`);
+      alert(`Payment insufficient! Short by ₱${(total - given).toFixed(2)}`);
+      return;
     }
 
     try {
       const saleDate = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
       const transactionDateTime = getFormattedDateTime(); // YYYY-MM-DD HH:MM:SS
 
-      // Add sale record with time
+      // ✅ FIXED: Just log to console
+      console.log(`[AUDIT] PAYMENT_ATTEMPT`, {
+        items_count: cart.length,
+        total_items: calculateTotalItems(),
+        total_amount: total,
+        cash_given: given,
+        change: (given - total).toFixed(2),
+        user_id: user?.user_id
+      });
+
+      // Add sale record with time and created_by
       const saleId = await db.sales.add({ 
         sales_date: saleDate,
-        sales_time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        sales_time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        // ✅ ADDED: Include created_by and created_at for audit trail
+        created_by: user?.username,
+        created_at: new Date().toISOString()
       });
 
       for (const item of cart) {
@@ -250,13 +370,16 @@ export default function SalesScreen({ userMode }) {
         await db.inventory.where({ product_id: item.id }).modify(inv => {
           inv.quantity -= item.quantity;
           if (inv.quantity < 0) inv.quantity = 0;
+          // ✅ ADDED: Update audit fields
+          inv.updated_by = user?.username;
+          inv.updated_at = new Date().toISOString();
         });
 
         // Get current inventory for running balance
         const currentInv = await db.inventory.where({ product_id: item.id }).first();
         const runningBalance = currentInv ? currentInv.quantity : 0;
 
-        // ADD STOCK CARD RECORD FOR THE SALE (STOCK-OUT)
+        // ADD STOCK CARD RECORD FOR THE SALE (STOCK-OUT) with created_by
         await db.stock_card.add({
           product_id: item.id,
           quantity: -item.quantity, // Negative for stock-out
@@ -264,9 +387,37 @@ export default function SalesScreen({ userMode }) {
           transaction_type: 'SALE',
           transaction_date: transactionDateTime,
           sales_id: saleId,
-          running_balance: runningBalance
+          running_balance: runningBalance,
+          // ✅ ADDED: Include created_by and created_at for audit trail
+          created_by: user?.username,
+          created_at: transactionDateTime
+        });
+
+        // ✅ FIXED: Just log to console
+        console.log(`[AUDIT] SALE_ITEM`, {
+          product_id: item.id,
+          product_name: item.name,
+          quantity: item.quantity,
+          unit_price: item.price,
+          total_amount: amount,
+          stock_before: item.stock,
+          stock_after: runningBalance,
+          sale_id: saleId,
+          user_id: user?.user_id
         });
       }
+
+      // ✅ FIXED: Just log to console
+      console.log(`[AUDIT] PAYMENT_SUCCESS`, {
+        sale_id: saleId,
+        items_count: cart.length,
+        total_items: calculateTotalItems(),
+        total_amount: total,
+        cash_given: given,
+        change: (given - total).toFixed(2),
+        user_id: user?.user_id,
+        username: user?.username
+      });
 
       const change = (given - total).toFixed(2);
       setCart([]);
@@ -278,6 +429,15 @@ export default function SalesScreen({ userMode }) {
       loadProducts(); // Refresh product stock data
     } catch (err) {
       console.error('Error handling payment:', err);
+      
+      // ✅ FIXED: Just log to console
+      console.error(`[AUDIT] PAYMENT_ERROR`, {
+        error: err.message,
+        items_count: cart.length,
+        total_amount: calculateTotal(),
+        user_id: user?.user_id
+      });
+      
       alert('Error processing payment. Please try again.');
     }
   };

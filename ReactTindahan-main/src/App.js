@@ -9,15 +9,25 @@ import ResupplyScreen from './screens/ResupplyScreen';
 import SalesScreen from './screens/SalesScreen';
 import ReportsScreen from './screens/ReportsScreen';
 import SuppliersScreen from './screens/SuppliersScreen';
+import BackupScreen from './screens/BackupScreen'; // Import BackupScreen
 import MainLayout from './components/MainLayout';
 
 import { db } from './db';
+import { runDailyBackup } from './services/autoBackup';
 
 // 🔒 Protected Route Middleware
-function ProtectedRoute({ element, userMode }) {
+function ProtectedRoute({ element, userMode, allowedRoles = [] }) {
+  const user = JSON.parse(localStorage.getItem('user') || '{}');
+  
   if (!userMode) {
     return <Navigate to="/" replace />;
   }
+  
+  // Check if route requires specific role
+  if (allowedRoles.length > 0 && !allowedRoles.includes(user.role)) {
+    return <Navigate to="/dashboard" replace />;
+  }
+  
   return element;
 }
 
@@ -39,6 +49,9 @@ function ClientStack({ handleLogout, userMode }) {
 
 // 🔹 Server stack
 function ServerStack({ handleLogout, userMode }) {
+  const user = JSON.parse(localStorage.getItem('user') || '{}');
+  const isOwner = user.role === 'Owner';
+  
   return (
     <MainLayout userMode={userMode} handleLogout={handleLogout}>
       <Routes>
@@ -48,6 +61,8 @@ function ServerStack({ handleLogout, userMode }) {
         <Route path="/sales" element={<SalesScreen />} />
         <Route path="/reports" element={<ReportsScreen />} />
         <Route path="/suppliers" element={<SuppliersScreen />} />
+        {/* Only show backup screen for owners */}
+        {isOwner && <Route path="/backup" element={<BackupScreen />} />}
         <Route path="*" element={<Navigate to="/dashboard" />} />
       </Routes>
     </MainLayout>
@@ -77,7 +92,7 @@ export default function App() {
       } catch (err) {
         console.error('❌ Error initializing DB:', err);
       }
-
+      await runDailyBackup();
       const savedMode = localStorage.getItem('userMode');
       if (savedMode) setUserMode(savedMode);
       setLoading(false);
@@ -115,13 +130,23 @@ export default function App() {
           // Server user, protected
           <Route
             path="/*"
-            element={<ProtectedRoute userMode={userMode} element={<ServerStack handleLogout={handleLogout} userMode={userMode} />} />}
+            element={
+              <ProtectedRoute 
+                userMode={userMode} 
+                element={<ServerStack handleLogout={handleLogout} userMode={userMode} />} 
+              />
+            }
           />
         ) : (
           // Client user, protected
           <Route
             path="/*"
-            element={<ProtectedRoute userMode={userMode} element={<ClientStack handleLogout={handleLogout} userMode={userMode} />} />}
+            element={
+              <ProtectedRoute 
+                userMode={userMode} 
+                element={<ClientStack handleLogout={handleLogout} userMode={userMode} />} 
+              />
+            }
           />
         )}
       </Routes>

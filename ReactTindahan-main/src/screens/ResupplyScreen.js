@@ -14,9 +14,48 @@ export default function ResupplyScreen() {
   const searchRef = useRef(null);
   const quantityInputRefs = useRef({});
   const [isInputFocused, setIsInputFocused] = useState(false);
+  
+  const savedUser = JSON.parse(localStorage.getItem("user") || "{}");
+  const user = savedUser;
+
+  // ✅ FIXED Audit logging function - uses console logging instead of non-existent audits table
+  const logAudit = async (action, details = {}) => {
+    try {
+      // Just log to console - no separate audits table
+      console.log(`[AUDIT] ${action}`, {
+        user_id: user?.user_id,
+        username: user?.username,
+        details,
+        timestamp: new Date().toISOString()
+      });
+      return Date.now(); // Return timestamp for compatibility
+    } catch (error) {
+      console.error('Failed to log audit:', error);
+      return null;
+    }
+  };
+
+  // Helper function to create reliable date format for stock card
+  const getFormattedDateTime = () => {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+    const hours = String(now.getHours()).padStart(2, '0');
+    const minutes = String(now.getMinutes()).padStart(2, '0');
+    const seconds = String(now.getSeconds()).padStart(2, '0');
+    
+    return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
+  };
 
   // ✅ Load data once
   useEffect(() => {
+    // ✅ FIXED: Just log to console
+    console.log(`[AUDIT] VIEW_RESUPPLY_SCREEN`, {
+      user_id: user?.user_id,
+      username: user?.username
+    });
+
     loadProductsAndSuppliers();
 
     const handleGlobalScan = (e) => {
@@ -69,21 +108,13 @@ export default function ResupplyScreen() {
     };
   }, []);
 
-  // Helper function to create reliable date format for stock card
-  const getFormattedDateTime = () => {
-    const now = new Date();
-    const year = now.getFullYear();
-    const month = String(now.getMonth() + 1).padStart(2, '0');
-    const day = String(now.getDate()).padStart(2, '0');
-    const hours = String(now.getHours()).padStart(2, '0');
-    const minutes = String(now.getMinutes()).padStart(2, '0');
-    const seconds = String(now.getSeconds()).padStart(2, '0');
-    
-    return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
-  };
-
   const loadProductsAndSuppliers = async () => {
     try {
+      // ✅ FIXED: Just log to console
+      console.log(`[AUDIT] LOAD_RESUPPLY_DATA`, {
+        user_id: user?.user_id
+      });
+
       const prodRes = await db.products.toArray();
       const supRes = await db.suppliers.toArray();
       const inventoryData = await db.inventory.toArray();
@@ -108,6 +139,11 @@ export default function ResupplyScreen() {
       setLowStockProducts(lowStock);
     } catch (err) {
       console.error("Error loading data:", err);
+      // ✅ FIXED: Just log to console
+      console.error(`[AUDIT] LOAD_RESUPPLY_DATA_ERROR`, {
+        error: err.message,
+        user_id: user?.user_id
+      });
     }
   };
 
@@ -117,6 +153,12 @@ export default function ResupplyScreen() {
       setShowSearchResults(false);
       return;
     }
+
+    // ✅ FIXED: Just log to console
+    console.log(`[AUDIT] SEARCH_PRODUCT_RESUPPLY`, {
+      search_term: searchTerm,
+      user_id: user?.user_id
+    });
 
     const term = searchTerm.toLowerCase();
     const results = products.filter(product => 
@@ -128,7 +170,7 @@ export default function ResupplyScreen() {
     setShowSearchResults(results.length > 0);
   };
 
-  const handleScan = (code) => {
+  const handleScan = async (code) => {
     // Don't process if user is typing in quantity fields
     if (isInputFocused) return;
     
@@ -145,9 +187,28 @@ export default function ResupplyScreen() {
     if (product) {
       if (!selectedSupplierId) {
         alert("⚠️ Please select a supplier before scanning.");
+        
+        // ✅ FIXED: Just log to console
+        console.log(`[AUDIT] SCAN_NO_SUPPLIER`, {
+          barcode: code,
+          product_id: product.id,
+          product_name: product.name,
+          user_id: user?.user_id
+        });
+        
         setBarcode("");
         return;
       }
+      
+      // ✅ FIXED: Just log to console
+      console.log(`[AUDIT] SCAN_PRODUCT_RESUPPLY`, {
+        barcode: code,
+        product_id: product.id,
+        product_name: product.name,
+        supplier_id: selectedSupplierId,
+        user_id: user?.user_id
+      });
+      
       addToCart(product, 1);
     } else {
       // If no exact match, search and show results
@@ -156,18 +217,56 @@ export default function ResupplyScreen() {
     setBarcode("");
   };
 
-  const handleSearchSelect = (product) => {
+  const handleSearchSelect = async (product) => {
     if (!selectedSupplierId) {
       alert("⚠️ Please select a supplier first.");
+      
+      // ✅ FIXED: Just log to console
+      console.log(`[AUDIT] SEARCH_SELECT_NO_SUPPLIER`, {
+        product_id: product.id,
+        product_name: product.name,
+        user_id: user?.user_id
+      });
+      
       return;
     }
+    
+    // ✅ FIXED: Just log to console
+    console.log(`[AUDIT] SEARCH_SELECT_PRODUCT`, {
+      product_id: product.id,
+      product_name: product.name,
+      supplier_id: selectedSupplierId,
+      user_id: user?.user_id
+    });
+    
     addToCart(product, 1);
     setShowSearchResults(false);
     setBarcode("");
   };
 
-  const addToCart = (product, qty = 1) => {
-    if (!selectedSupplierId) return alert("Select a supplier first!");
+  const addToCart = async (product, qty = 1) => {
+    if (!selectedSupplierId) {
+      alert("Select a supplier first!");
+      
+      // ✅ FIXED: Just log to console
+      console.log(`[AUDIT] ADD_TO_CART_NO_SUPPLIER`, {
+        product_id: product.id,
+        product_name: product.name,
+        quantity: qty,
+        user_id: user?.user_id
+      });
+      
+      return;
+    }
+
+    // ✅ FIXED: Just log to console
+    console.log(`[AUDIT] ADD_TO_CART`, {
+      product_id: product.id,
+      product_name: product.name,
+      supplier_id: selectedSupplierId,
+      quantity: qty,
+      user_id: user?.user_id
+    });
 
     const existing = cart.find(
       (item) =>
@@ -208,12 +307,26 @@ export default function ResupplyScreen() {
     );
   };
 
-  const removeFromCart = (id, supplier_id) => {
+  const removeFromCart = async (id, supplier_id) => {
+    const item = cart.find(item => item.id === id && item.supplier_id === supplier_id);
+    
+    // ✅ FIXED: Just log to console
+    console.log(`[AUDIT] REMOVE_FROM_CART`, {
+      product_id: id,
+      product_name: item?.name,
+      supplier_id: supplier_id,
+      quantity: item?.quantity,
+      user_id: user?.user_id
+    });
+    
     setCart(cart.filter((item) => !(item.id === id && item.supplier_id === supplier_id)));
   };
 
   const handleResupply = async () => {
-    if (cart.length === 0) return alert("No products to resupply.");
+    if (cart.length === 0) {
+      alert("No products to resupply.");
+      return;
+    }
     
     if (!selectedSupplierId) {
       alert("⚠️ Please select a supplier.");
@@ -234,6 +347,15 @@ export default function ResupplyScreen() {
     try {
       const today = new Date().toISOString().split("T")[0];
       const transactionDateTime = getFormattedDateTime();
+      
+      // ✅ FIXED: Just log to console
+      console.log(`[AUDIT] RESUPPLY_ATTEMPT`, {
+        supplier_id: selectedSupplierId,
+        items_count: cart.length,
+        total_quantity: cart.reduce((sum, item) => sum + item.quantity, 0),
+        total_cost: cart.reduce((sum, item) => sum + (parseFloat(item.unitCost) || 0) * item.quantity, 0),
+        user_id: user?.user_id
+      });
 
       for (const item of cart) {
         const resupplyData = {
@@ -243,7 +365,7 @@ export default function ResupplyScreen() {
           unit_cost: parseFloat(item.unitCost) || 0,
           expiration_date: item.noExpiry ? "" : item.expirationDate || "",
           unit_type: item.unitType,
-          user_id: 1,
+          user_id: user.user_id,
           resupply_date: today,
         };
 
@@ -261,12 +383,16 @@ export default function ResupplyScreen() {
             supplier_id: item.supplier_id,
             quantity: item.quantity,
             expiration_date: resupplyData.expiration_date,
+            updated_by: user?.username,
+            updated_at: new Date().toISOString()
           });
         } else {
           await db.inventory.where({ product_id: item.id }).modify((inv) => {
             inv.quantity += item.quantity;
             inv.supplier_id = item.supplier_id;
             inv.expiration_date = resupplyData.expiration_date;
+            inv.updated_by = user?.username;
+            inv.updated_at = new Date().toISOString();
           });
         }
 
@@ -276,11 +402,23 @@ export default function ResupplyScreen() {
         // Get product price
         const prod = await db.products.get(item.id);
         
-        // ✅ ADD STOCK CARD RECORD FOR RESUPPLY (STOCK-IN)
-        const stockCardId = await db.stock_card.add({
+        // ✅ FIXED: Just log to console
+        console.log(`[AUDIT] RESUPPLY_ITEM`, {
+          product_id: item.id,
+          product_name: item.name,
+          supplier_id: item.supplier_id,
+          quantity: item.quantity,
+          unit_cost: parseFloat(item.unitCost) || 0,
+          total_cost: (parseFloat(item.unitCost) || 0) * item.quantity,
+          expiration_date: resupplyData.expiration_date,
+          user_id: user?.user_id
+        });
+        
+        // ✅ ADD STOCK CARD RECORD FOR RESUPPLY (STOCK-IN) with created_by
+        await db.stock_card.add({
           product_id: item.id,
           supplier_id: item.supplier_id,
-          user_id: 1,
+          user_id: user.user_id,
           quantity: item.quantity, // Positive for stock-in
           unit_cost: parseFloat(item.unitCost) || 0,
           unit_price: prod?.unit_price || 0,
@@ -289,12 +427,21 @@ export default function ResupplyScreen() {
           unit_type: item.unitType,
           transaction_type: "RESUPPLY",
           transaction_date: transactionDateTime,
-          running_balance: currentStock
+          running_balance: currentStock,
+          // ✅ ADDED: Include created_by and created_at for audit trail
+          created_by: user?.username,
+          created_at: transactionDateTime
         });
-
-        // FIXED: No need to update since we already set transaction_date
-        // This was causing the error
       }
+
+      // ✅ FIXED: Just log to console
+      console.log(`[AUDIT] RESUPPLY_SUCCESS`, {
+        supplier_id: selectedSupplierId,
+        items_count: cart.length,
+        total_quantity: cart.reduce((sum, item) => sum + item.quantity, 0),
+        total_cost: cart.reduce((sum, item) => sum + (parseFloat(item.unitCost) || 0) * item.quantity, 0),
+        user_id: user?.user_id
+      });
 
       alert("✅ Resupply completed successfully!");
       setCart([]);
@@ -305,8 +452,61 @@ export default function ResupplyScreen() {
       loadProductsAndSuppliers(); // Refresh data
     } catch (err) {
       console.error("Error during resupply:", err);
+      
+      // ✅ FIXED: Just log to console
+      console.error(`[AUDIT] RESUPPLY_ERROR`, {
+        error: err.message,
+        supplier_id: selectedSupplierId,
+        items_count: cart.length,
+        user_id: user?.user_id
+      });
+      
       alert("❌ Failed to resupply products. Please try again.");
     }
+  };
+
+  const handleClearCart = async () => {
+    // ✅ FIXED: Just log to console
+    console.log(`[AUDIT] CLEAR_RESUPPLY_CART`, {
+      items_count: cart.length,
+      total_quantity: cart.reduce((sum, item) => sum + item.quantity, 0),
+      user_id: user?.user_id
+    });
+    
+    setCart([]);
+  };
+
+  const handleSupplierChange = async (supplierId) => {
+    // ✅ FIXED: Just log to console
+    if (supplierId !== selectedSupplierId) {
+      console.log(`[AUDIT] CHANGE_RESUPPLY_SUPPLIER`, {
+        old_supplier_id: selectedSupplierId,
+        new_supplier_id: supplierId,
+        user_id: user?.user_id
+      });
+    }
+    
+    setSelectedSupplierId(supplierId);
+  };
+
+  const handleLowStockClick = async (product) => {
+    if (!selectedSupplierId) {
+      alert("⚠️ Please select a supplier first.");
+      return;
+    }
+    
+    // ✅ FIXED: Just log to console
+    console.log(`[AUDIT] LOW_STOCK_CLICK`, {
+      product_id: product.id,
+      product_name: product.name,
+      current_stock: product.stock,
+      threshold: product.threshold,
+      suggested_quantity: Math.max(product.threshold - product.stock + 1, 1),
+      supplier_id: selectedSupplierId,
+      user_id: user?.user_id
+    });
+    
+    addToCart(product, Math.max(product.threshold - product.stock + 1, 1));
   };
 
   const unitOptions = (baseUnit) => {
@@ -344,7 +544,7 @@ export default function ResupplyScreen() {
         <select
           style={styles.input}
           value={selectedSupplierId}
-          onChange={(e) => setSelectedSupplierId(e.target.value)}
+          onChange={(e) => handleSupplierChange(e.target.value)}
           required
         >
           <option value="">Select Supplier</option>
@@ -407,13 +607,7 @@ export default function ResupplyScreen() {
               <div
                 key={p.id}
                 style={styles.lowStockItem}
-                onClick={() => {
-                  if (!selectedSupplierId) {
-                    alert("⚠️ Please select a supplier first.");
-                    return;
-                  }
-                  addToCart(p, Math.max(p.threshold - p.stock + 1, 1));
-                }}
+                onClick={() => handleLowStockClick(p)}
               >
                 <div style={styles.lowStockItemName}>{p.name}</div>
                 <div style={styles.lowStockItemDetails}>
@@ -445,7 +639,7 @@ export default function ResupplyScreen() {
             </div>
           </div>
           {cart.length > 0 && (
-            <button style={styles.clearCartButton} onClick={() => setCart([])}>
+            <button style={styles.clearCartButton} onClick={handleClearCart}>
               Clear All
             </button>
           )}

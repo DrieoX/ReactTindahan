@@ -28,8 +28,31 @@ export default function DashboardScreen({ userMode }) {
     fetchDashboardStats();
   }, []);
 
+  // ✅ Log audit action
+  const logAudit = async (action, details = {}) => {
+    try {
+      await db.backup.add({
+        user_id: user.user_id,
+        backup_name: `AUDIT_${action}`,
+        backup_type: 'audit',
+        created_at: new Date().toISOString(),
+        schema_version: '5',
+        details: JSON.stringify(details)
+      });
+    } catch (error) {
+      console.error('Failed to log audit:', error);
+    }
+  };
+
   const fetchDashboardStats = async () => {
     try {
+      // ✅ Log dashboard view using backup table for audit
+      await logAudit('VIEW_DASHBOARD', {
+        page: 'dashboard',
+        user_id: user.user_id,
+        username: user.username
+      });
+
       const today = new Date().toISOString().split('T')[0];
 
       // ✅ Today's Sales
@@ -55,7 +78,8 @@ export default function DashboardScreen({ userMode }) {
           time: sale.sales_time || '00:00',
           amount: totalSale,
           items: items.length,
-          productNames: productDetails
+          productNames: productDetails,
+          user_id: sale.user_id // Using existing field
         });
       }
 
@@ -73,6 +97,8 @@ export default function DashboardScreen({ userMode }) {
             name: product?.name || 'Unknown Product',
             quantity: i.quantity,
             threshold: i.threshold,
+            updated_by: i.updated_by, // Using existing field
+            updated_at: i.updated_at  // Using existing field
           };
         });
       const lowStock = lowStockItems.length;
@@ -84,20 +110,24 @@ export default function DashboardScreen({ userMode }) {
       nearExpiryThreshold.setDate(todayDate.getDate() + 7);
 
       for (let i of inventory) {
-        if (!i.expiration_date) continue; // ❌ Skip items without expiration
+        if (!i.expiration_date) continue;
         const expDate = new Date(i.expiration_date);
         const product = await db.products.get(i.product_id);
         if (expDate < todayDate) {
           expiredItems.push({
             ...i,
             name: product?.name || 'Unknown Product',
-            type: 'expired'
+            type: 'expired',
+            updated_by: i.updated_by, // Using existing field
+            updated_at: i.updated_at  // Using existing field
           });
         } else if (expDate <= nearExpiryThreshold) {
           expiredItems.push({
             ...i,
             name: product?.name || 'Unknown Product',
-            type: 'near-expiry'
+            type: 'near-expiry',
+            updated_by: i.updated_by, // Using existing field
+            updated_at: i.updated_at  // Using existing field
           });
         }
       }
@@ -123,12 +153,62 @@ export default function DashboardScreen({ userMode }) {
       setExpiredItems(expiredItems);
     } catch (err) {
       console.error('Error fetching dashboard stats:', err);
+      // ✅ Log error in backup table for audit
+      await logAudit('DASHBOARD_ERROR', {
+        error: err.message,
+        user_id: user.user_id
+      });
     }
   };
 
-  const handleTotalProductsClick = () => {
+  const handleTotalProductsClick = async () => {
+    // ✅ Log "View All Inventory" click using backup table
+    await logAudit('CLICK_VIEW_INVENTORY', {
+      action: 'view_all_inventory',
+      user_id: user.user_id,
+      username: user.username
+    });
+    
     // Acts as "clear filter" button – just reloads stats
     fetchDashboardStats();
+  };
+
+  const handleLowStockClick = async () => {
+    // ✅ Log low stock modal view using backup table
+    await logAudit('VIEW_LOW_STOCK', {
+      action: 'open_low_stock_modal',
+      low_stock_count: stats.lowStock,
+      user_id: user.user_id
+    });
+    setShowLowStockModal(true);
+  };
+
+  const handleExpiredClick = async () => {
+    // ✅ Log expired items modal view using backup table
+    await logAudit('VIEW_EXPIRED_ITEMS', {
+      action: 'open_expired_items_modal',
+      expired_count: stats.expired,
+      user_id: user.user_id
+    });
+    setShowExpiredModal(true);
+  };
+
+  const handleCloseLowStockModal = async () => {
+    // ✅ Log low stock modal close using backup table
+    await logAudit('CLOSE_LOW_STOCK_MODAL', {
+      action: 'close_low_stock_modal',
+      user_id: user.user_id
+    });
+    setShowLowStockModal(false);
+  };
+
+  const handleCloseExpiredModal = async () => {
+    // ✅ Log expired items modal close using backup table
+    await logAudit('CLOSE_EXPIRED_MODAL', {
+      action: 'close_expired_items_modal',
+      user_id: user.user_id
+    });
+    setShowExpiredModal(false);
   };
 
   return (
@@ -177,7 +257,7 @@ export default function DashboardScreen({ userMode }) {
               text="#ffffff"
             />
           </div>
-          <div onClick={() => setShowLowStockModal(true)} style={styles.statCardWrapper}>
+          <div onClick={handleLowStockClick} style={styles.statCardWrapper}>
             <StatCard
               label="Low Stock Items"
               value={stats.lowStock}
@@ -186,7 +266,7 @@ export default function DashboardScreen({ userMode }) {
               text="#ffffff"
             />
           </div>
-          <div onClick={() => setShowExpiredModal(true)} style={styles.statCardWrapper}>
+          <div onClick={handleExpiredClick} style={styles.statCardWrapper}>
             <StatCard
               label="Expiring Soon"
               value={stats.expired}
@@ -321,6 +401,7 @@ export default function DashboardScreen({ userMode }) {
                       <th style={styles.tableCell}>Product</th>
                       <th style={styles.tableCell}>Quantity</th>
                       <th style={styles.tableCell}>Threshold</th>
+                      <th style={styles.tableCell}>Last Updated</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -329,6 +410,9 @@ export default function DashboardScreen({ userMode }) {
                         <td style={styles.tableCell}>{item.name}</td>
                         <td style={styles.tableCell}>{item.quantity}</td>
                         <td style={styles.tableCell}>{item.threshold}</td>
+                        <td style={styles.tableCell}>
+                          {item.updated_at ? new Date(item.updated_at).toLocaleDateString() : 'N/A'}
+                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -336,7 +420,7 @@ export default function DashboardScreen({ userMode }) {
               </div>
             )}
             <div style={styles.modalButtons}>
-              <button style={styles.cancelButton} onClick={() => setShowLowStockModal(false)}>
+              <button style={styles.cancelButton} onClick={handleCloseLowStockModal}>
                 Close
               </button>
             </div>
@@ -359,6 +443,7 @@ export default function DashboardScreen({ userMode }) {
                       <th style={styles.tableCell}>Product</th>
                       <th style={styles.tableCell}>Status</th>
                       <th style={styles.tableCell}>Expiry Date</th>
+                      <th style={styles.tableCell}>Last Updated</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -369,6 +454,9 @@ export default function DashboardScreen({ userMode }) {
                           {item.type === 'expired' ? 'Expired' : 'Near Expiry'}
                         </td>
                         <td style={styles.tableCell}>{item.expiration_date}</td>
+                        <td style={styles.tableCell}>
+                          {item.updated_at ? new Date(item.updated_at).toLocaleDateString() : 'N/A'}
+                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -376,7 +464,7 @@ export default function DashboardScreen({ userMode }) {
               </div>
             )}
             <div style={styles.modalButtons}>
-              <button style={styles.cancelButton} onClick={() => setShowExpiredModal(false)}>
+              <button style={styles.cancelButton} onClick={handleCloseExpiredModal}>
                 Close
               </button>
             </div>
@@ -394,6 +482,7 @@ const StatCard = ({ label, value, change, bg, text }) => (
     <p style={styles.statChange}>{change}</p>
   </div>
 );
+
 
 const styles = {
   content: {
