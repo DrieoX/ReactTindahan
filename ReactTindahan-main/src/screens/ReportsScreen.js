@@ -3,7 +3,6 @@ import { db } from '../db';
 
 export const addReport = async (report) => {
   await db.backup.add(report);
-  // Removed the fetch call to backend
 };
 
 export default function ReportsScreen({ userMode }) {
@@ -16,19 +15,18 @@ export default function ReportsScreen({ userMode }) {
   const [timeFilter, setTimeFilter] = useState('daily');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
-  const [costData, setCostData] = useState({}); // Store product cost data
+  const [costData, setCostData] = useState({});
 
   useEffect(() => {
-    // Set default date range to today when component mounts
     const today = new Date().toISOString().split('T')[0];
     setStartDate(today);
     setEndDate(today);
     
-    // ✅ FIXED: Just log to console
     console.log(`[AUDIT] VIEW_REPORTS_SCREEN`, {
       user_id: user?.user_id,
       username: user?.username,
-      page: 'reports'
+      page: 'reports',
+      timestamp: new Date().toISOString()
     });
   }, []);
 
@@ -41,31 +39,13 @@ export default function ReportsScreen({ userMode }) {
     fetchResupplyReport();
   }, [timeFilter, startDate, endDate, costData]);
 
-  // ✅ FIXED Audit logging function - uses console logging
-  const logAudit = async (action, details = {}) => {
-    try {
-      // Simply log to console - no separate audits table needed
-      console.log(`[AUDIT] ${action}`, {
-        user_id: user?.user_id,
-        username: user?.username,
-        details,
-        timestamp: new Date().toISOString()
-      });
-    } catch (error) {
-      console.error('Failed to log audit:', error);
-    }
-  };
-
-  // Fetch product cost data from stock card or resupply records
   const fetchProductCostData = async () => {
     try {
       const resupplyItems = await db.resupplied_items.toArray();
       const stockCardItems = await db.stock_card.toArray();
       
-      // First try to get cost from resupply items
       const costMap = {};
       
-      // Process resupply items (most recent first to get latest cost)
       resupplyItems
         .sort((a, b) => new Date(b.resupply_date) - new Date(a.resupply_date))
         .forEach(item => {
@@ -79,7 +59,6 @@ export default function ReportsScreen({ userMode }) {
           }
         });
       
-      // Fallback to stock card if no resupply data
       stockCardItems
         .sort((a, b) => new Date(b.transaction_date) - new Date(a.transaction_date))
         .forEach(item => {
@@ -93,17 +72,19 @@ export default function ReportsScreen({ userMode }) {
       
       setCostData(costMap);
       
-      // ✅ FIXED: Just log to console
       console.log(`[AUDIT] FETCH_COST_DATA`, {
         products_with_cost: Object.keys(costMap).length,
-        user_id: user?.user_id
+        user_id: user?.user_id,
+        username: user?.username,
+        timestamp: new Date().toISOString()
       });
     } catch (err) {
       console.error("Error fetching cost data:", err);
-      // ✅ FIXED: Just log to console
       console.error(`[AUDIT] FETCH_COST_DATA_ERROR`, {
         error: err.message,
-        user_id: user?.user_id
+        user_id: user?.user_id,
+        username: user?.username,
+        timestamp: new Date().toISOString()
       });
     }
   };
@@ -144,7 +125,7 @@ export default function ReportsScreen({ userMode }) {
     const date = new Date(dateStr);
     const start = new Date(startDate);
     const end = new Date(endDate);
-    end.setHours(23, 59, 59, 999); // Include the entire end date
+    end.setHours(23, 59, 59, 999);
     return date >= start && date <= end;
   };
 
@@ -166,13 +147,14 @@ export default function ReportsScreen({ userMode }) {
   };
 
   const handleDateRangeChange = async (newStartDate, newEndDate) => {
-    // ✅ FIXED: Just log to console
     console.log(`[AUDIT] CHANGE_REPORT_FILTER`, {
       old_filter: timeFilter,
       new_filter: 'custom',
       start_date: newStartDate,
       end_date: newEndDate,
-      user_id: user?.user_id
+      user_id: user?.user_id,
+      username: user?.username,
+      timestamp: new Date().toISOString()
     });
     
     setStartDate(newStartDate);
@@ -183,13 +165,14 @@ export default function ReportsScreen({ userMode }) {
   };
 
   const handleTimeFilterChange = async (newFilter) => {
-    // ✅ FIXED: Just log to console
     console.log(`[AUDIT] CHANGE_REPORT_FILTER`, {
       old_filter: timeFilter,
       new_filter: newFilter,
       start_date: startDate,
       end_date: endDate,
-      user_id: user?.user_id
+      user_id: user?.user_id,
+      username: user?.username,
+      timestamp: new Date().toISOString()
     });
     
     setTimeFilter(newFilter);
@@ -215,14 +198,12 @@ export default function ReportsScreen({ userMode }) {
     return `${new Date().toLocaleDateString()}`;
   };
 
-  // Download as CSV - UPDATED: Added Cost and Income columns
   const downloadCSV = async () => {
     if (report.length === 0) {
       alert('No data to download');
       return;
     }
 
-    // Calculate totals
     const totalRevenue = report.reduce((sum, r) => sum + (r.totalAmount || 0), 0);
     const totalCost = report.reduce((sum, r) => sum + (r.totalCost || 0), 0);
     const totalIncome = totalRevenue - totalCost;
@@ -231,7 +212,6 @@ export default function ReportsScreen({ userMode }) {
       sum + sale.items.reduce((itemSum, item) => itemSum + item.quantity, 0), 0
     );
     
-    // ✅ FIXED: Just log to console
     console.log(`[AUDIT] DOWNLOAD_REPORT_CSV`, {
       report_type: 'sales_with_income',
       time_filter: timeFilter,
@@ -242,12 +222,12 @@ export default function ReportsScreen({ userMode }) {
       total_cost: totalCost,
       total_income: totalIncome,
       user_id: user?.user_id,
-      username: user?.username
+      username: user?.username,
+      timestamp: new Date().toISOString()
     });
 
-    const headers = ['Date', 'Product', 'Quantity', 'Selling Price', 'Cost Price', 'Income', 'Total Sale', 'Total Cost', 'Total Income'];
+    const headers = ['Date', 'Created By', 'Created At', 'Product', 'Quantity', 'Selling Price', 'Cost Price', 'Income', 'Total Sale', 'Total Cost', 'Total Income'];
     
-    // Flatten all sales data
     const csvData = report.flatMap(sale => {
       const totalItemsInSale = sale.items.reduce((sum, item) => sum + item.quantity, 0);
       const saleTotal = sale.totalAmount || 0;
@@ -256,6 +236,8 @@ export default function ReportsScreen({ userMode }) {
       
       return sale.items.map((item, index) => [
         index === 0 ? sale.sales_date : '',
+        index === 0 ? (sale.created_by || 'Unknown') : '',
+        index === 0 ? (sale.created_at || '') : '',
         item.name,
         item.quantity,
         `₱${item.unit_price?.toFixed(2) || '0.00'}`,
@@ -267,23 +249,22 @@ export default function ReportsScreen({ userMode }) {
       ]);
     });
 
-    // Add summary rows
     const csvContent = [
       ['SmartTindahan - Income Report (Profit & Loss)'],
       ['Date Range:', getDateRangeForExport()],
-      [`Generated on: ${new Date().toLocaleDateString()}`],
+      [`Generated on: ${new Date().toLocaleDateString()} by ${user?.username || 'Unknown'}`],
       [''],
       headers,
       ...csvData,
       [''],
-      ['SUMMARY', '', '', '', '', '', '', '', ''],
-      ['Total Revenue', '', '', '', '', '', `₱${totalRevenue.toFixed(2)}`, '', ''],
-      ['Total Cost', '', '', '', '', '', '', `₱${totalCost.toFixed(2)}`, ''],
-      ['Total Income (Profit)', '', '', '', '', '', '', '', `₱${totalIncome.toFixed(2)}`],
-      ['Total Transactions', '', '', '', '', '', totalTransactions, '', ''],
-      ['Total Items Sold', '', '', '', '', '', totalItemsSold, '', ''],
-      ['Average Transaction Value', '', '', '', '', '', `₱${(totalRevenue / totalTransactions).toFixed(2)}`, '', ''],
-      ['Profit Margin', '', '', '', '', '', `${totalRevenue > 0 ? ((totalIncome / totalRevenue) * 100).toFixed(2) : '0.00'}%`, '', '']
+      ['SUMMARY', '', '', '', '', '', '', '', '', '', ''],
+      ['Total Revenue', '', '', '', '', '', '', '', `₱${totalRevenue.toFixed(2)}`, '', ''],
+      ['Total Cost', '', '', '', '', '', '', '', '', `₱${totalCost.toFixed(2)}`, ''],
+      ['Total Income (Profit)', '', '', '', '', '', '', '', '', '', `₱${totalIncome.toFixed(2)}`],
+      ['Total Transactions', '', '', '', '', '', '', '', totalTransactions, '', ''],
+      ['Total Items Sold', '', '', '', '', '', '', '', totalItemsSold, '', ''],
+      ['Average Transaction Value', '', '', '', '', '', '', '', `₱${(totalRevenue / totalTransactions).toFixed(2)}`, '', ''],
+      ['Profit Margin', '', '', '', '', '', '', '', `${totalRevenue > 0 ? ((totalIncome / totalRevenue) * 100).toFixed(2) : '0.00'}%`, '', '']
     ].map(row => row.join(',')).join('\n');
 
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
@@ -297,14 +278,12 @@ export default function ReportsScreen({ userMode }) {
     document.body.removeChild(link);
   };
 
-  // Download as PDF - UPDATED: Added Cost and Income columns
   const downloadPDF = async () => {
     if (report.length === 0) {
       alert('No data to download');
       return;
     }
 
-    // Calculate totals
     const totalRevenue = report.reduce((sum, r) => sum + (r.totalAmount || 0), 0);
     const totalCost = report.reduce((sum, r) => sum + (r.totalCost || 0), 0);
     const totalIncome = totalRevenue - totalCost;
@@ -315,7 +294,6 @@ export default function ReportsScreen({ userMode }) {
     const averageTransaction = totalRevenue / totalTransactions;
     const profitMargin = totalRevenue > 0 ? (totalIncome / totalRevenue) * 100 : 0;
 
-    // ✅ FIXED: Just log to console
     console.log(`[AUDIT] DOWNLOAD_REPORT_PDF`, {
       report_type: 'income',
       time_filter: timeFilter,
@@ -326,7 +304,8 @@ export default function ReportsScreen({ userMode }) {
       total_cost: totalCost,
       total_income: totalIncome,
       user_id: user?.user_id,
-      username: user?.username
+      username: user?.username,
+      timestamp: new Date().toISOString()
     });
 
     const printWindow = window.open('', '_blank');
@@ -342,6 +321,7 @@ export default function ReportsScreen({ userMode }) {
           .date-info { text-align: center; margin-bottom: 20px; padding: 15px; background: #f8f9fa; border-radius: 5px; }
           .date-range { font-size: 18px; font-weight: bold; color: #2c3e50; margin-bottom: 5px; }
           .generated-date { font-size: 14px; color: #7f8c8d; }
+          .creator-info { font-size: 14px; color: #5d6d7e; margin-top: 5px; }
           .summary { background: #f5f5f5; padding: 15px; margin-bottom: 20px; border-radius: 5px; }
           .summary-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; margin-bottom: 20px; }
           .summary-item { text-align: center; padding: 10px; border-radius: 5px; }
@@ -367,6 +347,7 @@ export default function ReportsScreen({ userMode }) {
           table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
           th, td { border: 1px solid #ddd; padding: 10px; text-align: left; }
           th { background-color: #f8f9fa; font-weight: bold; }
+          .creator-column { background-color: #f9f9f9; }
           .income-positive { color: #2e7d32; font-weight: bold; }
           .income-negative { color: #c62828; font-weight: bold; }
           .total-row { background-color: #e8f5e8; font-weight: bold; }
@@ -388,6 +369,7 @@ export default function ReportsScreen({ userMode }) {
         <div class="date-info">
           <div class="date-range">Date Range: ${getDateRangeForExport()}</div>
           <div class="generated-date">Generated on: ${new Date().toLocaleDateString()}</div>
+          <div class="creator-info">Generated by: ${user?.username || 'Unknown'}</div>
         </div>
 
         <div class="summary">
@@ -421,6 +403,8 @@ export default function ReportsScreen({ userMode }) {
           <thead>
             <tr>
               <th>Date</th>
+              <th class="creator-column">Created By</th>
+              <th class="creator-column">Created At</th>
               <th>Product</th>
               <th>Quantity</th>
               <th>Selling Price</th>
@@ -441,6 +425,8 @@ export default function ReportsScreen({ userMode }) {
               return sale.items.map((item, index) => `
                 <tr>
                   ${index === 0 ? `<td rowspan="${sale.items.length}">${sale.sales_date}</td>` : ''}
+                  ${index === 0 ? `<td class="creator-column" rowspan="${sale.items.length}">${sale.created_by || 'Unknown'}</td>` : ''}
+                  ${index === 0 ? `<td class="creator-column" rowspan="${sale.items.length}">${sale.created_at || ''}</td>` : ''}
                   <td>${item.name}</td>
                   <td>${item.quantity}</td>
                   <td>₱${item.unit_price?.toFixed(2) || '0.00'}</td>
@@ -459,7 +445,8 @@ export default function ReportsScreen({ userMode }) {
           </tbody>
           <tfoot class="total-row">
             <tr>
-              <td colspan="3"><strong>Grand Totals:</strong></td>
+              <td colspan="4"><strong>Grand Totals:</strong></td>
+              <td></td>
               <td></td>
               <td class="cost-row"></td>
               <td class="income-row"></td>
@@ -475,6 +462,7 @@ export default function ReportsScreen({ userMode }) {
         <div class="footer">
           <p>Generated by SmartTindahan Income Report System</p>
           <p>Profit = Selling Price - Cost Price</p>
+          <p>Report generated by: ${user?.username || 'Unknown'}</p>
         </div>
 
         <script>
@@ -493,12 +481,13 @@ export default function ReportsScreen({ userMode }) {
 
   const fetchReport = async () => {
     try {
-      // ✅ FIXED: Just log to console
       console.log(`[AUDIT] FETCH_SALES_REPORT`, {
         time_filter: timeFilter,
         start_date: startDate,
         end_date: endDate,
-        user_id: user?.user_id
+        user_id: user?.user_id,
+        username: user?.username,
+        timestamp: new Date().toISOString()
       });
 
       const salesData = await db.sale_items.toArray();
@@ -518,7 +507,6 @@ export default function ReportsScreen({ userMode }) {
       const enriched = Object.entries(groupedSales).map(([sales_id, items]) => {
         const sale = filteredSales.find(s => s.sales_id === parseInt(sales_id));
         
-        // Combine items with the same product name and calculate income
         const combinedItems = {};
         let saleTotal = 0;
         let saleTotalCost = 0;
@@ -558,6 +546,8 @@ export default function ReportsScreen({ userMode }) {
 
         return {
           sales_date: sale?.sales_date,
+          created_by: sale?.created_by || 'Unknown',
+          created_at: sale?.created_at || '',
           items: productDetails,
           totalAmount: saleTotal,
           totalCost: saleTotalCost,
@@ -568,78 +558,99 @@ export default function ReportsScreen({ userMode }) {
       setReport(enriched);
     } catch (err) {
       console.error("Error fetching sales report:", err);
-      // ✅ FIXED: Just log to console
       console.error(`[AUDIT] FETCH_SALES_REPORT_ERROR`, {
         error: err.message,
         time_filter: timeFilter,
-        user_id: user?.user_id
+        user_id: user?.user_id,
+        username: user?.username,
+        timestamp: new Date().toISOString()
       });
     }
   };
 
   const fetchResupplyReport = async () => {
-    try {
-      // ✅ FIXED: Just log to console
-      console.log(`[AUDIT] FETCH_RESUPPLY_REPORT`, {
-        time_filter: timeFilter,
-        start_date: startDate,
-        end_date: endDate,
-        user_id: user?.user_id
-      });
+  try {
+    console.log(`[AUDIT] FETCH_RESUPPLY_REPORT`, {
+      time_filter: timeFilter,
+      start_date: startDate,
+      end_date: endDate,
+      user_id: user?.user_id,
+      username: user?.username,
+      timestamp: new Date().toISOString()
+    });
 
-      const resuppliedItems = await db.resupplied_items.toArray();
-      const products = await db.products.toArray();
-      const suppliers = await db.suppliers.toArray();
+    // Fetch from stock_card instead of resupplied_items
+    const stockCardItems = await db.stock_card.toArray();
+    const products = await db.products.toArray();
+    const suppliers = await db.suppliers.toArray();
 
-      const filteredResupplies = resuppliedItems.filter(i => matchesFilter(i.resupply_date));
+    // Filter for RESUPPLY transactions and by date
+    const filteredResupplies = stockCardItems.filter(i => 
+      i.transaction_type === 'RESUPPLY' && matchesFilter(i.transaction_date)
+    );
 
-      const groupedResupplies = {};
-      for (const item of filteredResupplies) {
-        const key = item.resupply_date;
-        if (!groupedResupplies[key]) groupedResupplies[key] = [];
-        groupedResupplies[key].push(item);
-      }
+    const groupedResupplies = {};
+    for (const item of filteredResupplies) {
+      const key = item.transaction_date?.split(' ')[0] || item.resupply_date; // Use date part only
+      if (!groupedResupplies[key]) groupedResupplies[key] = [];
+      groupedResupplies[key].push(item);
+    }
 
-      const enriched = Object.entries(groupedResupplies).map(([date, items]) => {
-        const productDetails = items.map(i => {
-          const product = products.find(p => p.product_id === i.product_id);
-          const supplier = suppliers.find(s => s.supplier_id === i.supplier_id);
-          const totalCost = (i.unit_cost || 0) * (i.quantity || 0);
-          
-          return {
-            product_name: product?.name || 'Unknown Product',
-            supplier_name: supplier?.name || 'Unknown Supplier',
-            quantity: i.quantity,
-            unit_cost: i.unit_cost,
-            total_cost: totalCost,
-            expiration_date: i.expiration_date || 'N/A'
-          };
-        });
-        
-        const totalItems = items.reduce((sum, i) => sum + (i.quantity || 0), 0);
-        const totalCost = items.reduce((sum, i) => sum + ((i.unit_cost || 0) * (i.quantity || 0)), 0);
+    const enriched = Object.entries(groupedResupplies).map(([date, items]) => {
+      // Get supplier details for the group
+      const groupSupplierId = items[0]?.supplier_id;
+      const groupSupplier = suppliers.find(s => s.supplier_id === groupSupplierId);
+      
+      const productDetails = items.map(i => {
+        const product = products.find(p => p.product_id === i.product_id);
+        const supplier = suppliers.find(s => s.supplier_id === i.supplier_id);
+        const totalCost = (i.unit_cost || 0) * (i.quantity || 0);
         
         return {
-          resupply_date: date,
-          items: productDetails,
-          totalItems,
-          totalCost
+          product_name: product?.name || 'Unknown Product',
+          supplier_name: supplier?.name || groupSupplier?.name || 'Unknown Supplier',
+          quantity: i.quantity,
+          unit_cost: i.unit_cost,
+          total_cost: totalCost,
+          expiration_date: i.expiration_date || 'N/A',
+          created_by: i.created_by || 'System',
+          created_at: i.transaction_date || i.created_at || date
         };
-      }).sort((a, b) => new Date(b.resupply_date) - new Date(a.resupply_date));
-
-      setResupplyReport(enriched);
-    } catch (err) {
-      console.error("Error fetching resupply report:", err);
-      // ✅ FIXED: Just log to console
-      console.error(`[AUDIT] FETCH_RESUPPLY_REPORT_ERROR`, {
-        error: err.message,
-        time_filter: timeFilter,
-        user_id: user?.user_id
       });
-    }
-  };
+      
+      const totalItems = items.reduce((sum, i) => sum + (i.quantity || 0), 0);
+      const totalCost = items.reduce((sum, i) => sum + ((i.unit_cost || 0) * (i.quantity || 0)), 0);
+      
+      // Get group created_by info - use the most common creator in the group
+      const creators = items.map(i => i.created_by).filter(Boolean);
+      const groupCreatedBy = creators.length > 0 
+        ? creators[0] // You could also find the most frequent creator here
+        : 'System';
+      
+      return {
+        resupply_date: date,
+        items: productDetails,
+        totalItems,
+        totalCost,
+        created_by: groupCreatedBy,
+        created_at: items[0]?.transaction_date || date,
+        supplier_name: groupSupplier?.name || 'Unknown Supplier'
+      };
+    }).sort((a, b) => new Date(b.resupply_date) - new Date(a.resupply_date));
 
-  // Calculate totals for the table footer
+    setResupplyReport(enriched);
+  } catch (err) {
+    console.error("Error fetching resupply report:", err);
+    console.error(`[AUDIT] FETCH_RESUPPLY_REPORT_ERROR`, {
+      error: err.message,
+      time_filter: timeFilter,
+      user_id: user?.user_id,
+      username: user?.username,
+      timestamp: new Date().toISOString()
+    });
+  }
+};
+
   const totalItemsSold = report.reduce((sum, sale) => 
     sum + sale.items.reduce((itemSum, item) => itemSum + item.quantity, 0), 0
   );
@@ -780,6 +791,8 @@ export default function ReportsScreen({ userMode }) {
                   <thead>
                     <tr>
                       <th style={styles.tableHeader}>Date</th>
+                      <th style={styles.tableHeader}>Created By</th>
+                      <th style={styles.tableHeader}>Created At</th>
                       <th style={styles.tableHeader}>Product</th>
                       <th style={styles.tableHeader}>Quantity</th>
                       <th style={styles.tableHeader}>Selling Price</th>
@@ -798,6 +811,12 @@ export default function ReportsScreen({ userMode }) {
                             <>
                               <td style={styles.tableCell} rowSpan={sale.items.length}>
                                 {sale.sales_date}
+                              </td>
+                              <td style={styles.tableCell} rowSpan={sale.items.length}>
+                                {sale.created_by || 'Unknown'}
+                              </td>
+                              <td style={styles.tableCell} rowSpan={sale.items.length}>
+                                {sale.created_at || ''}
                               </td>
                             </>
                           )}
@@ -838,7 +857,7 @@ export default function ReportsScreen({ userMode }) {
                     ))}
                     {/* Table Footer with Totals */}
                     <tr style={styles.tableFooter}>
-                      <td style={styles.footerCell} colSpan="3">
+                      <td style={styles.footerCell} colSpan="5">
                         <strong>Grand Totals:</strong>
                       </td>
                       <td style={styles.footerCell}></td>
@@ -882,6 +901,11 @@ export default function ReportsScreen({ userMode }) {
                   <div key={index} style={styles.resupplyItem}>
                     <div style={styles.resupplyHeader}>
                       <p style={styles.reportDate}>{group.resupply_date}</p>
+                      <div style={styles.creatorInfo}>
+                        <span style={styles.creatorLabel}>Created by: </span>
+                        <span style={styles.creatorValue}>{group.created_by || 'Unknown'}</span>
+                        <span style={styles.creatorTime}>{group.created_at ? ` at ${group.created_at}` : ''}</span>
+                      </div>
                       <p style={{...styles.reportAmount, color: '#c62828'}}>
                         Total Cost: ₱{group.totalCost?.toFixed(2) || '0.00'}
                       </p>
@@ -894,6 +918,7 @@ export default function ReportsScreen({ userMode }) {
                         <p style={styles.reportDetails}>
                           Qty: {item.quantity} × ₱{item.unit_cost} = ₱{item.total_cost.toFixed(2)}
                           {item.expiration_date !== 'N/A' && ` | Exp: ${item.expiration_date}`}
+                          {item.created_by && item.created_by !== 'Unknown' && ` | Added by: ${item.created_by}`}
                         </p>
                       </div>
                     ))}

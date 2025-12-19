@@ -17,32 +17,16 @@ export default function SalesScreen({ userMode }) {
   const savedUser = JSON.parse(localStorage.getItem("user") || "{}");
   const user = savedUser;
 
-  // ✅ FIXED Audit logging function - uses console logging
-  const logAudit = async (action, details = {}) => {
-    try {
-      // Simply log to console - no separate audits table needed
-      console.log(`[AUDIT] ${action}`, {
-        user_id: user?.user_id,
-        username: user?.username,
-        details,
-        timestamp: new Date().toISOString()
-      });
-    } catch (error) {
-      console.error('Failed to log audit:', error);
-    }
-  };
-
   useEffect(() => {
-    // ✅ FIXED: Just log to console
     console.log(`[AUDIT] VIEW_SALES_SCREEN`, {
       user_id: user?.user_id,
-      username: user?.username
+      username: user?.username,
+      timestamp: new Date().toISOString()
     });
 
     loadProducts();
 
     const handleGlobalScan = (e) => {
-      // Don't capture if user is typing in any input field
       if (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA') {
         return;
       }
@@ -58,7 +42,6 @@ export default function SalesScreen({ userMode }) {
     return () => window.removeEventListener('keydown', handleGlobalScan);
   }, [barcode, products]);
 
-  // Close search results when clicking outside
   useEffect(() => {
     const handleClickOutside = (event) => {
       if (searchRef.current && !searchRef.current.contains(event.target)) {
@@ -70,7 +53,6 @@ export default function SalesScreen({ userMode }) {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  // Track when inputs are focused
   useEffect(() => {
     const handleFocus = (e) => {
       if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') {
@@ -111,9 +93,10 @@ export default function SalesScreen({ userMode }) {
 
   const loadProducts = async () => {
     try {
-      // ✅ FIXED: Just log to console
       console.log(`[AUDIT] LOAD_SALES_PRODUCTS`, {
-        user_id: user?.user_id
+        user_id: user?.user_id,
+        username: user?.username,
+        timestamp: new Date().toISOString()
       });
 
       const prodRes = await db.products.toArray();
@@ -134,10 +117,11 @@ export default function SalesScreen({ userMode }) {
       setProducts(enrichedProducts);
     } catch (err) {
       console.error('Error loading products:', err);
-      // ✅ FIXED: Just log to console
       console.error(`[AUDIT] LOAD_SALES_PRODUCTS_ERROR`, {
         error: err.message,
-        user_id: user?.user_id
+        user_id: user?.user_id,
+        username: user?.username,
+        timestamp: new Date().toISOString()
       });
     }
   };
@@ -149,10 +133,11 @@ export default function SalesScreen({ userMode }) {
       return;
     }
 
-    // ✅ FIXED: Just log to console
     console.log(`[AUDIT] SEARCH_PRODUCT_SALES`, {
       search_term: searchTerm,
-      user_id: user?.user_id
+      user_id: user?.user_id,
+      username: user?.username,
+      timestamp: new Date().toISOString()
     });
 
     const term = searchTerm.toLowerCase();
@@ -166,13 +151,10 @@ export default function SalesScreen({ userMode }) {
   };
 
   const handleScan = async (code) => {
-    // Don't process if user is typing in quantity fields
     if (isInputFocused) return;
     
-    // First try to find by SKU
     let product = products.find((p) => p.sku === code);
     
-    // If not found by SKU, try to find by name
     if (!product) {
       product = products.find((p) => 
         p.name.toLowerCase() === code.toLowerCase()
@@ -180,28 +162,29 @@ export default function SalesScreen({ userMode }) {
     }
 
     if (product) {
-      // ✅ FIXED: Just log to console
       console.log(`[AUDIT] SCAN_PRODUCT_SALES`, {
         barcode: code,
         product_id: product.id,
         product_name: product.name,
-        user_id: user?.user_id
+        user_id: user?.user_id,
+        username: user?.username,
+        timestamp: new Date().toISOString()
       });
       
       addToCart(product, 1);
     } else {
-      // If no exact match, search and show results
       handleSearch(code);
     }
     setBarcode('');
   };
 
   const handleSearchSelect = async (product) => {
-    // ✅ FIXED: Just log to console
     console.log(`[AUDIT] SEARCH_SELECT_PRODUCT_SALES`, {
       product_id: product.id,
       product_name: product.name,
-      user_id: user?.user_id
+      user_id: user?.user_id,
+      username: user?.username,
+      timestamp: new Date().toISOString()
     });
     
     addToCart(product, 1);
@@ -212,14 +195,15 @@ export default function SalesScreen({ userMode }) {
   const addToCart = async (product, qty = 1) => {
     if (!product) return;
     
-    // ✅ FIXED: Just log to console
     console.log(`[AUDIT] ADD_TO_CART_SALES`, {
       product_id: product.id,
       product_name: product.name,
       quantity: qty,
       price: product.price,
       stock_before: product.stock,
-      user_id: user?.user_id
+      user_id: user?.user_id,
+      username: user?.username,
+      timestamp: new Date().toISOString()
     });
 
     const existing = cart.find(item => item.id === product.id);
@@ -246,7 +230,6 @@ export default function SalesScreen({ userMode }) {
     if (qty > product.stock) {
       alert('Not enough stock!');
     } else {
-      // ✅ FIXED: Just log to console
       const oldItem = cart.find(item => item.id === id);
       if (oldItem && oldItem.quantity !== qty) {
         console.log(`[AUDIT] UPDATE_CART_QUANTITY`, {
@@ -255,7 +238,9 @@ export default function SalesScreen({ userMode }) {
           old_quantity: oldItem.quantity,
           new_quantity: qty,
           price: product.price,
-          user_id: user?.user_id
+          user_id: user?.user_id,
+          username: user?.username,
+          timestamp: new Date().toISOString()
         });
       }
       
@@ -271,13 +256,14 @@ export default function SalesScreen({ userMode }) {
   const removeFromCart = async (id) => {
     const item = cart.find(item => item.id === id);
     
-    // ✅ FIXED: Just log to console
     console.log(`[AUDIT] REMOVE_FROM_CART_SALES`, {
       product_id: id,
       product_name: item?.name,
       quantity: item?.quantity,
       price: item?.price,
-      user_id: user?.user_id
+      user_id: user?.user_id,
+      username: user?.username,
+      timestamp: new Date().toISOString()
     });
     
     setCart(cart.filter(item => item.id !== id));
@@ -285,11 +271,12 @@ export default function SalesScreen({ userMode }) {
 
   const cancelAll = async () => {
     if (window.confirm('Are you sure you want to cancel all items?')) {
-      // ✅ FIXED: Just log to console
       console.log(`[AUDIT] CANCEL_ALL_ITEMS`, {
         items_count: cart.length,
         total_amount: calculateTotal(),
-        user_id: user?.user_id
+        user_id: user?.user_id,
+        username: user?.username,
+        timestamp: new Date().toISOString()
       });
       
       setCart([]);
@@ -298,13 +285,10 @@ export default function SalesScreen({ userMode }) {
 
   const calculateTotal = () => cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
   
-  // Calculate total items (sum of all quantities)
   const calculateTotalItems = () => cart.reduce((sum, item) => sum + item.quantity, 0);
   
-  // Calculate total amount for each item
   const calculateItemTotal = (item) => (item.price * item.quantity).toFixed(2);
 
-  // Helper function to create reliable date format for stock card
   const getFormattedDateTime = () => {
     const now = new Date();
     const year = now.getFullYear();
@@ -332,24 +316,25 @@ export default function SalesScreen({ userMode }) {
     }
 
     try {
-      const saleDate = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
-      const transactionDateTime = getFormattedDateTime(); // YYYY-MM-DD HH:MM:SS
+      const saleDate = new Date().toISOString().split('T')[0];
+      const transactionDateTime = getFormattedDateTime();
 
-      // ✅ FIXED: Just log to console
       console.log(`[AUDIT] PAYMENT_ATTEMPT`, {
         items_count: cart.length,
         total_items: calculateTotalItems(),
         total_amount: total,
         cash_given: given,
         change: (given - total).toFixed(2),
-        user_id: user?.user_id
+        user_id: user?.user_id,
+        username: user?.username,
+        timestamp: new Date().toISOString()
       });
 
-      // Add sale record with time and created_by
+      // ✅ FIXED: Store user_id as well as username
       const saleId = await db.sales.add({ 
         sales_date: saleDate,
         sales_time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        // ✅ ADDED: Include created_by and created_at for audit trail
+        user_id: user?.user_id,
         created_by: user?.username,
         created_at: new Date().toISOString()
       });
@@ -357,43 +342,39 @@ export default function SalesScreen({ userMode }) {
       for (const item of cart) {
         const amount = item.quantity * item.price;
 
-        // Add sale item record
         await db.sale_items.add({
           sales_id: saleId,
           product_id: item.id,
           quantity: item.quantity,
           amount,
-          total_amount: total
+          total_amount: total,
+          created_by: user?.username,
+          created_at: new Date().toISOString()
         });
 
-        // Update inventory quantity
         await db.inventory.where({ product_id: item.id }).modify(inv => {
           inv.quantity -= item.quantity;
           if (inv.quantity < 0) inv.quantity = 0;
-          // ✅ ADDED: Update audit fields
           inv.updated_by = user?.username;
           inv.updated_at = new Date().toISOString();
         });
 
-        // Get current inventory for running balance
         const currentInv = await db.inventory.where({ product_id: item.id }).first();
         const runningBalance = currentInv ? currentInv.quantity : 0;
 
-        // ADD STOCK CARD RECORD FOR THE SALE (STOCK-OUT) with created_by
         await db.stock_card.add({
           product_id: item.id,
-          quantity: -item.quantity, // Negative for stock-out
+          quantity: -item.quantity,
           unit_price: item.price,
           transaction_type: 'SALE',
           transaction_date: transactionDateTime,
           sales_id: saleId,
+          user_id: user?.user_id,
           running_balance: runningBalance,
-          // ✅ ADDED: Include created_by and created_at for audit trail
           created_by: user?.username,
           created_at: transactionDateTime
         });
 
-        // ✅ FIXED: Just log to console
         console.log(`[AUDIT] SALE_ITEM`, {
           product_id: item.id,
           product_name: item.name,
@@ -403,11 +384,12 @@ export default function SalesScreen({ userMode }) {
           stock_before: item.stock,
           stock_after: runningBalance,
           sale_id: saleId,
-          user_id: user?.user_id
+          user_id: user?.user_id,
+          username: user?.username,
+          timestamp: new Date().toISOString()
         });
       }
 
-      // ✅ FIXED: Just log to console
       console.log(`[AUDIT] PAYMENT_SUCCESS`, {
         sale_id: saleId,
         items_count: cart.length,
@@ -416,7 +398,8 @@ export default function SalesScreen({ userMode }) {
         cash_given: given,
         change: (given - total).toFixed(2),
         user_id: user?.user_id,
-        username: user?.username
+        username: user?.username,
+        timestamp: new Date().toISOString()
       });
 
       const change = (given - total).toFixed(2);
@@ -426,21 +409,23 @@ export default function SalesScreen({ userMode }) {
       setSearchResults([]);
       setShowSearchResults(false);
       alert(`Payment completed! Change: ₱${change}`);
-      loadProducts(); // Refresh product stock data
+      loadProducts();
     } catch (err) {
       console.error('Error handling payment:', err);
       
-      // ✅ FIXED: Just log to console
       console.error(`[AUDIT] PAYMENT_ERROR`, {
         error: err.message,
         items_count: cart.length,
         total_amount: calculateTotal(),
-        user_id: user?.user_id
+        user_id: user?.user_id,
+        username: user?.username,
+        timestamp: new Date().toISOString()
       });
       
       alert('Error processing payment. Please try again.');
     }
   };
+
 
   return (
     <div style={styles.container}>

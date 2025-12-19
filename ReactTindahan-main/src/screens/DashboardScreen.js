@@ -221,11 +221,6 @@ export default function DashboardScreen({ userMode }) {
             Overview of your store's performance and inventory status
           </p>
         </div>
-        <div style={styles.userSection}>
-          <span style={styles.notificationIcon}>🔔</span>
-          <span style={styles.headerText}>{user?.username || 'User'}</span>
-          <span style={styles.logoutIcon}>🚪</span>
-        </div>
       </div>
 
       {/* Main Content */}
