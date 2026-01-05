@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "dependencies": {
+    "@capacitor-community/http": "^1.4.1",
     "@capacitor/android": "^7.4.4",
     "@capacitor/cli": "^7.4.4",
     "@capacitor/core": "^7.4.4",
@@ -15,11 +16,14 @@
     "@testing-library/jest-dom": "^6.8.0",
     "@testing-library/react": "^16.3.0",
     "@testing-library/user-event": "^13.5.0",
+    "axios": "^1.13.2",
+    "body-parser": "^2.2.1",
     "cors": "^2.8.5",
     "crypto-js": "^4.2.0",
-    "dexie": "^4.2.0",
+    "dexie": "^4.2.1",
+    "dexie-export-import": "^4.1.4",
     "dexie-react-hooks": "^4.2.0",
-    "express": "^5.1.0",
+    "express": "^5.2.1",
     "react": "^19.1.1",
     "react-datepicker": "^8.7.0",
     "react-dom": "^19.1.1",
@@ -31,9 +35,18 @@
   },
   "scripts": {
     "start": "react-scripts start",
+    "server": "node owner-api.js",
+    "dev": "concurrently \"npm start\" \"npm run server\"",
+    "dev:mobile": "concurrently \"HOST=0.0.0.0 npm start\" \"npm run server\"",
+    "start:network": "HOST=0.0.0.0 react-scripts start",
     "build": "react-scripts build",
     "test": "react-scripts test",
-    "eject": "react-scripts eject"
+    "eject": "react-scripts eject",
+    "cap:sync": "npx cap sync",
+    "cap:android": "npx cap open android",
+    "cap:ios": "npx cap open ios",
+    "android:dev": "npm run build && npx cap sync && npx cap run android",
+    "ios:dev": "npm run build && npx cap sync && npx cap run ios"
   },
   "eslintConfig": {
     "extends": [
@@ -55,6 +68,7 @@
   },
   "devDependencies": {
     "autoprefixer": "^10.4.21",
+    "concurrently": "^9.2.1",
     "postcss": "^8.5.6",
     "tailwindcss": "^4.1.13"
   }

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { db } from '../db';
 import { useLocation } from 'react-router-dom';
+import { dataService } from '../services/DataService'; // NEW: Use DataService instead of direct db
 
 export default function DashboardScreen({ userMode }) {
   const location = useLocation();
@@ -23,6 +23,7 @@ export default function DashboardScreen({ userMode }) {
   const [expiredItems, setExpiredItems] = useState([]);
   const [showLowStockModal, setShowLowStockModal] = useState(false);
   const [showExpiredModal, setShowExpiredModal] = useState(false);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     fetchDashboardStats();
@@ -31,7 +32,7 @@ export default function DashboardScreen({ userMode }) {
   // ✅ Log audit action
   const logAudit = async (action, details = {}) => {
     try {
-      await db.backup.add({
+      await dataService.add('backup', {
         user_id: user.user_id,
         backup_name: `AUDIT_${action}`,
         backup_type: 'audit',
@@ -46,6 +47,8 @@ export default function DashboardScreen({ userMode }) {
 
   const fetchDashboardStats = async () => {
     try {
+      setLoading(true);
+      
       // ✅ Log dashboard view using backup table for audit
       await logAudit('VIEW_DASHBOARD', {
         page: 'dashboard',
@@ -55,22 +58,28 @@ export default function DashboardScreen({ userMode }) {
 
       const today = new Date().toISOString().split('T')[0];
 
-      // ✅ Today's Sales
-      const sales = await db.sales.where('sales_date').equals(today).toArray();
+      // ✅ Fetch all data using DataService
+      const sales = await dataService.getAll('sales', {
+        where: { sales_date: today }
+      });
+      
+      const allProducts = await dataService.getAll('products');
+      const allInventory = await dataService.getAll('inventory');
+      const allSaleItems = await dataService.getAll('sale_items');
+
       let salesToday = 0;
       let recentSalesData = [];
 
+      // ✅ Calculate today's sales
       for (let sale of sales) {
-        const items = await db.sale_items.where('sales_id').equals(sale.sales_id).toArray();
+        const items = allSaleItems.filter(item => item.sales_id === sale.sales_id);
         const totalSale = items.reduce((sum, i) => sum + i.amount, 0);
         salesToday += totalSale;
 
-        const productDetails = await Promise.all(
-          items.map(async (item) => {
-            const product = await db.products.get(item.product_id);
-            return product?.name || 'Unknown Product';
-          })
-        );
+        const productDetails = items.map(item => {
+          const product = allProducts.find(p => p.product_id === item.product_id);
+          return product?.name || 'Unknown Product';
+        });
 
         recentSalesData.push({
           id: sale.sales_id,
@@ -79,55 +88,46 @@ export default function DashboardScreen({ userMode }) {
           amount: totalSale,
           items: items.length,
           productNames: productDetails,
-          user_id: sale.user_id // Using existing field
+          user_id: sale.user_id
         });
       }
 
       // ✅ Total Products
-      const totalProducts = await db.products.count();
+      const totalProducts = allProducts.length;
 
-      // ✅ Low Stock
-      const inventory = await db.inventory.toArray();
-      const products = await db.products.toArray();
-      const lowStockItems = inventory
+      // ✅ Low Stock Items
+      const lowStockItems = allInventory
         .filter(i => i.quantity <= i.threshold)
         .map(i => {
-          const product = products.find(p => p.product_id === i.product_id);
+          const product = allProducts.find(p => p.product_id === i.product_id);
           return {
-            name: product?.name || 'Unknown Product',
-            quantity: i.quantity,
-            threshold: i.threshold,
-            updated_by: i.updated_by, // Using existing field
-            updated_at: i.updated_at  // Using existing field
+            ...i,
+            name: product?.name || 'Unknown Product'
           };
         });
       const lowStock = lowStockItems.length;
 
-      // ✅ Expired / Near Expiry
+      // ✅ Expired / Near Expiry Items
       const expiredItems = [];
       const todayDate = new Date();
       const nearExpiryThreshold = new Date();
       nearExpiryThreshold.setDate(todayDate.getDate() + 7);
 
-      for (let i of inventory) {
+      for (let i of allInventory) {
         if (!i.expiration_date) continue;
         const expDate = new Date(i.expiration_date);
-        const product = await db.products.get(i.product_id);
+        const product = allProducts.find(p => p.product_id === i.product_id);
         if (expDate < todayDate) {
           expiredItems.push({
             ...i,
             name: product?.name || 'Unknown Product',
-            type: 'expired',
-            updated_by: i.updated_by, // Using existing field
-            updated_at: i.updated_at  // Using existing field
+            type: 'expired'
           });
         } else if (expDate <= nearExpiryThreshold) {
           expiredItems.push({
             ...i,
             name: product?.name || 'Unknown Product',
-            type: 'near-expiry',
-            updated_by: i.updated_by, // Using existing field
-            updated_at: i.updated_at  // Using existing field
+            type: 'near-expiry'
           });
         }
       }
@@ -158,6 +158,8 @@ export default function DashboardScreen({ userMode }) {
         error: err.message,
         user_id: user.user_id
       });
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -210,6 +212,15 @@ export default function DashboardScreen({ userMode }) {
     });
     setShowExpiredModal(false);
   };
+
+  if (loading) {
+    return (
+      <div style={styles.loadingContainer}>
+        <div style={styles.spinner}></div>
+        <p>Loading dashboard...</p>
+      </div>
+    );
+  }
 
   return (
     <div style={styles.content}>

@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from 'react';
-import { db } from '../db';
+import { dataService } from '../services/DataService'; // CHANGED
 
 export const addReport = async (report) => {
-  await db.backup.add(report);
+  await dataService.add('backup', report); // CHANGED
 };
 
 export default function ReportsScreen({ userMode }) {
@@ -41,8 +41,8 @@ export default function ReportsScreen({ userMode }) {
 
   const fetchProductCostData = async () => {
     try {
-      const resupplyItems = await db.resupplied_items.toArray();
-      const stockCardItems = await db.stock_card.toArray();
+      const resupplyItems = await dataService.getAll('resupplied_items'); // CHANGED
+      const stockCardItems = await dataService.getAll('stock_card'); // CHANGED
       
       const costMap = {};
       
@@ -490,9 +490,9 @@ export default function ReportsScreen({ userMode }) {
         timestamp: new Date().toISOString()
       });
 
-      const salesData = await db.sale_items.toArray();
-      const sales = await db.sales.toArray();
-      const products = await db.products.toArray();
+      const salesData = await dataService.getAll('sale_items'); // CHANGED
+      const sales = await dataService.getAll('sales'); // CHANGED
+      const products = await dataService.getAll('products'); // CHANGED
 
       const filteredSales = sales.filter(s => matchesFilter(s.sales_date));
 
@@ -569,87 +569,87 @@ export default function ReportsScreen({ userMode }) {
   };
 
   const fetchResupplyReport = async () => {
-  try {
-    console.log(`[AUDIT] FETCH_RESUPPLY_REPORT`, {
-      time_filter: timeFilter,
-      start_date: startDate,
-      end_date: endDate,
-      user_id: user?.user_id,
-      username: user?.username,
-      timestamp: new Date().toISOString()
-    });
+    try {
+      console.log(`[AUDIT] FETCH_RESUPPLY_REPORT`, {
+        time_filter: timeFilter,
+        start_date: startDate,
+        end_date: endDate,
+        user_id: user?.user_id,
+        username: user?.username,
+        timestamp: new Date().toISOString()
+      });
 
-    // Fetch from stock_card instead of resupplied_items
-    const stockCardItems = await db.stock_card.toArray();
-    const products = await db.products.toArray();
-    const suppliers = await db.suppliers.toArray();
+      // Fetch from stock_card instead of resupplied_items
+      const stockCardItems = await dataService.getAll('stock_card'); // CHANGED
+      const products = await dataService.getAll('products'); // CHANGED
+      const suppliers = await dataService.getAll('suppliers'); // CHANGED
 
-    // Filter for RESUPPLY transactions and by date
-    const filteredResupplies = stockCardItems.filter(i => 
-      i.transaction_type === 'RESUPPLY' && matchesFilter(i.transaction_date)
-    );
+      // Filter for RESUPPLY transactions and by date
+      const filteredResupplies = stockCardItems.filter(i => 
+        i.transaction_type === 'RESUPPLY' && matchesFilter(i.transaction_date)
+      );
 
-    const groupedResupplies = {};
-    for (const item of filteredResupplies) {
-      const key = item.transaction_date?.split(' ')[0] || item.resupply_date; // Use date part only
-      if (!groupedResupplies[key]) groupedResupplies[key] = [];
-      groupedResupplies[key].push(item);
-    }
+      const groupedResupplies = {};
+      for (const item of filteredResupplies) {
+        const key = item.transaction_date?.split(' ')[0] || item.resupply_date; // Use date part only
+        if (!groupedResupplies[key]) groupedResupplies[key] = [];
+        groupedResupplies[key].push(item);
+      }
 
-    const enriched = Object.entries(groupedResupplies).map(([date, items]) => {
-      // Get supplier details for the group
-      const groupSupplierId = items[0]?.supplier_id;
-      const groupSupplier = suppliers.find(s => s.supplier_id === groupSupplierId);
-      
-      const productDetails = items.map(i => {
-        const product = products.find(p => p.product_id === i.product_id);
-        const supplier = suppliers.find(s => s.supplier_id === i.supplier_id);
-        const totalCost = (i.unit_cost || 0) * (i.quantity || 0);
+      const enriched = Object.entries(groupedResupplies).map(([date, items]) => {
+        // Get supplier details for the group
+        const groupSupplierId = items[0]?.supplier_id;
+        const groupSupplier = suppliers.find(s => s.supplier_id === groupSupplierId);
+        
+        const productDetails = items.map(i => {
+          const product = products.find(p => p.product_id === i.product_id);
+          const supplier = suppliers.find(s => s.supplier_id === i.supplier_id);
+          const totalCost = (i.unit_cost || 0) * (i.quantity || 0);
+          
+          return {
+            product_name: product?.name || 'Unknown Product',
+            supplier_name: supplier?.name || groupSupplier?.name || 'Unknown Supplier',
+            quantity: i.quantity,
+            unit_cost: i.unit_cost,
+            total_cost: totalCost,
+            expiration_date: i.expiration_date || 'N/A',
+            created_by: i.created_by || 'System',
+            created_at: i.transaction_date || i.created_at || date
+          };
+        });
+        
+        const totalItems = items.reduce((sum, i) => sum + (i.quantity || 0), 0);
+        const totalCost = items.reduce((sum, i) => sum + ((i.unit_cost || 0) * (i.quantity || 0)), 0);
+        
+        // Get group created_by info - use the most common creator in the group
+        const creators = items.map(i => i.created_by).filter(Boolean);
+        const groupCreatedBy = creators.length > 0 
+          ? creators[0] // You could also find the most frequent creator here
+          : 'System';
         
         return {
-          product_name: product?.name || 'Unknown Product',
-          supplier_name: supplier?.name || groupSupplier?.name || 'Unknown Supplier',
-          quantity: i.quantity,
-          unit_cost: i.unit_cost,
-          total_cost: totalCost,
-          expiration_date: i.expiration_date || 'N/A',
-          created_by: i.created_by || 'System',
-          created_at: i.transaction_date || i.created_at || date
+          resupply_date: date,
+          items: productDetails,
+          totalItems,
+          totalCost,
+          created_by: groupCreatedBy,
+          created_at: items[0]?.transaction_date || date,
+          supplier_name: groupSupplier?.name || 'Unknown Supplier'
         };
-      });
-      
-      const totalItems = items.reduce((sum, i) => sum + (i.quantity || 0), 0);
-      const totalCost = items.reduce((sum, i) => sum + ((i.unit_cost || 0) * (i.quantity || 0)), 0);
-      
-      // Get group created_by info - use the most common creator in the group
-      const creators = items.map(i => i.created_by).filter(Boolean);
-      const groupCreatedBy = creators.length > 0 
-        ? creators[0] // You could also find the most frequent creator here
-        : 'System';
-      
-      return {
-        resupply_date: date,
-        items: productDetails,
-        totalItems,
-        totalCost,
-        created_by: groupCreatedBy,
-        created_at: items[0]?.transaction_date || date,
-        supplier_name: groupSupplier?.name || 'Unknown Supplier'
-      };
-    }).sort((a, b) => new Date(b.resupply_date) - new Date(a.resupply_date));
+      }).sort((a, b) => new Date(b.resupply_date) - new Date(a.resupply_date));
 
-    setResupplyReport(enriched);
-  } catch (err) {
-    console.error("Error fetching resupply report:", err);
-    console.error(`[AUDIT] FETCH_RESUPPLY_REPORT_ERROR`, {
-      error: err.message,
-      time_filter: timeFilter,
-      user_id: user?.user_id,
-      username: user?.username,
-      timestamp: new Date().toISOString()
-    });
-  }
-};
+      setResupplyReport(enriched);
+    } catch (err) {
+      console.error("Error fetching resupply report:", err);
+      console.error(`[AUDIT] FETCH_RESUPPLY_REPORT_ERROR`, {
+        error: err.message,
+        time_filter: timeFilter,
+        user_id: user?.user_id,
+        username: user?.username,
+        timestamp: new Date().toISOString()
+      });
+    }
+  };
 
   const totalItemsSold = report.reduce((sum, sale) => 
     sum + sale.items.reduce((itemSum, item) => itemSum + item.quantity, 0), 0

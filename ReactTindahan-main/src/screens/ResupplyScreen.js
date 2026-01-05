@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
-import { db } from "../db";
+import { dataService } from "../services/DataService"; // CHANGED
 
 export default function ResupplyScreen() {
   const [barcode, setBarcode] = useState("");
@@ -115,9 +115,9 @@ export default function ResupplyScreen() {
         user_id: user?.user_id
       });
 
-      const prodRes = await db.products.toArray();
-      const supRes = await db.suppliers.toArray();
-      const inventoryData = await db.inventory.toArray();
+      const prodRes = await dataService.getAll('products'); // CHANGED
+      const supRes = await dataService.getAll('suppliers'); // CHANGED
+      const inventoryData = await dataService.getAll('inventory'); // CHANGED
 
       const enrichedProducts = prodRes.map((p) => {
         const inv = inventoryData.find((i) => i.product_id === p.product_id);
@@ -323,150 +323,152 @@ export default function ResupplyScreen() {
   };
 
   const handleResupply = async () => {
-  if (cart.length === 0) {
-    alert("No products to resupply.");
-    return;
-  }
-  
-  if (!selectedSupplierId) {
-    alert("⚠️ Please select a supplier.");
-    return;
-  }
-
-  // Validate required fields
-  const invalidItems = cart.filter(item => {
-    const unitCost = parseFloat(item.unitCost) || 0;
-    return unitCost <= 0 || item.quantity <= 0;
-  });
-
-  if (invalidItems.length > 0) {
-    alert("⚠️ Please check all items:\n- Unit cost must be greater than 0\n- Quantity must be greater than 0");
-    return;
-  }
-
-  try {
-    const today = new Date().toISOString().split("T")[0];
-    const transactionDateTime = getFormattedDateTime();
+    if (cart.length === 0) {
+      alert("No products to resupply.");
+      return;
+    }
     
-    // ✅ FIXED: Just log to console
-    console.log(`[AUDIT] RESUPPLY_ATTEMPT`, {
-      supplier_id: selectedSupplierId,
-      items_count: cart.length,
-      total_quantity: cart.reduce((sum, item) => sum + item.quantity, 0),
-      total_cost: cart.reduce((sum, item) => sum + (parseFloat(item.unitCost) || 0) * item.quantity, 0),
-      user_id: user?.user_id
+    if (!selectedSupplierId) {
+      alert("⚠️ Please select a supplier.");
+      return;
+    }
+
+    // Validate required fields
+    const invalidItems = cart.filter(item => {
+      const unitCost = parseFloat(item.unitCost) || 0;
+      return unitCost <= 0 || item.quantity <= 0;
     });
 
-    for (const item of cart) {
-      const resupplyData = {
-        product_id: item.id,
-        supplier_id: item.supplier_id,
-        quantity: item.quantity,
-        unit_cost: parseFloat(item.unitCost) || 0,
-        expiration_date: item.noExpiry ? "" : item.expirationDate || "",
-        unit_type: item.unitType,
-        user_id: user.user_id,
-        resupply_date: today,
-        // ✅ ADDED: Include created_by and created_at
-        created_by: user?.username,
-        created_at: transactionDateTime
-      };
+    if (invalidItems.length > 0) {
+      alert("⚠️ Please check all items:\n- Unit cost must be greater than 0\n- Quantity must be greater than 0");
+      return;
+    }
 
-      // Add resupply record
-      await db.resupplied_items.add(resupplyData);
+    try {
+      const today = new Date().toISOString().split("T")[0];
+      const transactionDateTime = getFormattedDateTime();
+      
+      // ✅ FIXED: Just log to console
+      console.log(`[AUDIT] RESUPPLY_ATTEMPT`, {
+        supplier_id: selectedSupplierId,
+        items_count: cart.length,
+        total_quantity: cart.reduce((sum, item) => sum + item.quantity, 0),
+        total_cost: cart.reduce((sum, item) => sum + (parseFloat(item.unitCost) || 0) * item.quantity, 0),
+        user_id: user?.user_id
+      });
 
-      // Update inventory
-      const existingInv = await db.inventory
-        .where({ product_id: item.id })
-        .first();
-
-      if (!existingInv) {
-        await db.inventory.add({
+      // Get all inventory data for updating
+      const allInventory = await dataService.getAll('inventory'); // CHANGED
+      
+      for (const item of cart) {
+        const resupplyData = {
           product_id: item.id,
           supplier_id: item.supplier_id,
           quantity: item.quantity,
+          unit_cost: parseFloat(item.unitCost) || 0,
+          expiration_date: item.noExpiry ? "" : item.expirationDate || "",
+          unit_type: item.unitType,
+          user_id: user.user_id,
+          resupply_date: today,
+          // ✅ ADDED: Include created_by and created_at
+          created_by: user?.username,
+          created_at: transactionDateTime
+        };
+
+        // Add resupply record
+        await dataService.add('resupplied_items', resupplyData); // CHANGED
+
+        // Update inventory
+        const existingInv = allInventory.find(inv => inv.product_id === item.id);
+
+        if (!existingInv) {
+          await dataService.add('inventory', { // CHANGED
+            product_id: item.id,
+            supplier_id: item.supplier_id,
+            quantity: item.quantity,
+            expiration_date: resupplyData.expiration_date,
+            updated_by: user?.username,
+            updated_at: new Date().toISOString()
+          });
+        } else {
+          await dataService.update('inventory', existingInv.product_id, { // CHANGED
+            quantity: existingInv.quantity + item.quantity,
+            supplier_id: item.supplier_id,
+            expiration_date: resupplyData.expiration_date,
+            updated_by: user?.username,
+            updated_at: new Date().toISOString()
+          });
+        }
+
+        // Get current running balance for stock card
+        const currentStock = existingInv ? existingInv.quantity + item.quantity : item.quantity;
+        
+        // Get product price
+        const productData = await dataService.getAll('products'); // CHANGED
+        const prod = productData.find(p => p.product_id === item.id);
+        
+        // ✅ FIXED: Just log to console
+        console.log(`[AUDIT] RESUPPLY_ITEM`, {
+          product_id: item.id,
+          product_name: item.name,
+          supplier_id: item.supplier_id,
+          quantity: item.quantity,
+          unit_cost: parseFloat(item.unitCost) || 0,
+          total_cost: (parseFloat(item.unitCost) || 0) * item.quantity,
           expiration_date: resupplyData.expiration_date,
-          updated_by: user?.username,
-          updated_at: new Date().toISOString()
+          user_id: user?.user_id
         });
-      } else {
-        await db.inventory.where({ product_id: item.id }).modify((inv) => {
-          inv.quantity += item.quantity;
-          inv.supplier_id = item.supplier_id;
-          inv.expiration_date = resupplyData.expiration_date;
-          inv.updated_by = user?.username;
-          inv.updated_at = new Date().toISOString();
+        
+        // ✅ ADD STOCK CARD RECORD FOR RESUPPLY (STOCK-IN) with created_by
+        await dataService.add('stock_card', { // CHANGED
+          product_id: item.id,
+          supplier_id: item.supplier_id,
+          user_id: user.user_id,
+          quantity: item.quantity, // Positive for stock-in
+          unit_cost: parseFloat(item.unitCost) || 0,
+          unit_price: prod?.unit_price || 0,
+          resupply_date: today,
+          expiration_date: resupplyData.expiration_date,
+          unit_type: item.unitType,
+          transaction_type: "RESUPPLY",
+          transaction_date: transactionDateTime,
+          running_balance: currentStock,
+          // ✅ ADDED: Include created_by and created_at for audit trail
+          created_by: user?.username,
+          created_at: transactionDateTime
         });
       }
 
-      // Get current running balance for stock card
-      const currentStock = existingInv ? existingInv.quantity + item.quantity : item.quantity;
-      
-      // Get product price
-      const prod = await db.products.get(item.id);
+      // ✅ FIXED: Just log to console
+      console.log(`[AUDIT] RESUPPLY_SUCCESS`, {
+        supplier_id: selectedSupplierId,
+        items_count: cart.length,
+        total_quantity: cart.reduce((sum, item) => sum + item.quantity, 0),
+        total_cost: cart.reduce((sum, item) => sum + (parseFloat(item.unitCost) || 0) * item.quantity, 0),
+        user_id: user?.user_id
+      });
+
+      alert("✅ Resupply completed successfully!");
+      setCart([]);
+      setSelectedSupplierId("");
+      setBarcode("");
+      setSearchResults([]);
+      setShowSearchResults(false);
+      loadProductsAndSuppliers(); // Refresh data
+    } catch (err) {
+      console.error("Error during resupply:", err);
       
       // ✅ FIXED: Just log to console
-      console.log(`[AUDIT] RESUPPLY_ITEM`, {
-        product_id: item.id,
-        product_name: item.name,
-        supplier_id: item.supplier_id,
-        quantity: item.quantity,
-        unit_cost: parseFloat(item.unitCost) || 0,
-        total_cost: (parseFloat(item.unitCost) || 0) * item.quantity,
-        expiration_date: resupplyData.expiration_date,
+      console.error(`[AUDIT] RESUPPLY_ERROR`, {
+        error: err.message,
+        supplier_id: selectedSupplierId,
+        items_count: cart.length,
         user_id: user?.user_id
       });
       
-      // ✅ ADD STOCK CARD RECORD FOR RESUPPLY (STOCK-IN) with created_by
-      await db.stock_card.add({
-        product_id: item.id,
-        supplier_id: item.supplier_id,
-        user_id: user.user_id,
-        quantity: item.quantity, // Positive for stock-in
-        unit_cost: parseFloat(item.unitCost) || 0,
-        unit_price: prod?.unit_price || 0,
-        resupply_date: today,
-        expiration_date: resupplyData.expiration_date,
-        unit_type: item.unitType,
-        transaction_type: "RESUPPLY",
-        transaction_date: transactionDateTime,
-        running_balance: currentStock,
-        // ✅ ADDED: Include created_by and created_at for audit trail
-        created_by: user?.username,
-        created_at: transactionDateTime
-      });
+      alert("❌ Failed to resupply products. Please try again.");
     }
-
-    // ✅ FIXED: Just log to console
-    console.log(`[AUDIT] RESUPPLY_SUCCESS`, {
-      supplier_id: selectedSupplierId,
-      items_count: cart.length,
-      total_quantity: cart.reduce((sum, item) => sum + item.quantity, 0),
-      total_cost: cart.reduce((sum, item) => sum + (parseFloat(item.unitCost) || 0) * item.quantity, 0),
-      user_id: user?.user_id
-    });
-
-    alert("✅ Resupply completed successfully!");
-    setCart([]);
-    setSelectedSupplierId("");
-    setBarcode("");
-    setSearchResults([]);
-    setShowSearchResults(false);
-    loadProductsAndSuppliers(); // Refresh data
-  } catch (err) {
-    console.error("Error during resupply:", err);
-    
-    // ✅ FIXED: Just log to console
-    console.error(`[AUDIT] RESUPPLY_ERROR`, {
-      error: err.message,
-      supplier_id: selectedSupplierId,
-      items_count: cart.length,
-      user_id: user?.user_id
-    });
-    
-    alert("❌ Failed to resupply products. Please try again.");
-  }
-};
+  };
 
   const handleClearCart = async () => {
     // ✅ FIXED: Just log to console

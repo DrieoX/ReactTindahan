@@ -11,6 +11,7 @@ import ReportsScreen from './screens/ReportsScreen';
 import SuppliersScreen from './screens/SuppliersScreen';
 import BackupScreen from './screens/BackupScreen';
 import MainLayout from './components/MainLayout';
+import { dataService } from './services/DataService';
 
 import { db } from './db';
 import { initAutoBackup, checkAndRunBackup } from './services/autoBackup';
@@ -83,11 +84,11 @@ function ServerStack({ handleLogout, userMode }) {
   );
 }
 
-// 🔹 Auth stack
-function AuthStack({ setUserMode }) {
+// 🔹 Auth stack - Updated to use handleLogin
+function AuthStack({ handleLogin }) {
   return (
     <Routes>
-      <Route path="/" element={<LoginScreen setUserMode={setUserMode} />} />
+      <Route path="/" element={<LoginScreen handleLogin={handleLogin} />} />
       <Route path="/signup" element={<SignupScreen />} />
       <Route path="*" element={<Navigate to="/" />} />
     </Routes>
@@ -97,6 +98,17 @@ function AuthStack({ setUserMode }) {
 export default function App() {
   const [userMode, setUserMode] = useState(null);
   const [loading, setLoading] = useState(true);
+
+  // ✅ Define handleLogin INSIDE the App component
+  const handleLogin = (user) => {
+    const mode = user.role === 'Owner' ? 'server' : 'client';
+    setUserMode(mode);
+    localStorage.setItem('userMode', mode);
+    localStorage.setItem('user', JSON.stringify(user));
+    
+    // Update data service with mode
+    dataService.setUserMode(mode);
+  };
 
   useEffect(() => {
     const init = async () => {
@@ -134,6 +146,8 @@ export default function App() {
         const savedMode = localStorage.getItem('userMode');
         if (savedMode && (savedMode === 'client' || savedMode === 'server')) {
           setUserMode(savedMode);
+          // Update data service with saved mode
+          dataService.setUserMode(savedMode);
         }
 
         setLoading(false);
@@ -207,7 +221,7 @@ export default function App() {
     <Router>
       <Routes>
         {!userMode ? (
-          <Route path="/*" element={<AuthStack setUserMode={setUserMode} />} />
+          <Route path="/*" element={<AuthStack handleLogin={handleLogin} />} />
         ) : userMode === 'server' ? (
           <Route
             path="/*"

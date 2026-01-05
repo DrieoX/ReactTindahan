@@ -1,4 +1,4 @@
-import { db } from '../db';
+import { dataService } from '../services/DataService';
 
 // Using try-catch for Capacitor to handle version issues
 let Filesystem;
@@ -39,10 +39,11 @@ function generateChecksum(data) {
 async function createBackup(userId, username = 'System', backupName = 'Automatic Backup') {
   try {
     const backupData = {
-      schema_version: db.verno || 1,
+      schema_version: '5',
       created_at: new Date().toISOString(),
       created_by: userId,
       created_by_name: username,
+      backup_name: backupName,
       data: {}
     };
 
@@ -60,9 +61,10 @@ async function createBackup(userId, username = 'System', backupName = 'Automatic
       'backup'
     ];
 
+    // CHANGED: Use DataService to get table data
     for (const table of tables) {
       try {
-        backupData.data[table] = await db.table(table).toArray();
+        backupData.data[table] = await dataService.getAll(table);
       } catch (err) {
         console.warn(`Table ${table} not found or error:`, err);
         backupData.data[table] = [];
@@ -73,15 +75,15 @@ async function createBackup(userId, username = 'System', backupName = 'Automatic
     const fileName = `TindaTrack_Auto_${backupName.replace(/\s+/g, '_')}_${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
     const jsonString = JSON.stringify(backupData, null, 2);
 
-    // Log the backup in database
+    // Log the backup in database using DataService
     try {
-      await db.backup.add({
+      await dataService.add('backup', {
         user_id: userId,
         username: username,
         backup_name: backupName,
         backup_type: 'full',
         created_at: new Date().toISOString(),
-        schema_version: db.verno || 1,
+        schema_version: '5',
         file_name: fileName,
         file_size: jsonString.length,
         checksum,
@@ -91,7 +93,7 @@ async function createBackup(userId, username = 'System', backupName = 'Automatic
       console.warn('Could not log backup to database:', dbError);
     }
 
-    return { success: true, backupData: jsonString, fileName, backupId: Date.now() };
+    return { success: true, json: jsonString, fileName, backupId: Date.now() };
   } catch (error) {
     console.error('Backup creation failed:', error);
     return { success: false, error };
@@ -99,7 +101,7 @@ async function createBackup(userId, username = 'System', backupName = 'Automatic
 }
 
 /**
- * Download backup file for auto backup - FIXED VERSION
+ * Download backup file for auto backup
  */
 async function downloadBackupFile(backupData, fileName) {
   try {
@@ -180,11 +182,6 @@ async function downloadBackupFile(backupData, fileName) {
 export async function runDailyBackup() {
   try {
     // Check if database is ready
-    if (!db.isOpen) {
-      console.log('Database not ready, skipping auto backup');
-      return false;
-    }
-
     const userData = localStorage.getItem('user');
     if (!userData) {
       console.log('No user logged in, skipping auto backup');

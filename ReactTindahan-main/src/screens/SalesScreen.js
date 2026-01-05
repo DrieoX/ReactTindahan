@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { db } from '../db';
+import { dataService } from '../services/DataService'; // CHANGED
 
 export default function SalesScreen({ userMode }) {
   const [barcode, setBarcode] = useState('');
@@ -99,8 +99,8 @@ export default function SalesScreen({ userMode }) {
         timestamp: new Date().toISOString()
       });
 
-      const prodRes = await db.products.toArray();
-      const inventoryData = await db.inventory.toArray();
+      const prodRes = await dataService.getAll('products'); // CHANGED
+      const inventoryData = await dataService.getAll('inventory'); // CHANGED
 
       const enrichedProducts = prodRes.map(p => {
         const inv = inventoryData.find(i => i.product_id === p.product_id);
@@ -331,7 +331,7 @@ export default function SalesScreen({ userMode }) {
       });
 
       // ✅ FIXED: Store user_id as well as username
-      const saleId = await db.sales.add({ 
+      const saleId = await dataService.add('sales', { // CHANGED
         sales_date: saleDate,
         sales_time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         user_id: user?.user_id,
@@ -339,10 +339,13 @@ export default function SalesScreen({ userMode }) {
         created_at: new Date().toISOString()
       });
 
+      // Get all inventory data
+      const allInventory = await dataService.getAll('inventory'); // CHANGED
+      
       for (const item of cart) {
         const amount = item.quantity * item.price;
 
-        await db.sale_items.add({
+        await dataService.add('sale_items', { // CHANGED
           sales_id: saleId,
           product_id: item.id,
           quantity: item.quantity,
@@ -352,17 +355,23 @@ export default function SalesScreen({ userMode }) {
           created_at: new Date().toISOString()
         });
 
-        await db.inventory.where({ product_id: item.id }).modify(inv => {
-          inv.quantity -= item.quantity;
-          if (inv.quantity < 0) inv.quantity = 0;
-          inv.updated_by = user?.username;
-          inv.updated_at = new Date().toISOString();
-        });
+        // Find and update inventory
+        const inventoryRecord = allInventory.find(inv => inv.product_id === item.id);
+        
+        if (inventoryRecord) {
+          await dataService.update('inventory', inventoryRecord.product_id, { // CHANGED
+            quantity: Math.max(inventoryRecord.quantity - item.quantity, 0),
+            updated_by: user?.username,
+            updated_at: new Date().toISOString()
+          });
+        }
 
-        const currentInv = await db.inventory.where({ product_id: item.id }).first();
+        // Calculate running balance
+        const updatedInventory = await dataService.getAll('inventory'); // CHANGED
+        const currentInv = updatedInventory.find(inv => inv.product_id === item.id);
         const runningBalance = currentInv ? currentInv.quantity : 0;
 
-        await db.stock_card.add({
+        await dataService.add('stock_card', { // CHANGED
           product_id: item.id,
           quantity: -item.quantity,
           unit_price: item.price,
@@ -425,7 +434,6 @@ export default function SalesScreen({ userMode }) {
       alert('Error processing payment. Please try again.');
     }
   };
-
 
   return (
     <div style={styles.container}>

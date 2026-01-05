@@ -10,6 +10,8 @@ export default function SignupScreen() {
   const [storeName, setStoreName] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [role, setRole] = useState('Staff'); // Default to Staff
   const [isOwnerSignup, setIsOwnerSignup] = useState(false);
 
@@ -55,176 +57,324 @@ export default function SignupScreen() {
     }
   };
 
+  const togglePasswordVisibility = () => {
+    setShowPassword(!showPassword);
+  };
+
+  const toggleConfirmPasswordVisibility = () => {
+    setShowConfirmPassword(!showConfirmPassword);
+  };
+
+  const handleKeyPress = (e) => {
+    if (e.key === 'Enter') {
+      handleRegister();
+    }
+  };
+
   return (
     <div style={styles.container}>
-      <div style={styles.icon}>🛒</div>
+      <div style={styles.card}>
+        <div style={styles.icon}>🛒</div>
+        <h2 style={styles.title}>Create your account</h2>
+        <p style={styles.subtitle}>
+          Start managing your business with our POS system
+        </p>
 
-      <h2 style={styles.title}>Create your account</h2>
-      <p style={styles.subtitle}>
-        Start managing your business with our POS system
-      </p>
+        {/* Role Selection */}
+        <div style={styles.roleContainer}>
+          <button
+            style={{
+              ...styles.roleButton,
+              ...(role === 'Owner' ? styles.activeRoleButton : {})
+            }}
+            onClick={() => handleRoleChange('Owner')}
+          >
+            Register as Owner
+          </button>
+          <button
+            style={{
+              ...styles.roleButton,
+              ...(role === 'Staff' ? styles.activeRoleButton : {})
+            }}
+            onClick={() => handleRoleChange('Staff')}
+          >
+            Register as Staff
+          </button>
+        </div>
 
-      {/* Role Selection */}
-      <div style={styles.roleContainer}>
-        <button
-          style={{
-            ...styles.roleButton,
-            ...(role === 'Owner' ? styles.activeRoleButton : {})
-          }}
-          onClick={() => handleRoleChange('Owner')}
-        >
-          Register as Owner
-        </button>
-        <button
-          style={{
-            ...styles.roleButton,
-            ...(role === 'Staff' ? styles.activeRoleButton : {})
-          }}
-          onClick={() => handleRoleChange('Staff')}
-        >
-          Register as Staff
-        </button>
+        <div style={styles.roleInfo}>
+          {role === 'Owner' ? 
+            "As an owner, you'll have full access to manage your store, inventory, and staff." : 
+            "As staff, you'll have limited access to process sales and view assigned tasks."}
+        </div>
+
+        <div style={styles.form}>
+          <div style={styles.inputGroup}>
+            <label style={styles.label}>Username *</label>
+            <input
+              type="text"
+              placeholder="Enter username"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              onKeyPress={handleKeyPress}
+              style={styles.input}
+            />
+          </div>
+          
+          <div style={styles.inputGroup}>
+            <label style={styles.label}>Full Name *</label>
+            <input
+              type="text"
+              placeholder="Enter your full name"
+              value={fullName}
+              onChange={(e) => setFullName(e.target.value)}
+              onKeyPress={handleKeyPress}
+              style={styles.input}
+            />
+          </div>
+          
+          {isOwnerSignup && (
+            <div style={styles.inputGroup}>
+              <label style={styles.label}>Store Name *</label>
+              <input
+                type="text"
+                placeholder="Enter store name"
+                value={storeName}
+                onChange={(e) => setStoreName(e.target.value)}
+                onKeyPress={handleKeyPress}
+                style={styles.input}
+              />
+            </div>
+          )}
+          
+          <div style={styles.inputGroup}>
+            <label style={styles.label}>Password (min. 6 characters) *</label>
+            <div style={styles.passwordWrapper}>
+              <input
+                type={showPassword ? "text" : "password"}
+                placeholder="Create a password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                onKeyPress={handleKeyPress}
+                style={styles.passwordInput}
+              />
+              <button
+                type="button"
+                onClick={togglePasswordVisibility}
+                style={styles.passwordToggle}
+              >
+                {showPassword ? '🙈' : '👁️'}
+              </button>
+            </div>
+          </div>
+          
+          <div style={styles.inputGroup}>
+            <label style={styles.label}>Confirm Password *</label>
+            <div style={styles.passwordWrapper}>
+              <input
+                type={showConfirmPassword ? "text" : "password"}
+                placeholder="Confirm your password"
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                onKeyPress={handleKeyPress}
+                style={styles.passwordInput}
+              />
+              <button
+                type="button"
+                onClick={toggleConfirmPasswordVisibility}
+                style={styles.passwordToggle}
+              >
+                {showConfirmPassword ? '🙈' : '👁️'}
+              </button>
+            </div>
+          </div>
+
+          <button style={styles.button} onClick={handleRegister}>
+            Create {role} Account
+          </button>
+
+          <p style={styles.footer}>
+            Already have an account?{' '}
+            <span style={styles.link} onClick={() => navigate('/')}>
+              Sign in here
+            </span>
+          </p>
+        </div>
       </div>
-
-      <div style={styles.roleInfo}>
-        {role === 'Owner' ? 
-          "As an owner, you'll have full access to manage your store, inventory, and staff." : 
-          "As staff, you'll have limited access to process sales and view assigned tasks."}
-      </div>
-
-      <input
-        type="text"
-        placeholder="Username *"
-        value={username}
-        onChange={(e) => setUsername(e.target.value)}
-        style={styles.input}
-      />
-      
-      <input
-        type="text"
-        placeholder="Full Name *"
-        value={fullName}
-        onChange={(e) => setFullName(e.target.value)}
-        style={styles.input}
-      />
-      
-      {isOwnerSignup && (
-        <input
-          type="text"
-          placeholder="Store Name *"
-          value={storeName}
-          onChange={(e) => setStoreName(e.target.value)}
-          style={styles.input}
-        />
-      )}
-      
-      <input
-        type="password"
-        placeholder="Password (min. 6 characters) *"
-        value={password}
-        onChange={(e) => setPassword(e.target.value)}
-        style={styles.input}
-      />
-      
-      <input
-        type="password"
-        placeholder="Confirm Password *"
-        value={confirmPassword}
-        onChange={(e) => setConfirmPassword(e.target.value)}
-        style={styles.input}
-      />
-
-      <button style={styles.button} onClick={handleRegister}>
-        Create {role} Account
-      </button>
-
-      <p style={styles.footer}>
-        Already have an account?{' '}
-        <span style={styles.link} onClick={() => navigate('/')}>
-          Sign in here
-        </span>
-      </p>
     </div>
   );
 }
 
 const styles = {
   container: {
-    maxWidth: '400px',
-    margin: '50px auto',
-    padding: '24px',
-    backgroundColor: '#F9FAFB',
-    borderRadius: '12px',
-    boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
-    textAlign: 'center',
-    fontFamily: 'Arial, sans-serif',
+    display: 'flex',
+    justifyContent: 'center',
+    alignItems: 'center',
+    minHeight: '100vh',
+    backgroundColor: '#f8fafc',
+    padding: '20px',
+    fontFamily: 'system-ui, -apple-system, sans-serif',
   },
-  icon: { fontSize: '48px', marginBottom: '16px' },
+  card: {
+    width: '100%',
+    maxWidth: '480px',
+    backgroundColor: 'white',
+    borderRadius: '16px',
+    boxShadow: '0 10px 25px rgba(0, 0, 0, 0.1)',
+    padding: '40px 32px',
+    border: '1px solid #e5e7eb',
+  },
+  icon: {
+    fontSize: '48px',
+    marginBottom: '20px',
+    textAlign: 'center',
+    color: '#10b981',
+  },
   title: {
-    fontSize: '22px',
-    fontWeight: '600',
-    marginBottom: '4px',
+    fontSize: '28px',
+    fontWeight: '700',
+    marginBottom: '8px',
     color: '#111827',
     textAlign: 'center',
   },
   subtitle: {
-    fontSize: '14px',
-    color: '#6B7280',
+    fontSize: '15px',
+    color: '#6b7280',
     marginBottom: '24px',
     textAlign: 'center',
   },
-  input: {
-    width: '100%',
-    padding: '12px',
-    marginBottom: '15px',
-    borderRadius: '8px',
-    border: '1px solid #D1D5DB',
-    backgroundColor: '#FFFFFF',
-  },
-  button: {
-    width: '100%',
-    padding: '14px',
-    backgroundColor: '#3B82F6',
-    color: '#fff',
-    fontWeight: '600',
-    border: 'none',
-    borderRadius: '8px',
-    cursor: 'pointer',
-    marginTop: '24px',
-  },
-  footer: {
-    marginTop: '20px',
-    fontSize: '14px',
-    color: '#6B7280',
-    textAlign: 'center',
-  },
-  link: { color: '#3B82F6', fontWeight: '500', cursor: 'pointer' },
   roleContainer: {
     display: 'flex',
-    gap: '10px',
-    marginBottom: '15px'
+    gap: '12px',
+    marginBottom: '20px',
   },
   roleButton: {
     flex: 1,
-    padding: '10px',
-    border: '2px solid #ddd',
-    backgroundColor: '#f5f5f5',
-    borderRadius: '6px',
+    padding: '14px',
+    fontSize: '15px',
+    fontWeight: '500',
+    border: '2px solid #e5e7eb',
+    backgroundColor: '#f9fafb',
+    borderRadius: '10px',
     cursor: 'pointer',
-    fontSize: '14px',
-    fontWeight: '500'
+    transition: 'all 0.2s ease',
+    color: '#6b7280',
   },
   activeRoleButton: {
-    backgroundColor: '#4CAF50',
+    backgroundColor: '#10b981',
     color: 'white',
-    borderColor: '#4CAF50'
+    borderColor: '#10b981',
   },
   roleInfo: {
-    padding: '10px',
-    backgroundColor: '#f0f8ff',
-    borderRadius: '6px',
-    marginBottom: '20px',
+    padding: '16px',
+    backgroundColor: '#f0f9ff',
+    borderRadius: '10px',
+    marginBottom: '24px',
     fontSize: '14px',
-    color: '#333'
+    color: '#0369a1',
+    border: '1px solid #bae6fd',
+  },
+  form: {
+    width: '100%',
+  },
+  inputGroup: {
+    marginBottom: '20px',
+  },
+  label: {
+    display: 'block',
+    fontSize: '14px',
+    fontWeight: '500',
+    color: '#374151',
+    marginBottom: '6px',
+  },
+  input: {
+    width: '100%',
+    padding: '12px 16px',
+    fontSize: '15px',
+    border: '1px solid #d1d5db',
+    borderRadius: '10px',
+    backgroundColor: '#f9fafb',
+    transition: 'all 0.2s ease',
+    boxSizing: 'border-box',
+  },
+  passwordWrapper: {
+    position: 'relative',
+    width: '100%',
+  },
+  passwordInput: {
+    width: '100%',
+    padding: '12px 48px 12px 16px',
+    fontSize: '15px',
+    border: '1px solid #d1d5db',
+    borderRadius: '10px',
+    backgroundColor: '#f9fafb',
+    transition: 'all 0.2s ease',
+    boxSizing: 'border-box',
+  },
+  passwordToggle: {
+    position: 'absolute',
+    right: '12px',
+    top: '50%',
+    transform: 'translateY(-50%)',
+    background: 'none',
+    border: 'none',
+    cursor: 'pointer',
+    fontSize: '18px',
+    color: '#6b7280',
+    padding: '4px',
+    borderRadius: '4px',
+    transition: 'color 0.2s ease',
+  },
+  button: {
+    width: '100%',
+    padding: '16px',
+    fontSize: '16px',
+    fontWeight: '600',
+    color: 'white',
+    backgroundColor: '#10b981',
+    border: 'none',
+    borderRadius: '10px',
+    cursor: 'pointer',
+    marginTop: '16px',
+    transition: 'background-color 0.2s ease',
+  },
+  footer: {
+    marginTop: '24px',
+    fontSize: '14px',
+    color: '#6b7280',
+    textAlign: 'center',
+  },
+  link: {
+    color: '#10b981',
+    fontWeight: '600',
+    cursor: 'pointer',
+    textDecoration: 'underline',
+    transition: 'color 0.2s ease',
   },
 };
+
+// Add CSS for focus states
+const signupStyleSheet = document.createElement('style');
+signupStyleSheet.textContent = `
+  input:focus {
+    outline: none;
+    border-color: #10b981;
+    box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.1);
+    background-color: white;
+  }
+  
+  button:hover:not(:disabled) {
+    opacity: 0.9;
+  }
+  
+  .roleButton:hover {
+    border-color: #10b981;
+    color: #10b981;
+  }
+  
+  .passwordToggle:hover {
+    color: #10b981;
+    background-color: #f3f4f6;
+  }
+`;
+document.head.appendChild(signupStyleSheet);

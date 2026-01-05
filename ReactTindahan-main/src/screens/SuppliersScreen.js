@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { db } from '../db';
+import { dataService } from '../services/DataService';
 import { useLocation } from 'react-router-dom';
 
 export default function SuppliersScreen({ userMode }) {
@@ -56,20 +56,23 @@ export default function SuppliersScreen({ userMode }) {
     try {
       setDeletedItemsLoading(true);
       
-      const deletedSuppliersData = await db.backup
-        .where('backup_type')
-        .equals('deleted_supplier')
-        .filter(item => !item.restored_at && !item.confirmed_at)
-        .reverse()
-        .toArray();
+      // CHANGED: Use DataService
+      const deletedSuppliersData = await dataService.getAll('backup');
+      const filteredData = deletedSuppliersData
+        .filter(item => 
+          item.backup_type === 'deleted_supplier' && 
+          !item.restored_at && 
+          !item.confirmed_at
+        )
+        .reverse();
       
-      setDeletedSuppliers(deletedSuppliersData);
+      setDeletedSuppliers(filteredData);
       
       // Count new items (deleted in last 7 days)
       const sevenDaysAgo = new Date();
       sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
       
-      const newDeletedCount = deletedSuppliersData
+      const newDeletedCount = filteredData
         .filter(item => new Date(item.created_at) > sevenDaysAgo)
         .length;
       
@@ -89,7 +92,8 @@ export default function SuppliersScreen({ userMode }) {
         user_id: user?.user_id
       });
 
-      const list = await db.suppliers.toArray();
+      // CHANGED: Use DataService
+      const list = await dataService.getSuppliers();
       setSuppliers(list);
     } catch (err) {
       console.error('Error fetching suppliers:', err);
@@ -109,9 +113,10 @@ export default function SuppliersScreen({ userMode }) {
     
     try {
       if (editingId) {
-        const oldSupplier = await db.suppliers.get(editingId);
+        const oldSupplier = await dataService.getById('suppliers', editingId);
         
-        await db.suppliers.update(editingId, { 
+        // CHANGED: Use DataService
+        await dataService.update('suppliers', editingId, { 
           name, 
           contact_info: contact, 
           address 
@@ -125,7 +130,8 @@ export default function SuppliersScreen({ userMode }) {
           username: user?.username
         });
       } else {
-        const supplierId = await db.suppliers.add({ 
+        // CHANGED: Use DataService
+        const supplierId = await dataService.addSupplier({ 
           name, 
           contact_info: contact, 
           address,
@@ -179,24 +185,21 @@ export default function SuppliersScreen({ userMode }) {
     if (!window.confirm('Are you sure you want to delete this supplier? This will be moved to recycle bin.')) return;
     
     try {
-      const supplier = await db.suppliers.get(id);
+      const supplier = await dataService.getById('suppliers', id);
       if (!supplier) return;
       
       // Check if supplier is referenced in other tables
-      const resupplies = await db.resupplied_items
-        .where('supplier_id')
-        .equals(id)
-        .toArray();
+      const resupplies = await dataService.getAll('resupplied_items', { 
+        where: { supplier_id: id } 
+      });
       
-      const inventory = await db.inventory
-        .where('supplier_id')
-        .equals(id)
-        .toArray();
+      const inventory = await dataService.getAll('inventory', { 
+        where: { supplier_id: id } 
+      });
       
-      const stockCards = await db.stock_card
-        .where('supplier_id')
-        .equals(id)
-        .toArray();
+      const stockCards = await dataService.getAll('stock_card', { 
+        where: { supplier_id: id } 
+      });
       
       if (resupplies.length > 0 || inventory.length > 0 || stockCards.length > 0) {
         if (!window.confirm(`This supplier is referenced in ${resupplies.length + inventory.length + stockCards.length} record(s). References will remain but show "Deleted Supplier". Continue?`)) {
@@ -205,7 +208,7 @@ export default function SuppliersScreen({ userMode }) {
       }
       
       // Store deleted supplier in backup table
-      await db.backup.add({
+      await dataService.add('backup', {
         user_id: user?.user_id,
         username: user?.username,
         backup_name: `DELETED_SUPPLIER_${supplier.name}`,
@@ -219,7 +222,7 @@ export default function SuppliersScreen({ userMode }) {
       });
       
       // Now delete from original table
-      await db.suppliers.delete(id);
+      await dataService.delete('suppliers', id);
       
       // ✅ FIXED: Just log to console
       console.log(`[AUDIT] DELETE_SUPPLIER_TO_RECYCLE`, {
@@ -261,15 +264,15 @@ export default function SuppliersScreen({ userMode }) {
     if (!window.confirm(`Are you sure you want to restore supplier "${details.name}"?`)) return;
     
     try {
-      // Restore supplier
-      const supplierId = await db.suppliers.add({
+      // Restore supplier using DataService
+      const supplierId = await dataService.addSupplier({
         ...details,
         created_at: new Date().toISOString(),
         created_by: `${deletedItem.username} (restored)`
       });
       
       // Update backup record
-      await db.backup.update(deletedItem.backup_id, {
+      await dataService.update('backup', deletedItem.backup_id, {
         restored_at: new Date().toISOString(),
         restored_by: user?.username
       });
@@ -294,7 +297,7 @@ export default function SuppliersScreen({ userMode }) {
     
     try {
       // Mark as confirmed deletion
-      await db.backup.update(deletedItem.backup_id, {
+      await dataService.update('backup', deletedItem.backup_id, {
         confirmed_at: new Date().toISOString(),
         confirmed_by: user?.username
       });
@@ -363,6 +366,7 @@ export default function SuppliersScreen({ userMode }) {
     }
   };
 
+  // All styles remain the same...
   return (
     <div style={styles.container}>
       <div style={styles.header}>
