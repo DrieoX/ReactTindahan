@@ -9,11 +9,27 @@ import ResupplyScreen from './screens/ResupplyScreen';
 import SalesScreen from './screens/SalesScreen';
 import ReportsScreen from './screens/ReportsScreen';
 import SuppliersScreen from './screens/SuppliersScreen';
-import BackupScreen from './screens/BackupScreen'; // Import BackupScreen
+import BackupScreen from './screens/BackupScreen';
 import MainLayout from './components/MainLayout';
 
 import { db } from './db';
-import { runDailyBackup } from './services/autoBackup';
+import { initAutoBackup, checkAndRunBackup } from './services/autoBackup';
+
+// 🔐 Capacitor storage permission - Dynamically import to avoid build errors
+let Filesystem;
+const isCapacitor = typeof window !== 'undefined' && window.Capacitor;
+
+if (isCapacitor) {
+  try {
+    import('@capacitor/filesystem').then(module => {
+      Filesystem = module.Filesystem;
+    }).catch(error => {
+      console.log('Filesystem plugin not available:', error);
+    });
+  } catch (error) {
+    console.log('Capacitor import failed, running in web mode');
+  }
+}
 
 // 🔒 Protected Route Middleware
 function ProtectedRoute({ element, userMode, allowedRoles = [] }) {
@@ -23,7 +39,6 @@ function ProtectedRoute({ element, userMode, allowedRoles = [] }) {
     return <Navigate to="/" replace />;
   }
   
-  // Check if route requires specific role
   if (allowedRoles.length > 0 && !allowedRoles.includes(user.role)) {
     return <Navigate to="/dashboard" replace />;
   }
@@ -61,7 +76,6 @@ function ServerStack({ handleLogout, userMode }) {
         <Route path="/sales" element={<SalesScreen />} />
         <Route path="/reports" element={<ReportsScreen />} />
         <Route path="/suppliers" element={<SuppliersScreen />} />
-        {/* Only show backup screen for owners */}
         {isOwner && <Route path="/backup" element={<BackupScreen />} />}
         <Route path="*" element={<Navigate to="/dashboard" />} />
       </Routes>
@@ -82,20 +96,66 @@ function AuthStack({ setUserMode }) {
 
 export default function App() {
   const [userMode, setUserMode] = useState(null);
-  const [loading, setLoading] = useState(true); // ⏳ Prevent white screen
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const init = async () => {
       try {
+        // Initialize auto backup system
+        initAutoBackup();
+        
+        // 🔐 REQUEST STORAGE PERMISSION (Capacitor Android/iOS)
+        if (isCapacitor && Filesystem) {
+          try {
+            // Check if we have permission
+            const hasPermission = await Filesystem.checkPermissions();
+            
+            // Request permission if needed
+            if (hasPermission.publicStorage !== 'granted') {
+              try {
+                await Filesystem.requestPermissions();
+                console.log('✅ Storage permission requested');
+              } catch (permError) {
+                console.warn('⚠️ Permission request failed (may not be needed):', permError);
+              }
+            } else {
+              console.log('✅ Storage permission already granted');
+            }
+          } catch (permissionError) {
+            console.warn('⚠️ Permission check failed, continuing:', permissionError);
+          }
+        }
+
+        // Initialize database
         await db.open();
         console.log('✅ Database initialized');
+
+        // Restore user mode from localStorage
+        const savedMode = localStorage.getItem('userMode');
+        if (savedMode && (savedMode === 'client' || savedMode === 'server')) {
+          setUserMode(savedMode);
+        }
+
+        setLoading(false);
+        
+        // Schedule auto backup check for owners
+        // Wait 5 seconds for app to fully initialize
+        setTimeout(() => {
+          checkAndRunBackup().then(success => {
+            if (success) {
+              console.log('✅ Auto backup completed on startup');
+            } else {
+              console.log('ℹ️ Auto backup not needed or not run');
+            }
+          }).catch(error => {
+            console.error('❌ Auto backup check failed:', error);
+          });
+        }, 5000);
+        
       } catch (err) {
-        console.error('❌ Error initializing DB:', err);
+        console.error('❌ Initialization error:', err);
+        setLoading(false);
       }
-      await runDailyBackup();
-      const savedMode = localStorage.getItem('userMode');
-      if (savedMode) setUserMode(savedMode);
-      setLoading(false);
     };
 
     init();
@@ -106,14 +166,39 @@ export default function App() {
     localStorage.removeItem('user');
     localStorage.removeItem('userMode');
     sessionStorage.clear();
-    window.location.href = '/'; // full reset
+    window.location.href = '/';
   };
 
   if (loading) {
-    // Prevent blank flash
     return (
-      <div style={{ textAlign: 'center', marginTop: '40vh', fontSize: 20 }}>
-        Loading TindaTrack...
+      <div style={{ 
+        textAlign: 'center', 
+        marginTop: '40vh', 
+        fontSize: 20,
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center'
+      }}>
+        <div style={{ marginBottom: '20px' }}>
+          Loading TindaTrack...
+        </div>
+        <div 
+          style={{
+            width: '50px',
+            height: '50px',
+            border: '5px solid #f3f3f3',
+            borderTop: '5px solid #3498db',
+            borderRadius: '50%',
+            animation: 'spin 1s linear infinite'
+          }}
+        />
+        <style>{`
+          @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+          }
+        `}</style>
       </div>
     );
   }
@@ -122,12 +207,8 @@ export default function App() {
     <Router>
       <Routes>
         {!userMode ? (
-          // Not logged in
-          <>
-            <Route path="/*" element={<AuthStack setUserMode={setUserMode} />} />
-          </>
+          <Route path="/*" element={<AuthStack setUserMode={setUserMode} />} />
         ) : userMode === 'server' ? (
-          // Server user, protected
           <Route
             path="/*"
             element={
@@ -138,7 +219,6 @@ export default function App() {
             }
           />
         ) : (
-          // Client user, protected
           <Route
             path="/*"
             element={

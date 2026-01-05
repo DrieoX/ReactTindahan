@@ -1,19 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { createBackup, restoreBackup } from '../services/backupService';
+import { createBackup, restoreBackup, downloadBackupFile, logAudit } from '../services/backupService';
+import { runDailyBackup } from '../services/autoBackup';
 import { db } from '../db';
-// Using try-catch for Capacitor to handle version issues
-let Filesystem, Share, Device;
-try {
-  // Try to import Capacitor plugins
-  const capFilesystem = require('@capacitor/filesystem');
-  const capShare = require('@capacitor/share');
-  const capDevice = require('@capacitor/device');
-  Filesystem = capFilesystem.Filesystem;
-  Share = capShare.Share;
-  Device = capDevice.Device;
-} catch (error) {
-  console.log('Capacitor plugins not available, running in web mode');
-}
 
 export default function BackupScreen() {
   const user = JSON.parse(localStorage.getItem('user') || '{}');
@@ -26,6 +14,7 @@ export default function BackupScreen() {
   const [selectedFile, setSelectedFile] = useState(null);
   const [isMobile, setIsMobile] = useState(false);
   const [capAvailable, setCapAvailable] = useState(false);
+  const [lastDownloadInfo, setLastDownloadInfo] = useState(null);
 
   useEffect(() => {
     checkCapacitor();
@@ -34,83 +23,39 @@ export default function BackupScreen() {
 
   const checkCapacitor = async () => {
     try {
-      // Check if running on mobile device
       const isMobileDevice = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
       setIsMobile(isMobileDevice);
       
-      // Check if Capacitor plugins are available
-      if (Device && Filesystem && Share) {
-        const info = await Device.getInfo();
-        setCapAvailable(info.platform !== 'web');
-      }
+      // Check if running in Capacitor environment
+      const isCapacitor = typeof window !== 'undefined' && window.Capacitor;
+      setCapAvailable(isCapacitor);
+      
+      console.log('Capacitor available:', isCapacitor, 'Mobile:', isMobileDevice);
     } catch (error) {
       console.log('Capacitor check failed, using web mode:', error);
       setCapAvailable(false);
     }
   };
 
-  const logAudit = async (action, details = {}) => {
-    try {
-      await db.backup.add({
-        user_id: user.user_id,
-        username: user.username || 'Unknown', // ✅ FIXED: Store username
-        backup_name: `AUDIT_${action}`,
-        backup_type: 'audit',
-        created_at: new Date().toISOString(),
-        schema_version: '5',
-        details: JSON.stringify(details)
-      });
-    } catch (error) {
-      console.error('Failed to log audit:', error);
-    }
-  };
-
   const fetchBackupHistory = async () => {
     try {
-      await logAudit('VIEW_BACKUP_HISTORY', {
-        user_id: user.user_id,
-        username: user.username
-      });
-
-      const backups = await db.backup
-        .orderBy('created_at')
-        .reverse()
-        .limit(50)
-        .toArray();
-      setBackupHistory(backups);
+      // Fetch only actual backups (not audit logs)
+      const allBackups = await db.backup.toArray();
+      const filteredBackups = allBackups
+        .filter(backup => 
+          backup.backup_type !== 'audit' && 
+          ['full', 'restore', 'deleted_product', 'deleted_category'].includes(backup.backup_type)
+        )
+        .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+        .slice(0, 50);
+      
+      setBackupHistory(filteredBackups);
     } catch (error) {
       console.error('Error fetching backup history:', error);
-      await logAudit('VIEW_BACKUP_HISTORY_ERROR', {
-        error: error.message,
-        user_id: user.user_id,
-        username: user.username
+      setMessage({ 
+        type: 'error', 
+        text: `Failed to load backup history: ${error.message}` 
       });
-    }
-  };
-
-  const downloadBackupFile = (backupData, fileName) => {
-    try {
-      // Create blob and download link
-      const blob = new Blob([backupData], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = fileName;
-      link.style.display = 'none';
-      document.body.appendChild(link);
-      
-      // Trigger download
-      link.click();
-      
-      // Clean up
-      document.body.removeChild(link);
-      setTimeout(() => URL.revokeObjectURL(url), 100);
-      
-      return { success: true, fileName };
-    } catch (error) {
-      console.error('Download failed:', error);
-      return { success: false, error: error.message };
     }
   };
 
@@ -124,30 +69,43 @@ export default function BackupScreen() {
     setMessage({ type: '', text: '' });
 
     try {
-      await logAudit('CREATE_BACKUP_ATTEMPT', {
-        backup_name: backupName,
-        user_id: user.user_id,
-        username: user.username
-      });
-
-      // Use the backup service function
       const result = await createBackup(user.user_id, user.username, backupName);
       
       if (result.success) {
-        // Download the file
-        const downloadResult = downloadBackupFile(result.backupData, result.fileName);
+        // Generate a better filename with timestamp for better visibility
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+        const betterFileName = `TindaTrack_${backupName.replace(/\s+/g, '_')}_${timestamp}.json`;
+        
+        const downloadResult = await downloadBackupFile(result.json, betterFileName);
         
         if (downloadResult.success) {
+          let successMessage = `✅ Backup created successfully!\n`;
+          successMessage += `📁 File: ${betterFileName}\n`;
+          successMessage += `📦 Size: ${formatFileSize(result.json.length)}\n\n`;
+          
+          if (capAvailable) {
+            // Show simplified location info
+            successMessage += `📍 **Saved to:** ${downloadResult.location || 'Documents folder'}\n`;
+            successMessage += `📱 **Find it in:** Files app → Documents folder\n`;
+            successMessage += `🔍 **Tip:** Look for files starting with "TindaTrack_"`;
+            
+            // Store download info for user reference
+            setLastDownloadInfo({
+              fileName: betterFileName,
+              location: downloadResult.location || 'Documents folder',
+              timestamp: new Date().toLocaleString(),
+              size: formatFileSize(result.json.length)
+            });
+          } else if (isMobile) {
+            successMessage += `📱 Check your Downloads folder\n`;
+            successMessage += `🔍 Enable "Show hidden files" in file manager`;
+          } else {
+            successMessage += `💾 File downloaded to your default download folder`;
+          }
+          
           setMessage({ 
             type: 'success', 
-            text: `Backup created successfully! File: ${result.fileName} downloaded.` 
-          });
-          
-          await logAudit('CREATE_BACKUP_SUCCESS', {
-            backup_name: backupName,
-            file_name: result.fileName,
-            user_id: user.user_id,
-            username: user.username
+            text: successMessage 
           });
           
           fetchBackupHistory();
@@ -162,14 +120,7 @@ export default function BackupScreen() {
       console.error('Backup error:', error);
       setMessage({ 
         type: 'error', 
-        text: `Backup failed: ${error.message}`
-      });
-
-      await logAudit('CREATE_BACKUP_ERROR', {
-        error: error.message,
-        backup_name: backupName,
-        user_id: user.user_id,
-        username: user.username
+        text: `❌ Backup failed: ${error.message}\n\nTry using a different file name or check storage permissions.`
       });
     } finally {
       setCreatingBackup(false);
@@ -181,7 +132,7 @@ export default function BackupScreen() {
     if (!file) return;
 
     if (file.type !== 'application/json' && !file.name.endsWith('.json')) {
-      setMessage({ type: 'error', text: 'Please select a valid JSON file' });
+      setMessage({ type: 'error', text: 'Please select a valid JSON file (.json)' });
       return;
     }
 
@@ -204,24 +155,12 @@ export default function BackupScreen() {
     setMessage({ type: '', text: '' });
 
     try {
-      await logAudit('RESTORE_BACKUP_ATTEMPT', {
-        file_name: selectedFile.name,
-        user_id: user.user_id,
-        username: user.username
-      });
-
       const result = await restoreBackup(selectedFile, user.user_id, user.username);
       
       if (result.success) {
         setMessage({ 
           type: 'success', 
-          text: 'Backup restored successfully! Refreshing...' 
-        });
-
-        await logAudit('RESTORE_BACKUP_SUCCESS', {
-          file_name: selectedFile.name,
-          user_id: user.user_id,
-          username: user.username
+          text: '✅ Backup restored successfully! Page will refresh in 2 seconds...' 
         });
 
         setTimeout(() => {
@@ -234,20 +173,39 @@ export default function BackupScreen() {
       console.error('Restore error:', error);
       setMessage({ 
         type: 'error', 
-        text: `Restore failed: ${error.message}. Please check the backup file.` 
-      });
-
-      await logAudit('RESTORE_BACKUP_FAILED', {
-        error: error.message,
-        file_name: selectedFile.name,
-        user_id: user.user_id,
-        username: user.username
+        text: `❌ Restore failed: ${error.message}\n\nPlease ensure:\n1. It's a valid TindaTrack backup file\n2. File is not corrupted\n3. You're using the same app version` 
       });
     } finally {
       setRestoring(false);
       setShowConfirmRestore(false);
       setSelectedFile(null);
       fetchBackupHistory();
+    }
+  };
+
+  const handleRunAutoBackup = async () => {
+    setCreatingBackup(true);
+    try {
+      const success = await runDailyBackup();
+      if (success) {
+        setMessage({ 
+          type: 'success', 
+          text: '✅ Automatic backup completed!\nCheck your Documents folder for the file.' 
+        });
+        fetchBackupHistory();
+      } else {
+        setMessage({ 
+          type: 'error', 
+          text: '⚠️ Automatic backup skipped or failed.\nMake sure:\n1. You are logged in as Owner\n2. Not already backed up today\n3. Storage permissions are granted' 
+        });
+      }
+    } catch (error) {
+      setMessage({ 
+        type: 'error', 
+        text: `❌ Auto backup error: ${error.message}` 
+      });
+    } finally {
+      setCreatingBackup(false);
     }
   };
 
@@ -276,7 +234,6 @@ export default function BackupScreen() {
     switch (backupType) {
       case 'full': return '📦';
       case 'restore': return '🔄';
-      case 'audit': return '📊';
       case 'deleted_product': return '🗑️📦';
       case 'deleted_category': return '🗑️🏷️';
       default: return '📄';
@@ -287,14 +244,63 @@ export default function BackupScreen() {
     setMessage({ type: '', text: '' });
   };
 
+  const showDownloadHelp = () => {
+    setMessage({
+      type: 'info',
+      text: `📱 **Finding Downloaded Backups on Mobile:**\n
+1. Open your **Files** or **File Manager** app
+2. Navigate to **Documents** folder (NOT Downloads)
+3. Look for files starting with **"TindaTrack_"**
+4. Files are named like: TindaTrack_Monthly_Backup_2024-01-15T10-30-00Z.json\n
+📍 **On Android:** Files app → Browse → Documents
+📍 **On iOS:** Files app → Browse → On My iPhone/iPad → TindaTrack app → Documents\n
+💡 **Tip:** If you don't see the file, try restarting the app and creating the backup again.`
+    });
+  };
+
   return (
     <div style={styles.container}>
       <div style={styles.headerSection}>
         <h1 style={styles.header}>Backup & Restore</h1>
         <p style={styles.subheader}>
-          Download backups to your computer or device
+          {capAvailable 
+            ? 'Backup to device storage or share'
+            : 'Download backups to your computer'}
         </p>
+        {capAvailable && (
+          <div style={styles.mobileNotice}>
+            📱 Mobile mode: Backups saved to Documents folder
+            <button 
+              onClick={showDownloadHelp}
+              style={styles.helpButton}
+              title="How to find downloaded files"
+            >
+              ?
+            </button>
+          </div>
+        )}
       </div>
+
+      {/* Last Download Info */}
+      {lastDownloadInfo && (
+        <div style={styles.downloadInfo}>
+          <div style={styles.downloadInfoHeader}>
+            <span>📥 Last Download Info</span>
+            <button 
+              onClick={() => setLastDownloadInfo(null)}
+              style={styles.closeInfoButton}
+            >
+              ✕
+            </button>
+          </div>
+          <div style={styles.downloadInfoContent}>
+            <p><strong>File:</strong> {lastDownloadInfo.fileName}</p>
+            <p><strong>Saved to:</strong> {lastDownloadInfo.location}</p>
+            <p><strong>Time:</strong> {lastDownloadInfo.timestamp}</p>
+            <p><strong>Size:</strong> {lastDownloadInfo.size}</p>
+          </div>
+        </div>
+      )}
 
       {/* Stats Cards */}
       <div style={styles.statsContainer}>
@@ -334,23 +340,27 @@ export default function BackupScreen() {
           style={{
             ...styles.message,
             backgroundColor: message.type === 'success' ? '#d1fae5' : 
-                           message.type === 'error' ? '#fee2e2' : '#fef3c7',
+                           message.type === 'error' ? '#fee2e2' : 
+                           message.type === 'info' ? '#dbeafe' : '#fef3c7',
             color: message.type === 'success' ? '#065f46' : 
-                   message.type === 'error' ? '#991b1b' : '#92400e',
+                   message.type === 'error' ? '#991b1b' : 
+                   message.type === 'info' ? '#1e40af' : '#92400e',
             borderColor: message.type === 'success' ? '#10b981' : 
-                         message.type === 'error' ? '#ef4444' : '#f59e0b'
+                         message.type === 'error' ? '#ef4444' : 
+                         message.type === 'info' ? '#3b82f6' : '#f59e0b'
           }}
           onClick={clearMessage}
         >
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <span style={{ fontSize: '16px' }}>
-              {message.type === 'success' ? '✅' : '⚠️'}
+          <div style={{ display: 'flex', alignItems: 'flex-start', gap: '8px' }}>
+            <span style={{ fontSize: '16px', marginTop: '2px' }}>
+              {message.type === 'success' ? '✅' : 
+               message.type === 'error' ? '❌' : 
+               message.type === 'info' ? '💡' : '⚠️'}
             </span>
-            <span>{message.text}</span>
+            <span style={{ whiteSpace: 'pre-line', flex: 1 }}>{message.text}</span>
             <button 
               onClick={clearMessage}
               style={{
-                marginLeft: 'auto',
                 background: 'none',
                 border: 'none',
                 color: 'inherit',
@@ -393,11 +403,13 @@ export default function BackupScreen() {
                   <div style={styles.spinner}></div>
                   Creating...
                 </span>
-              ) : '💾 Create & Download Backup'}
+              ) : capAvailable ? '💾 Create & Save to Device' : '💾 Create & Download Backup'}
             </button>
           </div>
           <p style={styles.helpText}>
-            Backup will be downloaded as a JSON file. Save it in a safe location.
+            {capAvailable 
+              ? 'Backup will be saved to Documents folder. Files are named: TindaTrack_[Name]_[Timestamp].json'
+              : 'Backup will be downloaded as a JSON file. Save it in a safe location.'}
           </p>
         </div>
 
@@ -423,8 +435,8 @@ export default function BackupScreen() {
                 }}
               >
                 {selectedFile 
-                  ? selectedFile.name 
-                  : 'Choose backup file (.json)'}
+                  ? `📁 ${selectedFile.name}` 
+                  : '📁 Choose backup file (.json)'}
               </label>
               {selectedFile && (
                 <button
@@ -463,13 +475,23 @@ export default function BackupScreen() {
         <div style={styles.section}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <h3 style={styles.sectionHeader}>Backup History</h3>
-            <button 
-              onClick={fetchBackupHistory}
-              style={styles.refreshButton}
-              title="Refresh history"
-            >
-              🔄 Refresh
-            </button>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <button 
+                onClick={handleRunAutoBackup}
+                style={styles.secondaryButton}
+                title="Create automatic backup"
+                disabled={creatingBackup}
+              >
+                ⚡ Auto Backup
+              </button>
+              <button 
+                onClick={fetchBackupHistory}
+                style={styles.refreshButton}
+                title="Refresh history"
+              >
+                🔄 Refresh
+              </button>
+            </div>
           </div>
           
           {backupHistory.length === 0 ? (
@@ -509,7 +531,7 @@ export default function BackupScreen() {
                           )}
                         </td>
                         <td style={styles.tableCell}>
-                          {backup.username || 'Unknown'} {/* ✅ Now shows username */}
+                          {backup.username || 'System'}
                           {backup.user_id && (
                             <div style={styles.userId}>ID: {backup.user_id}</div>
                           )}
@@ -580,292 +602,423 @@ export default function BackupScreen() {
     </div>
   );
 }
+
 const styles = {
-  container: { 
-    padding: '16px', 
-    backgroundColor: '#f8fafc', 
-    minHeight: '100vh'
+  container: {
+    padding: '20px',
+    maxWidth: '1200px',
+    margin: '0 auto',
+    fontFamily: 'Arial, sans-serif',
+    width: '100%',
+    boxSizing: 'border-box',
+    overflowX: 'hidden'
   },
   headerSection: {
-    marginBottom: '24px'
+    textAlign: 'center',
+    marginBottom: '30px',
+    width: '100%',
+    boxSizing: 'border-box'
   },
   header: {
-    fontSize: '28px',
-    fontWeight: 'bold',
-    color: '#1e293b',
-    marginBottom: '8px'
+    fontSize: '32px',
+    color: '#2c3e50',
+    marginBottom: '10px',
+    '@media (max-width: 768px)': {
+      fontSize: '24px'
+    }
   },
   subheader: {
     fontSize: '16px',
-    color: '#64748b',
-    marginBottom: '8px'
+    color: '#7f8c8d',
+    marginBottom: '10px',
+    '@media (max-width: 768px)': {
+      fontSize: '14px'
+    }
   },
-  mobileNote: {
-    backgroundColor: '#e0f2fe',
-    border: '1px solid #0ea5e9',
+  mobileNotice: {
+    backgroundColor: '#e3f2fd',
+    padding: '10px 15px',
     borderRadius: '8px',
-    padding: '12px',
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '10px',
+    marginTop: '10px',
+    boxSizing: 'border-box',
+    width: '100%',
+    maxWidth: '100%'
+  },
+  helpButton: {
+    backgroundColor: '#2196f3',
+    color: 'white',
+    border: 'none',
+    borderRadius: '50%',
+    width: '24px',
+    height: '24px',
+    cursor: 'pointer',
     fontSize: '14px',
-    color: '#0369a1',
-    marginTop: '8px'
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0
+  },
+  downloadInfo: {
+    backgroundColor: '#e8f5e9',
+    border: '1px solid #4caf50',
+    borderRadius: '8px',
+    padding: '15px',
+    marginBottom: '20px',
+    width: '100%',
+    boxSizing: 'border-box'
+  },
+  downloadInfoHeader: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: '10px',
+    width: '100%'
+  },
+  downloadInfoContent: {
+    fontSize: '14px'
+  },
+  closeInfoButton: {
+    backgroundColor: 'transparent',
+    border: 'none',
+    fontSize: '16px',
+    cursor: 'pointer',
+    color: '#666'
   },
   statsContainer: {
     display: 'grid',
     gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
-    gap: '16px',
-    marginBottom: '24px'
+    gap: '20px',
+    marginBottom: '30px',
+    width: '100%',
+    boxSizing: 'border-box',
+    '@media (max-width: 768px)': {
+      gridTemplateColumns: 'repeat(2, 1fr)',
+      gap: '15px'
+    },
+    '@media (max-width: 480px)': {
+      gridTemplateColumns: '1fr'
+    }
   },
   statCard: {
-    backgroundColor: '#fff',
-    border: '1px solid #e2e8f0',
-    borderRadius: '12px',
+    backgroundColor: 'white',
+    border: '1px solid #e0e0e0',
+    borderRadius: '10px',
     padding: '20px',
-    boxShadow: '0 1px 3px rgba(0, 0, 0, 0.05)',
     display: 'flex',
     alignItems: 'center',
-    gap: '16px'
+    gap: '15px',
+    boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
+    boxSizing: 'border-box',
+    width: '100%',
+    overflow: 'hidden',
+    '@media (max-width: 768px)': {
+      padding: '15px',
+      gap: '12px'
+    }
   },
   statIcon: {
     fontSize: '32px',
-    width: '60px',
-    height: '60px',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#f1f5f9',
-    borderRadius: '12px'
+    flexShrink: 0,
+    '@media (max-width: 768px)': {
+      fontSize: '28px'
+    }
   },
   statValue: {
     fontSize: '24px',
     fontWeight: 'bold',
-    color: '#1e293b',
-    marginBottom: '4px'
+    margin: 0,
+    color: '#2c3e50',
+    '@media (max-width: 768px)': {
+      fontSize: '20px'
+    }
   },
   statLabel: {
     fontSize: '14px',
-    color: '#64748b'
-  },
-  message: {
-    padding: '12px 16px',
-    borderRadius: '8px',
-    marginBottom: '24px',
-    border: '2px solid',
-    fontSize: '14px',
-    cursor: 'pointer',
-    transition: 'opacity 0.2s',
-    '&:hover': {
-      opacity: 0.9
+    color: '#7f8c8d',
+    margin: 0,
+    '@media (max-width: 768px)': {
+      fontSize: '13px'
     }
   },
+  message: {
+    padding: '15px',
+    borderRadius: '8px',
+    marginBottom: '20px',
+    border: '1px solid',
+    cursor: 'pointer',
+    width: '100%',
+    boxSizing: 'border-box'
+  },
   contentContainer: {
-    backgroundColor: '#fff',
-    border: '1px solid #e2e8f0',
+    backgroundColor: 'white',
     borderRadius: '12px',
-    padding: '24px',
-    boxShadow: '0 1px 3px rgba(0, 0, 0, 0.05)'
+    padding: '30px',
+    boxShadow: '0 4px 6px rgba(0,0,0,0.1)',
+    width: '100%',
+    boxSizing: 'border-box',
+    overflow: 'hidden',
+    '@media (max-width: 768px)': {
+      padding: '20px'
+    }
   },
   section: {
-    marginBottom: '32px',
-    paddingBottom: '24px',
-    borderBottom: '1px solid #e2e8f0',
-    '&:last-child': {
-      borderBottom: 'none',
-      marginBottom: 0,
-      paddingBottom: 0
+    marginBottom: '40px',
+    width: '100%',
+    boxSizing: 'border-box',
+    '@media (max-width: 768px)': {
+      marginBottom: '30px'
     }
   },
   sectionHeader: {
     fontSize: '20px',
-    fontWeight: '600',
-    color: '#1e293b',
-    marginBottom: '16px'
+    color: '#2c3e50',
+    marginBottom: '20px',
+    paddingBottom: '10px',
+    borderBottom: '2px solid #f0f0f0',
+    '@media (max-width: 768px)': {
+      fontSize: '18px',
+      marginBottom: '15px'
+    }
   },
   backupForm: {
     display: 'flex',
-    gap: '12px',
-    marginBottom: '12px',
+    gap: '10px',
+    marginBottom: '10px',
+    width: '100%',
+    boxSizing: 'border-box',
     '@media (max-width: 768px)': {
-      flexDirection: 'column'
+      flexDirection: 'column',
+      gap: '15px'
     }
   },
   input: {
     flex: 1,
-    padding: '10px 16px',
-    borderRadius: '8px',
-    border: '1px solid #d1d5db',
-    fontSize: '14px',
-    '&:disabled': {
-      backgroundColor: '#f3f4f6',
-      cursor: 'not-allowed'
+    padding: '12px 15px',
+    border: '1px solid #ddd',
+    borderRadius: '6px',
+    fontSize: '16px',
+    width: '100%',
+    boxSizing: 'border-box',
+    '@media (max-width: 768px)': {
+      fontSize: '16px', // Prevent iOS zoom
+      width: '100%'
     }
   },
   primaryButton: {
-    backgroundColor: '#4f46e5',
+    backgroundColor: '#2196f3',
     color: 'white',
     border: 'none',
-    padding: '10px 24px',
-    borderRadius: '8px',
-    fontSize: '14px',
-    fontWeight: '500',
+    borderRadius: '6px',
+    padding: '12px 24px',
+    fontSize: '16px',
+    fontWeight: 'bold',
     cursor: 'pointer',
-    transition: 'background-color 0.2s',
-    minWidth: '200px',
-    '&:hover:not(:disabled)': {
-      backgroundColor: '#4338ca'
+    transition: 'background-color 0.3s',
+    whiteSpace: 'nowrap',
+    flexShrink: 0,
+    '@media (max-width: 768px)': {
+      width: '100%',
+      padding: '14px 20px',
+      fontSize: '16px'
     }
+  },
+  spinner: {
+    width: '16px',
+    height: '16px',
+    border: '2px solid #ffffff',
+    borderTop: '2px solid transparent',
+    borderRadius: '50%',
+    animation: 'spin 1s linear infinite'
   },
   helpText: {
     fontSize: '14px',
-    color: '#64748b',
-    lineHeight: '1.5'
+    color: '#666',
+    marginTop: '5px',
+    width: '100%',
+    boxSizing: 'border-box'
   },
   restoreForm: {
     display: 'flex',
     flexDirection: 'column',
-    gap: '16px',
-    marginBottom: '12px'
+    gap: '15px',
+    width: '100%',
+    boxSizing: 'border-box'
   },
   fileUpload: {
+    position: 'relative',
     display: 'flex',
     alignItems: 'center',
-    gap: '12px'
+    width: '100%',
+    boxSizing: 'border-box'
   },
   fileInput: {
     display: 'none'
   },
   fileLabel: {
     flex: 1,
-    padding: '10px 16px',
-    backgroundColor: '#f8fafc',
-    border: '2px dashed #d1d5db',
-    borderRadius: '8px',
-    fontSize: '14px',
-    color: '#64748b',
+    padding: '12px 15px',
+    border: '2px dashed #ddd',
+    borderRadius: '6px',
+    textAlign: 'center',
     cursor: 'pointer',
-    transition: 'border-color 0.2s',
-    '&:hover': {
-      borderColor: '#4f46e5'
-    }
+    backgroundColor: '#f9f9f9',
+    transition: 'all 0.3s',
+    width: '100%',
+    boxSizing: 'border-box'
   },
   clearButton: {
-    backgroundColor: '#f1f5f9',
-    color: '#64748b',
-    border: '1px solid #e2e8f0',
-    padding: '8px 12px',
-    borderRadius: '6px',
-    cursor: 'pointer',
-    fontSize: '14px',
-    '&:hover': {
-      backgroundColor: '#fee2e2',
-      color: '#ef4444'
-    }
-  },
-  warningButton: {
-    backgroundColor: '#f59e0b',
+    position: 'absolute',
+    right: '10px',
+    backgroundColor: '#ff4444',
     color: 'white',
     border: 'none',
-    padding: '10px 24px',
-    borderRadius: '8px',
-    fontSize: '14px',
-    fontWeight: '500',
+    borderRadius: '50%',
+    width: '24px',
+    height: '24px',
     cursor: 'pointer',
-    transition: 'background-color 0.2s',
-    alignSelf: 'flex-start',
-    '&:hover:not(:disabled)': {
-      backgroundColor: '#d97706'
+    fontSize: '12px'
+  },
+  warningButton: {
+    backgroundColor: '#ff9800',
+    color: 'white',
+    border: 'none',
+    borderRadius: '6px',
+    padding: '12px 24px',
+    fontSize: '16px',
+    fontWeight: 'bold',
+    cursor: 'pointer',
+    width: '100%',
+    boxSizing: 'border-box',
+    '@media (max-width: 768px)': {
+      width: '100%',
+      padding: '14px 20px'
     }
   },
   warningText: {
-    fontSize: '14px',
-    color: '#92400e',
-    backgroundColor: '#fffbeb',
+    backgroundColor: '#fff3cd',
+    border: '1px solid #ffecb5',
+    color: '#856404',
     padding: '12px',
-    borderRadius: '8px',
-    borderLeft: '4px solid #f59e0b'
+    borderRadius: '6px',
+    fontSize: '14px',
+    marginTop: '15px',
+    width: '100%',
+    boxSizing: 'border-box'
+  },
+  secondaryButton: {
+    backgroundColor: '#6c757d',
+    color: 'white',
+    border: 'none',
+    borderRadius: '6px',
+    padding: '8px 16px',
+    fontSize: '14px',
+    cursor: 'pointer',
+    whiteSpace: 'nowrap',
+    '@media (max-width: 768px)': {
+      width: '100%',
+      padding: '10px 20px',
+      fontSize: '15px'
+    }
+  },
+  refreshButton: {
+    backgroundColor: '#17a2b8',
+    color: 'white',
+    border: 'none',
+    borderRadius: '6px',
+    padding: '8px 16px',
+    fontSize: '14px',
+    cursor: 'pointer',
+    whiteSpace: 'nowrap',
+    '@media (max-width: 768px)': {
+      width: '100%',
+      padding: '10px 20px',
+      fontSize: '15px'
+    }
   },
   emptyState: {
     textAlign: 'center',
-    padding: '40px 20px'
+    padding: '40px',
+    color: '#7f8c8d',
+    width: '100%',
+    boxSizing: 'border-box'
   },
   emptyIcon: {
     fontSize: '48px',
-    marginBottom: '16px'
+    marginBottom: '10px'
   },
   emptyText: {
-    fontSize: '16px',
-    color: '#64748b',
-    marginBottom: '8px'
+    fontSize: '18px',
+    marginBottom: '5px'
   },
   emptySubtext: {
-    fontSize: '14px',
-    color: '#94a3b8'
+    fontSize: '14px'
   },
   tableContainer: {
-    overflowX: 'auto'
+    overflowX: 'auto',
+    width: '100%',
+    maxWidth: '100%',
+    WebkitOverflowScrolling: 'touch',
+    msOverflowStyle: '-ms-autohiding-scrollbar'
   },
   tableWrapper: {
-    minWidth: '600px'
+    minWidth: '800px',
+    width: '100%'
   },
   table: {
     width: '100%',
     borderCollapse: 'collapse'
   },
   tableHeader: {
-    backgroundColor: '#f8fafc'
+    backgroundColor: '#f8f9fa',
+    borderBottom: '2px solid #dee2e6'
   },
   tableHeaderCell: {
-    padding: '12px 16px',
+    padding: '12px',
     textAlign: 'left',
-    fontSize: '12px',
-    fontWeight: '600',
-    color: '#64748b',
-    textTransform: 'uppercase',
-    letterSpacing: '0.05em',
-    borderBottom: '2px solid #e2e8f0'
+    fontWeight: 'bold',
+    color: '#495057',
+    whiteSpace: 'nowrap',
+    '@media (max-width: 768px)': {
+      padding: '10px',
+      fontSize: '13px'
+    }
   },
   tableRowEven: {
-    backgroundColor: '#f8fafc'
+    backgroundColor: '#f8f9fa'
   },
   tableRowOdd: {
-    backgroundColor: '#fff'
+    backgroundColor: 'white'
   },
   tableCell: {
-    padding: '12px 16px',
-    fontSize: '14px',
-    borderBottom: '1px solid #e2e8f0'
+    padding: '12px',
+    borderBottom: '1px solid #dee2e6',
+    '@media (max-width: 768px)': {
+      padding: '10px',
+      fontSize: '13px'
+    }
   },
   typeBadge: {
-    display: 'inline-flex',
-    alignItems: 'center',
-    gap: '4px',
+    display: 'inline-block',
     padding: '4px 8px',
-    backgroundColor: '#f1f5f9',
-    borderRadius: '6px',
+    backgroundColor: '#e9ecef',
+    borderRadius: '4px',
     fontSize: '12px',
-    color: '#475569'
+    whiteSpace: 'nowrap'
   },
   fileName: {
     fontSize: '12px',
-    color: '#94a3b8',
+    color: '#666',
     marginTop: '4px',
     wordBreak: 'break-all'
   },
   userId: {
-    fontSize: '11px',
-    color: '#94a3b8',
-    marginTop: '2px'
-  },
-  refreshButton: {
-    backgroundColor: '#f1f5f9',
-    color: '#475569',
-    border: '1px solid #e2e8f0',
-    padding: '8px 16px',
-    borderRadius: '6px',
-    cursor: 'pointer',
-    fontSize: '14px',
-    '&:hover': {
-      backgroundColor: '#e2e8f0'
-    }
+    fontSize: '12px',
+    color: '#999',
+    marginTop: '2px',
+    wordBreak: 'break-all'
   },
   modalOverlay: {
     position: 'fixed',
@@ -873,121 +1026,124 @@ const styles = {
     left: 0,
     right: 0,
     bottom: 0,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    backgroundColor: 'rgba(0,0,0,0.5)',
     display: 'flex',
-    justifyContent: 'center',
     alignItems: 'center',
+    justifyContent: 'center',
     zIndex: 1000,
-    padding: '16px'
+    padding: '16px',
+    boxSizing: 'border-box'
   },
   modalContainer: {
-    backgroundColor: '#fff',
+    backgroundColor: 'white',
     borderRadius: '12px',
-    padding: '24px',
-    width: '100%',
+    padding: '30px',
     maxWidth: '500px',
-    boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)'
+    width: '90%',
+    boxSizing: 'border-box',
+    '@media (max-width: 768px)': {
+      padding: '20px',
+      width: '95%'
+    }
   },
   modalHeader: {
     fontSize: '20px',
-    fontWeight: '600',
-    color: '#1e293b',
-    marginBottom: '16px'
+    color: '#dc3545',
+    marginBottom: '20px',
+    '@media (max-width: 768px)': {
+      fontSize: '18px'
+    }
   },
   modalContent: {
-    marginBottom: '24px'
+    marginBottom: '30px',
+    width: '100%',
+    boxSizing: 'border-box'
   },
   modalText: {
-    fontSize: '14px',
-    color: '#64748b',
-    marginBottom: '16px',
-    lineHeight: '1.5'
+    fontSize: '16px',
+    marginBottom: '20px',
+    '@media (max-width: 768px)': {
+      fontSize: '15px'
+    }
   },
   modalWarningBox: {
-    backgroundColor: '#fef2f2',
-    border: '1px solid #fee2e2',
-    borderRadius: '8px',
-    padding: '16px',
-    marginBottom: '16px'
+    backgroundColor: '#fff3cd',
+    border: '1px solid #ffecb5',
+    borderRadius: '6px',
+    padding: '15px',
+    marginBottom: '20px',
+    width: '100%',
+    boxSizing: 'border-box'
   },
   modalList: {
-    margin: '8px 0 8px 20px',
-    color: '#991b1b',
-    fontSize: '14px',
-    lineHeight: '1.6'
+    margin: '10px 0',
+    paddingLeft: '20px',
+    width: '100%',
+    boxSizing: 'border-box'
   },
   modalFileInfo: {
-    backgroundColor: '#f8fafc',
-    border: '1px solid #e2e8f0',
-    borderRadius: '8px',
-    padding: '12px',
-    fontSize: '13px',
-    color: '#475569'
+    backgroundColor: '#f8f9fa',
+    padding: '10px',
+    borderRadius: '6px',
+    fontSize: '14px',
+    width: '100%',
+    boxSizing: 'border-box',
+    wordBreak: 'break-all'
   },
   modalButtons: {
     display: 'flex',
-    gap: '12px',
-    justifyContent: 'flex-end'
+    gap: '10px',
+    justifyContent: 'flex-end',
+    width: '100%',
+    boxSizing: 'border-box',
+    '@media (max-width: 768px)': {
+      flexDirection: 'column'
+    }
   },
   cancelButton: {
-    backgroundColor: '#f1f5f9',
-    color: '#475569',
-    border: '1px solid #e2e8f0',
+    backgroundColor: '#6c757d',
+    color: 'white',
+    border: 'none',
+    borderRadius: '6px',
     padding: '10px 20px',
-    borderRadius: '8px',
-    fontSize: '14px',
-    fontWeight: '500',
     cursor: 'pointer',
-    '&:hover:not(:disabled)': {
-      backgroundColor: '#e2e8f0'
-    },
-    '&:disabled': {
-      opacity: 0.6,
-      cursor: 'not-allowed'
+    '@media (max-width: 768px)': {
+      width: '100%',
+      padding: '12px 20px'
     }
   },
   dangerButton: {
-    backgroundColor: '#ef4444',
+    backgroundColor: '#dc3545',
     color: 'white',
     border: 'none',
+    borderRadius: '6px',
     padding: '10px 20px',
-    borderRadius: '8px',
-    fontSize: '14px',
-    fontWeight: '500',
     cursor: 'pointer',
-    '&:hover:not(:disabled)': {
-      backgroundColor: '#dc2626'
-    },
-    '&:disabled': {
-      opacity: 0.6,
-      cursor: 'not-allowed'
+    '@media (max-width: 768px)': {
+      width: '100%',
+      padding: '12px 20px'
     }
-  },
-  spinner: {
-    width: '16px',
-    height: '16px',
-    border: '2px solid rgba(255, 255, 255, 0.3)',
-    borderTop: '2px solid white',
-    borderRadius: '50%',
-    animation: 'spin 1s linear infinite'
   }
 };
 
-// Add spinner animation
+// Add CSS animation for spinner
 const styleSheet = document.createElement('style');
-styleSheet.innerHTML = `
+styleSheet.textContent = `
   @keyframes spin {
     0% { transform: rotate(0deg); }
     100% { transform: rotate(360deg); }
   }
   
   @media (max-width: 768px) {
-    .backup-form {
-      flex-direction: column !important;
+    /* Prevent horizontal scrolling */
+    body {
+      overflow-x: hidden;
+      max-width: 100vw;
     }
     
-    .primary-button {
-      min-width: 100% !important;
+    /* Improve button touch targets */
+    button {
+      min-height: 44px;
     }
   }
 `;

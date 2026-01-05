@@ -1,192 +1,173 @@
 import { db } from '../db';
+import { Capacitor } from '@capacitor/core';
+import {
+  Filesystem,
+  Directory
+} from '@capacitor/filesystem';
+import { Share } from '@capacitor/share';
 
-/**
- * Utility: Generate checksum (simple but acceptable for capstone)
- */
-function generateChecksum(data) {
-  return btoa(
-    JSON.stringify(data)
-      .split('')
-      .reduce((acc, char) => acc + char.charCodeAt(0), 0)
-  );
+/* --------------------------------------------------
+   CHECKSUM (SIMPLE BUT SAFE)
+-------------------------------------------------- */
+function checksum(text) {
+  let hash = 0;
+  for (let i = 0; i < text.length; i++) {
+    hash = (hash << 5) - hash + text.charCodeAt(i);
+    hash |= 0;
+  }
+  return hash.toString();
 }
 
-/**
- * CREATE BACKUP
- * @param {number} userId - ID of logged-in user
- * @param {string} username - Username of logged-in user
- * @param {string} backupName - Friendly name for backup
- */
-export async function createBackup(userId, username = 'System', backupName = 'Manual Backup') {
+/* --------------------------------------------------
+   CREATE BACKUP
+-------------------------------------------------- */
+export async function createBackup(userId, username, backupName) {
   try {
-    const backupData = {
+    const data = {};
+    const tables = db.tables.map((t) => t.name);
+
+    for (const table of tables) {
+      data[table] = await db.table(table).toArray();
+    }
+
+    const payload = {
       schema_version: db.verno,
       created_at: new Date().toISOString(),
       created_by: userId,
-      created_by_name: username, // ✅ Store username
-      data: {}
+      created_by_name: username,
+      data
     };
 
-    // Tables to back up
-    const tables = [
-      'users',
-      'suppliers',
-      'categories',
-      'products',
-      'product_units',
-      'inventory',
-      'resupplied_items',
-      'sales',
-      'sale_items',
-      'stock_card',
-      'backup' // Include backup table for history
-    ];
+    const json = JSON.stringify(payload, null, 2);
+    const fileName =
+      `TindaTrack_${backupName.replace(/\s+/g, '_')}_${Date.now()}.json`;
 
-    for (const table of tables) {
-      try {
-        backupData.data[table] = await db.table(table).toArray();
-      } catch (err) {
-        console.warn(`Table ${table} not found or error:`, err);
-        backupData.data[table] = [];
-      }
-    }
-
-    const checksum = generateChecksum(backupData);
-    const fileName = `TindaTrack_Backup_${backupName.replace(/\s+/g, '_')}_${Date.now()}.json`;
-    const jsonString = JSON.stringify(backupData, null, 2);
-
-    // ✅ FIXED: Store username in backup metadata
     await db.backup.add({
       user_id: userId,
-      username: username, // ✅ Store username
+      username,
       backup_name: backupName,
       backup_type: 'full',
       created_at: new Date().toISOString(),
       schema_version: db.verno,
       file_name: fileName,
-      file_size: jsonString.length,
-      checksum: checksum
+      file_size: json.length,
+      checksum: checksum(json)
     });
 
-    return {
-      success: true,
-      backupData: jsonString,
-      fileName: fileName,
-      backupId: Date.now()
-    };
+    return { success: true, json, fileName };
   } catch (error) {
-    console.error('Backup failed:', error);
     return { success: false, error };
   }
 }
 
-/**
- * RESTORE BACKUP
- * @param {File} file - Uploaded backup JSON file
- * @param {number} userId - User performing restore
- * @param {string} username - Username performing restore
- */
-export async function restoreBackup(file, userId, username = 'System') {
+/* --------------------------------------------------
+   RESTORE BACKUP
+-------------------------------------------------- */
+export async function restoreBackup(file, userId, username) {
   try {
     const text = await file.text();
-    const backupJson = JSON.parse(text);
+    const parsed = JSON.parse(text);
 
-    // Validate schema
-    if (backupJson.schema_version !== db.verno) {
-      throw new Error('Schema version mismatch. Please use a backup from this version.');
+    if (parsed.schema_version !== db.verno) {
+      throw new Error('Schema version mismatch.');
     }
 
-    const checksum = generateChecksum(backupJson);
-    if (!checksum) {
-      throw new Error('Invalid backup file.');
-    }
+    await db.transaction('rw', db.tables, async () => {
+      for (const table of db.tables) {
+        await table.clear();
+      }
 
-    await db.transaction('rw',
-      db.users,
-      db.suppliers,
-      db.categories,
-      db.products,
-      db.product_units,
-      db.inventory,
-      db.resupplied_items,
-      db.sales,
-      db.sale_items,
-      db.stock_card,
-      async () => {
-
-        // Clear tables first (keep backup table for history)
-        await Promise.all([
-          db.users.clear(),
-          db.suppliers.clear(),
-          db.categories.clear(),
-          db.products.clear(),
-          db.product_units.clear(),
-          db.inventory.clear(),
-          db.resupplied_items.clear(),
-          db.sales.clear(),
-          db.sale_items.clear(),
-          db.stock_card.clear()
-        ]);
-
-        // Restore data
-        for (const tableName in backupJson.data) {
-          if (tableName !== 'backup') { // Don't restore old backup records
-            await db.table(tableName).bulkAdd(backupJson.data[tableName]);
-          }
+      for (const name of Object.keys(parsed.data)) {
+        if (db.tables.map((t) => t.name).includes(name)) {
+          await db.table(name).bulkAdd(parsed.data[name]);
         }
       }
-    );
+    });
 
-    // ✅ FIXED: Store username in restore log
     await db.backup.add({
       user_id: userId,
-      username: username, // ✅ Store username
-      backup_name: 'Restore Operation - ' + file.name,
+      username,
+      backup_name: `Restore: ${file.name}`,
       backup_type: 'restore',
       created_at: new Date().toISOString(),
       schema_version: db.verno,
       file_name: file.name,
       file_size: text.length,
-      checksum: checksum,
-      details: JSON.stringify({
-        original_backup_date: backupJson.created_at,
-        original_backup_by: backupJson.created_by_name || 'Unknown',
-        restored_by: username
-      })
+      checksum: checksum(text)
     });
 
     return { success: true };
   } catch (error) {
-    console.error('Restore failed:', error);
     return { success: false, error };
   }
 }
 
-/**
- * Download backup file immediately (for auto backup)
- */
-export function downloadBackupFile(backupData, fileName) {
-  try {
-    const blob = new Blob([backupData], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = fileName;
-    link.style.display = 'none';
-    document.body.appendChild(link);
-    
-    // Trigger download
-    link.click();
-    
-    // Clean up
-    document.body.removeChild(link);
-    setTimeout(() => URL.revokeObjectURL(url), 100);
-    
-    console.log(`✅ Auto backup downloaded: ${fileName}`);
-    return true;
-  } catch (error) {
-    console.error('Auto backup download failed:', error);
-    return false;
+/* --------------------------------------------------
+   DOWNLOAD BACKUP (ANDROID / iOS / WEB)
+-------------------------------------------------- */
+export async function downloadBackupFile(json, fileName) {
+  const platform = Capacitor.getPlatform();
+
+  /* ---------- ANDROID ---------- */
+  if (platform === 'android') {
+    await Filesystem.requestPermissions();
+
+    const base64Data = btoa(
+      unescape(encodeURIComponent(json))
+    );
+
+    await Filesystem.writeFile({
+      path: `Download/${fileName}`,
+      data: base64Data,
+      directory: Directory.ExternalStorage,
+      recursive: true
+    });
+
+    return {
+      success: true,
+      platform: 'android',
+      location: 'Downloads folder',
+      length: json.length
+    };
   }
+
+  /* ---------- iOS ---------- */
+  if (platform === 'ios') {
+    const result = await Filesystem.writeFile({
+      path: fileName,
+      data: json,
+      directory: Directory.Documents
+    });
+
+    await Share.share({
+      title: 'Backup File',
+      text: 'TindaTrack Backup',
+      url: result.uri
+    });
+
+    return {
+      success: true,
+      platform: 'ios',
+      location: 'Documents folder',
+      length: json.length
+    };
+  }
+
+  /* ---------- WEB ---------- */
+  const blob = new Blob([json], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = fileName;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+
+  return {
+    success: true,
+    platform: 'web',
+    location: 'Browser downloads',
+    length: json.length
+  };
 }

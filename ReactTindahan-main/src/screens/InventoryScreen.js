@@ -2011,7 +2011,10 @@ const styles = {
   container: { 
     padding: '16px', 
     backgroundColor: '#f8fafc', 
-    minHeight: '100vh'
+    minHeight: '100vh',
+    maxWidth: '100%',
+    overflowX: 'hidden',
+    boxSizing: 'border-box'
   },
   header: {
     display: 'flex',
@@ -2019,25 +2022,47 @@ const styles = {
     alignItems: 'flex-start',
     marginBottom: '24px',
     flexWrap: 'wrap',
-    gap: '16px'
+    gap: '16px',
+    width: '100%',
+    maxWidth: '100%',
+    boxSizing: 'border-box'
   },
   pageTitle: {
     fontSize: '28px',
     fontWeight: 'bold',
     color: '#1e293b',
-    marginBottom: '8px'
+    marginBottom: '8px',
+    '@media (max-width: 768px)': {
+      fontSize: '24px'
+    }
   },
   pageSubtitle: {
     fontSize: '16px',
-    color: '#64748b'
+    color: '#64748b',
+    '@media (max-width: 768px)': {
+      fontSize: '14px'
+    }
   },
   headerActions: {
     display: 'flex',
     gap: '12px',
-    alignItems: 'center'
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    width: '100%',
+    maxWidth: '100%',
+    '@media (max-width: 768px)': {
+      flexDirection: 'column',
+      alignItems: 'stretch'
+    }
   },
   searchContainer: {
-    position: 'relative'
+    position: 'relative',
+    flex: 1,
+    minWidth: '250px',
+    '@media (max-width: 768px)': {
+      width: '100%',
+      minWidth: 'auto'
+    }
   },
   searchInput: {
     border: '1px solid #d1d5db',
@@ -2045,7 +2070,9 @@ const styles = {
     padding: '10px 16px',
     paddingRight: '40px',
     backgroundColor: '#fff',
-    width: '250px'
+    width: '100%',
+    boxSizing: 'border-box',
+    fontSize: '14px'
   },
   clearSearchButton: {
     position: 'absolute',
@@ -2059,7 +2086,6 @@ const styles = {
     fontSize: '16px',
     padding: '4px'
   },
-  // Recycle Bin Button Styles
   recycleBinButton: {
     backgroundColor: '#6b7280',
     color: 'white',
@@ -2073,9 +2099,17 @@ const styles = {
     alignItems: 'center',
     gap: '8px',
     transition: 'background-color 0.2s, transform 0.2s',
+    whiteSpace: 'nowrap',
+    flexShrink: 0,
     '&:hover': {
       backgroundColor: '#4b5563',
       transform: 'translateY(-1px)'
+    },
+    '@media (max-width: 768px)': {
+      width: '100%',
+      justifyContent: 'center',
+      fontSize: '13px',
+      padding: '12px 16px'
     }
   },
   recycleBinBadge: {
@@ -2091,14 +2125,29 @@ const styles = {
     display: 'grid',
     gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
     gap: '16px',
-    marginBottom: '24px'
+    marginBottom: '24px',
+    width: '100%',
+    maxWidth: '100%',
+    boxSizing: 'border-box',
+    '@media (max-width: 768px)': {
+      gridTemplateColumns: 'repeat(2, 1fr)',
+      gap: '12px'
+    },
+    '@media (max-width: 480px)': {
+      gridTemplateColumns: '1fr'
+    }
   },
   statCard: {
     backgroundColor: '#fff',
     border: '1px solid #e2e8f0',
     borderRadius: '12px',
     padding: '20px',
-    boxShadow: '0 1px 3px rgba(0, 0, 0, 0.05)'
+    boxShadow: '0 1px 3px rgba(0, 0, 0, 0.05)',
+    boxSizing: 'border-box',
+    overflow: 'hidden',
+    '@media (max-width: 768px)': {
+      padding: '16px'
+    }
   },
   lowStockCard: {
     backgroundColor: '#fffbeb',
@@ -2122,19 +2171,28 @@ const styles = {
     fontSize: '14px',
     color: '#64748b',
     marginBottom: '8px',
-    fontWeight: '500'
+    fontWeight: '500',
+    '@media (max-width: 768px)': {
+      fontSize: '13px'
+    }
   },
   statValue: {
     fontSize: '24px',
     fontWeight: 'bold',
     color: '#1e293b',
-    marginBottom: '4px'
+    marginBottom: '4px',
+    '@media (max-width: 768px)': {
+      fontSize: '20px'
+    }
   },
   lowStockValue: {
     fontSize: '24px',
     fontWeight: 'bold',
     color: '#b45309',
-    marginBottom: '4px'
+    marginBottom: '4px',
+    '@media (max-width: 768px)': {
+      fontSize: '20px'
+    }
   },
   lowStockLabel: {
     fontSize: '0.9rem',
@@ -2144,20 +2202,33 @@ const styles = {
     fontSize: '24px',
     fontWeight: 'bold',
     color: '#dc2626',
-    marginBottom: '4px'
+    marginBottom: '4px',
+    '@media (max-width: 768px)': {
+      fontSize: '20px'
+    }
   },
   valueAmount: {
     fontSize: '24px',
     fontWeight: 'bold',
     color: '#0369a1',
-    marginBottom: '4px'
+    marginBottom: '4px',
+    '@media (max-width: 768px)': {
+      fontSize: '20px'
+    }
   },
   productsSection: {
     backgroundColor: '#fff',
     border: '1px solid #e2e8f0',
     borderRadius: '12px',
     padding: '20px',
-    boxShadow: '0 1px 3px rgba(0, 0, 0, 0.05)'
+    boxShadow: '0 1px 3px rgba(0, 0, 0, 0.05)',
+    width: '100%',
+    maxWidth: '100%',
+    boxSizing: 'border-box',
+    overflow: 'hidden',
+    '@media (max-width: 768px)': {
+      padding: '16px'
+    }
   },
   sectionHeader: {
     display: 'flex',
@@ -2165,21 +2236,34 @@ const styles = {
     alignItems: 'flex-start',
     marginBottom: '20px',
     flexWrap: 'wrap',
-    gap: '12px'
+    gap: '12px',
+    width: '100%',
+    maxWidth: '100%'
   },
   sectionTitle: {
     fontSize: '18px',
     fontWeight: '600',
     color: '#1e293b',
-    marginBottom: '4px'
+    marginBottom: '4px',
+    '@media (max-width: 768px)': {
+      fontSize: '16px'
+    }
   },
   sectionSubtitle: {
     fontSize: '14px',
-    color: '#64748b'
+    color: '#64748b',
+    '@media (max-width: 768px)': {
+      fontSize: '13px'
+    }
   },
   sectionActions: {
     display: 'flex',
-    gap: '8px'
+    gap: '8px',
+    flexWrap: 'wrap',
+    '@media (max-width: 768px)': {
+      width: '100%',
+      justifyContent: 'flex-start'
+    }
   },
   primaryButton: {
     backgroundColor: '#4f46e5',
@@ -2189,7 +2273,12 @@ const styles = {
     borderRadius: '6px',
     cursor: 'pointer',
     fontSize: '14px',
-    fontWeight: '500'
+    fontWeight: '500',
+    whiteSpace: 'nowrap',
+    '@media (max-width: 768px)': {
+      fontSize: '13px',
+      padding: '10px 14px'
+    }
   },
   secondaryButton: {
     backgroundColor: '#f1f5f9',
@@ -2199,20 +2288,40 @@ const styles = {
     borderRadius: '6px',
     cursor: 'pointer',
     fontSize: '14px',
-    fontWeight: '500'
+    fontWeight: '500',
+    whiteSpace: 'nowrap',
+    '@media (max-width: 768px)': {
+      fontSize: '13px',
+      padding: '10px 14px'
+    }
   },
   tableContainer: {
-    overflowX: 'auto'
+    overflowX: 'auto',
+    width: '100%',
+    maxWidth: '100%',
+    WebkitOverflowScrolling: 'touch',
+    msOverflowStyle: '-ms-autohiding-scrollbar'
   },
   desktopView: {
-    display: 'block'
+    display: 'block',
+    '@media (max-width: 768px)': {
+      display: 'none'
+    }
   },
   mobileView: {
-    display: 'none'
+    display: 'none',
+    '@media (max-width: 768px)': {
+      display: 'block',
+      width: '100%'
+    }
   },
   table: {
     width: '100%',
-    borderCollapse: 'collapse'
+    borderCollapse: 'collapse',
+    minWidth: '800px',
+    '@media (max-width: 768px)': {
+      minWidth: '100%'
+    }
   },
   tableHeader: {
     backgroundColor: '#f8fafc',
@@ -2227,7 +2336,11 @@ const styles = {
   tableCell: {
     padding: '12px 16px',
     textAlign: 'left',
-    fontSize: '14px'
+    fontSize: '14px',
+    '@media (max-width: 768px)': {
+      padding: '10px 12px',
+      fontSize: '13px'
+    }
   },
   productNameCell: {
     display: 'flex',
@@ -2246,7 +2359,6 @@ const styles = {
     borderRadius: '10px',
     display: 'inline-block'
   },
-  // Audit cell styles
   auditCell: {
     display: 'flex',
     alignItems: 'flex-start',
@@ -2282,7 +2394,8 @@ const styles = {
   },
   actionButtons: {
     display: 'flex',
-    gap: '4px'
+    gap: '4px',
+    flexWrap: 'wrap'
   },
   editButton: {
     backgroundColor: '#3b82f6',
@@ -2291,7 +2404,12 @@ const styles = {
     padding: '6px 12px',
     borderRadius: '4px',
     cursor: 'pointer',
-    fontSize: '12px'
+    fontSize: '12px',
+    whiteSpace: 'nowrap',
+    '@media (max-width: 768px)': {
+      fontSize: '11px',
+      padding: '5px 10px'
+    }
   },
   viewButton: {
     backgroundColor: '#10b981',
@@ -2300,7 +2418,12 @@ const styles = {
     padding: '6px 12px',
     borderRadius: '4px',
     cursor: 'pointer',
-    fontSize: '12px'
+    fontSize: '12px',
+    whiteSpace: 'nowrap',
+    '@media (max-width: 768px)': {
+      fontSize: '11px',
+      padding: '5px 10px'
+    }
   },
   auditButton: {
     backgroundColor: '#6b7280',
@@ -2310,11 +2433,18 @@ const styles = {
     borderRadius: '4px',
     cursor: 'pointer',
     fontSize: '12px',
-    width: '32px'
+    width: '32px',
+    '@media (max-width: 768px)': {
+      width: '30px',
+      fontSize: '11px'
+    }
   },
   emptyState: {
     textAlign: 'center',
-    padding: '40px 20px'
+    padding: '40px 20px',
+    width: '100%',
+    maxWidth: '100%',
+    boxSizing: 'border-box'
   },
   emptyStateIcon: {
     fontSize: '48px',
@@ -2361,7 +2491,8 @@ const styles = {
     maxWidth: '500px',
     maxHeight: '90vh',
     overflowY: 'auto',
-    boxShadow: '0 10px 25px rgba(0, 0, 0, 0.15)'
+    boxShadow: '0 10px 25px rgba(0, 0, 0, 0.15)',
+    boxSizing: 'border-box'
   },
   largeModalContainer: {
     backgroundColor: '#fff',
@@ -2371,7 +2502,12 @@ const styles = {
     maxWidth: '90%',
     maxHeight: '90vh',
     overflowY: 'auto',
-    boxShadow: '0 10px 25px rgba(0, 0, 0, 0.15)'
+    boxShadow: '0 10px 25px rgba(0, 0, 0, 0.15)',
+    boxSizing: 'border-box',
+    '@media (max-width: 768px)': {
+      padding: '16px',
+      maxWidth: '95%'
+    }
   },
   modalHeaderRow: {
     display: 'flex',
@@ -2382,7 +2518,10 @@ const styles = {
   modalHeader: {
     fontSize: '20px',
     fontWeight: 'bold',
-    color: '#1e293b'
+    color: '#1e293b',
+    '@media (max-width: 768px)': {
+      fontSize: '18px'
+    }
   },
   closeButton: {
     backgroundColor: 'transparent',
@@ -2392,14 +2531,15 @@ const styles = {
     cursor: 'pointer',
     padding: '4px 8px'
   },
-  // Tabs
   tabsContainer: {
     marginBottom: '16px',
     borderBottom: '2px solid #e2e8f0'
   },
   tabs: {
     display: 'flex',
-    gap: '0'
+    gap: '0',
+    overflowX: 'auto',
+    WebkitOverflowScrolling: 'touch'
   },
   tab: {
     padding: '10px 20px',
@@ -2412,7 +2552,9 @@ const styles = {
     fontWeight: '500',
     color: '#64748b',
     cursor: 'pointer',
-    marginRight: '4px'
+    marginRight: '4px',
+    whiteSpace: 'nowrap',
+    flexShrink: 0
   },
   modalContent: {
     marginBottom: '20px'
@@ -2438,7 +2580,10 @@ const styles = {
   modalButtons: {
     display: 'flex',
     justifyContent: 'flex-end',
-    gap: '12px'
+    gap: '12px',
+    '@media (max-width: 768px)': {
+      flexDirection: 'column'
+    }
   },
   submitButton: {
     backgroundColor: '#4f46e5',
@@ -2448,7 +2593,10 @@ const styles = {
     borderRadius: '6px',
     cursor: 'pointer',
     fontSize: '14px',
-    fontWeight: '500'
+    fontWeight: '500',
+    '@media (max-width: 768px)': {
+      width: '100%'
+    }
   },
   deleteButton: {
     backgroundColor: '#ef4444',
@@ -2458,7 +2606,10 @@ const styles = {
     borderRadius: '6px',
     cursor: 'pointer',
     fontSize: '14px',
-    fontWeight: '500'
+    fontWeight: '500',
+    '@media (max-width: 768px)': {
+      width: '100%'
+    }
   },
   cancelButton: {
     backgroundColor: '#f1f5f9',
@@ -2468,9 +2619,11 @@ const styles = {
     borderRadius: '6px',
     cursor: 'pointer',
     fontSize: '14px',
-    fontWeight: '500'
+    fontWeight: '500',
+    '@media (max-width: 768px)': {
+      width: '100%'
+    }
   },
-  // Audit Logs Styles
   auditLogsContainer: {
     maxHeight: '60vh',
     overflowY: 'auto',
@@ -2495,7 +2648,8 @@ const styles = {
     gap: '12px',
     marginBottom: '12px',
     paddingBottom: '8px',
-    borderBottom: '1px solid #f1f5f9'
+    borderBottom: '1px solid #f1f5f9',
+    flexWrap: 'wrap'
   },
   auditActionIcon: {
     fontSize: '20px'
@@ -2517,7 +2671,8 @@ const styles = {
   },
   auditDetailRow: {
     display: 'flex',
-    gap: '8px'
+    gap: '8px',
+    flexWrap: 'wrap'
   },
   auditDetailLabel: {
     fontSize: '12px',
@@ -2541,7 +2696,8 @@ const styles = {
   },
   auditDetailItem: {
     display: 'flex',
-    gap: '4px'
+    gap: '4px',
+    flexWrap: 'wrap'
   },
   auditDetailKey: {
     fontSize: '11px',
@@ -2572,7 +2728,6 @@ const styles = {
     fontSize: '14px',
     color: '#94a3b8'
   },
-  // Recycle Bin Modal Styles
   recycleStats: {
     display: 'grid',
     gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
@@ -2581,7 +2736,12 @@ const styles = {
     padding: '16px',
     backgroundColor: '#f8fafc',
     borderRadius: '8px',
-    border: '1px solid #e2e8f0'
+    border: '1px solid #e2e8f0',
+    '@media (max-width: 768px)': {
+      gridTemplateColumns: 'repeat(2, 1fr)',
+      gap: '12px',
+      padding: '12px'
+    }
   },
   recycleStat: {
     display: 'flex',
@@ -2625,7 +2785,10 @@ const styles = {
     borderBottom: '2px solid #e2e8f0',
     display: 'flex',
     alignItems: 'center',
-    gap: '12px'
+    gap: '12px',
+    '@media (max-width: 768px)': {
+      fontSize: '16px'
+    }
   },
   pendingBadge: {
     backgroundColor: '#fef3c7',
@@ -2703,6 +2866,7 @@ const styles = {
     alignItems: 'center',
     gap: '4px',
     transition: 'background-color 0.2s',
+    whiteSpace: 'nowrap',
     '&:hover': {
       backgroundColor: '#059669'
     }
@@ -2719,6 +2883,7 @@ const styles = {
     alignItems: 'center',
     gap: '4px',
     transition: 'background-color 0.2s',
+    whiteSpace: 'nowrap',
     '&:hover': {
       backgroundColor: '#dc2626'
     }

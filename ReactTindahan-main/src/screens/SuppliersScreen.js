@@ -700,8 +700,9 @@ const styles = {
     padding: '16px',
     backgroundColor: '#F8FAFC',
     minHeight: '100vh',
-    maxWidth: '1200px',
-    margin: '0 auto',
+    maxWidth: '100%',
+    overflowX: 'hidden',
+    boxSizing: 'border-box',
     '@media (min-width: 768px)': {
       padding: '24px',
     },
@@ -713,9 +714,13 @@ const styles = {
     marginBottom: '24px',
     flexWrap: 'wrap',
     gap: '16px',
+    width: '100%',
+    maxWidth: '100%',
+    boxSizing: 'border-box',
     '@media (max-width: 768px)': {
       flexDirection: 'column',
       gap: '12px',
+      alignItems: 'stretch'
     },
   },
   pageTitle: {
@@ -737,8 +742,13 @@ const styles = {
   headerActions: {
     display: 'flex',
     gap: '12px',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    width: '100%',
+    maxWidth: '100%',
     '@media (max-width: 768px)': {
-      width: '100%',
+      flexDirection: 'column',
+      alignItems: 'stretch'
     },
   },
   searchInput: {
@@ -748,11 +758,12 @@ const styles = {
     backgroundColor: '#fff',
     width: '300px',
     fontSize: '14px',
+    boxSizing: 'border-box',
     '@media (max-width: 768px)': {
       width: '100%',
+      fontSize: '16px'
     },
   },
-  // Recycle Bin Button Styles
   recycleBinButton: {
     backgroundColor: '#6b7280',
     color: 'white',
@@ -766,9 +777,17 @@ const styles = {
     alignItems: 'center',
     gap: '8px',
     transition: 'background-color 0.2s, transform 0.2s',
+    whiteSpace: 'nowrap',
+    flexShrink: 0,
     '&:hover': {
       backgroundColor: '#4b5563',
       transform: 'translateY(-1px)'
+    },
+    '@media (max-width: 768px)': {
+      width: '100%',
+      justifyContent: 'center',
+      fontSize: '13px',
+      padding: '12px 16px'
     }
   },
   recycleBinBadge: {
@@ -785,8 +804,12 @@ const styles = {
     gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
     gap: '16px',
     marginBottom: '24px',
+    width: '100%',
+    maxWidth: '100%',
+    boxSizing: 'border-box',
     '@media (max-width: 768px)': {
       gridTemplateColumns: 'repeat(2, 1fr)',
+      gap: '12px'
     },
     '@media (max-width: 480px)': {
       gridTemplateColumns: '1fr',
@@ -801,8 +824,11 @@ const styles = {
     display: 'flex',
     alignItems: 'center',
     gap: '16px',
+    boxSizing: 'border-box',
+    overflow: 'hidden',
     '@media (max-width: 768px)': {
       padding: '16px',
+      gap: '12px'
     },
   },
   statIcon: {
@@ -814,6 +840,7 @@ const styles = {
     justifyContent: 'center',
     backgroundColor: '#F1F5F9',
     borderRadius: '8px',
+    flexShrink: 0,
     '@media (max-width: 768px)': {
       fontSize: '24px',
       width: '40px',
@@ -845,6 +872,10 @@ const styles = {
     borderRadius: '12px',
     marginBottom: '24px',
     boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
+    width: '100%',
+    maxWidth: '100%',
+    boxSizing: 'border-box',
+    overflow: 'hidden',
     '@media (max-width: 768px)': {
       padding: '16px',
     },
@@ -854,6 +885,9 @@ const styles = {
     fontWeight: '600',
     marginBottom: '16px',
     color: '#1E293B',
+    '@media (max-width: 768px)': {
+      fontSize: '16px'
+    }
   },
   input: {
     width: '100%',
@@ -890,6 +924,9 @@ const styles = {
     '&:hover': {
       backgroundColor: '#2563EB',
     },
+    '@media (max-width: 768px)': {
+      width: '100%'
+    }
   },
   cancelButton: {
     backgroundColor: '#F1F5F9',
@@ -905,9 +942,15 @@ const styles = {
     '&:hover': {
       backgroundColor: '#E2E8F0',
     },
+    '@media (max-width: 768px)': {
+      width: '100%'
+    }
   },
   listContainer: {
     marginBottom: '24px',
+    width: '100%',
+    maxWidth: '100%',
+    boxSizing: 'border-box'
   },
   listHeader: {
     display: 'flex',
@@ -916,12 +959,17 @@ const styles = {
     marginBottom: '16px',
     flexWrap: 'wrap',
     gap: '8px',
+    width: '100%',
+    maxWidth: '100%'
   },
   sectionHeader: {
     fontSize: '18px',
     fontWeight: '600',
     color: '#1E293B',
     margin: 0,
+    '@media (max-width: 768px)': {
+      fontSize: '16px'
+    }
   },
   clearSearchButton: {
     backgroundColor: 'transparent',
@@ -938,8 +986,12 @@ const styles = {
     display: 'grid',
     gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))',
     gap: '16px',
+    width: '100%',
+    maxWidth: '100%',
+    boxSizing: 'border-box',
     '@media (max-width: 768px)': {
       gridTemplateColumns: '1fr',
+      gap: '12px'
     },
   },
   supplierCard: {
@@ -952,6 +1004,8 @@ const styles = {
     flexDirection: 'column',
     gap: '12px',
     transition: 'transform 0.2s, box-shadow 0.2s',
+    boxSizing: 'border-box',
+    overflow: 'hidden',
     '&:hover': {
       transform: 'translateY(-2px)',
       boxShadow: '0 4px 6px rgba(0,0,0,0.1)',
@@ -966,6 +1020,7 @@ const styles = {
     alignItems: 'flex-start',
     gap: '12px',
     flexWrap: 'wrap',
+    width: '100%'
   },
   supplierName: {
     fontSize: '16px',
@@ -974,10 +1029,12 @@ const styles = {
     margin: 0,
     flex: '1',
     minWidth: '150px',
+    wordBreak: 'break-word'
   },
   supplierActions: {
     display: 'flex',
     gap: '8px',
+    flexWrap: 'wrap',
     '@media (max-width: 480px)': {
       width: '100%',
       justifyContent: 'flex-start',
@@ -988,6 +1045,7 @@ const styles = {
     display: 'flex',
     flexDirection: 'column',
     gap: '4px',
+    width: '100%',
     '@media (min-width: 480px)': {
       flexDirection: 'row',
       alignItems: 'flex-start',
@@ -998,11 +1056,13 @@ const styles = {
     color: '#64748B',
     fontWeight: '500',
     minWidth: '80px',
+    flexShrink: 0
   },
   detailValue: {
     fontSize: '14px',
     color: '#475569',
     flex: '1',
+    wordBreak: 'break-word'
   },
   supplierMeta: {
     display: 'flex',
@@ -1014,11 +1074,13 @@ const styles = {
     color: '#94A3B8',
     flexWrap: 'wrap',
     gap: '8px',
+    width: '100%'
   },
   metaItem: {
     display: 'flex',
     alignItems: 'center',
     gap: '4px',
+    flexShrink: 0
   },
   editButton: {
     backgroundColor: '#3B82F6',
@@ -1031,9 +1093,14 @@ const styles = {
     cursor: 'pointer',
     minWidth: '60px',
     transition: 'background-color 0.2s',
+    flexShrink: 0,
     '&:hover': {
       backgroundColor: '#2563EB',
     },
+    '@media (max-width: 480px)': {
+      flex: '1',
+      minWidth: 'auto'
+    }
   },
   deleteButton: {
     backgroundColor: '#FEF2F2',
@@ -1046,9 +1113,14 @@ const styles = {
     cursor: 'pointer',
     minWidth: '60px',
     transition: 'background-color 0.2s',
+    flexShrink: 0,
     '&:hover': {
       backgroundColor: '#FEE2E2',
     },
+    '@media (max-width: 480px)': {
+      flex: '1',
+      minWidth: 'auto'
+    }
   },
   emptyState: {
     backgroundColor: '#fff',
@@ -1056,6 +1128,9 @@ const styles = {
     borderRadius: '12px',
     textAlign: 'center',
     boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
+    width: '100%',
+    maxWidth: '100%',
+    boxSizing: 'border-box'
   },
   emptyStateIcon: {
     fontSize: '48px',
@@ -1073,7 +1148,6 @@ const styles = {
     color: '#9CA3AF',
     margin: 0,
   },
-  // Recycle Bin Modal Styles
   modalOverlay: {
     position: 'fixed',
     top: 0,
@@ -1085,7 +1159,8 @@ const styles = {
     justifyContent: 'center',
     alignItems: 'center',
     zIndex: 1000,
-    padding: '16px'
+    padding: '16px',
+    boxSizing: 'border-box'
   },
   largeModalContainer: {
     backgroundColor: '#fff',
@@ -1096,6 +1171,7 @@ const styles = {
     maxHeight: '90vh',
     overflowY: 'auto',
     boxShadow: '0 10px 25px rgba(0, 0, 0, 0.15)',
+    boxSizing: 'border-box',
     '@media (max-width: 768px)': {
       padding: '16px',
       maxWidth: '95%',
@@ -1107,13 +1183,17 @@ const styles = {
     alignItems: 'flex-start',
     marginBottom: '20px',
     flexWrap: 'wrap',
-    gap: '12px'
+    gap: '12px',
+    width: '100%'
   },
   modalHeader: {
     fontSize: '20px',
     fontWeight: 'bold',
     color: '#1e293b',
-    margin: 0
+    margin: 0,
+    '@media (max-width: 768px)': {
+      fontSize: '18px'
+    }
   },
   closeButton: {
     backgroundColor: 'transparent',
@@ -1134,7 +1214,14 @@ const styles = {
     padding: '16px',
     backgroundColor: '#f8fafc',
     borderRadius: '8px',
-    border: '1px solid #e2e8f0'
+    border: '1px solid #e2e8f0',
+    width: '100%',
+    boxSizing: 'border-box',
+    '@media (max-width: 768px)': {
+      gridTemplateColumns: 'repeat(2, 1fr)',
+      gap: '12px',
+      padding: '12px'
+    }
   },
   recycleStat: {
     display: 'flex',
@@ -1143,7 +1230,8 @@ const styles = {
     padding: '12px',
     backgroundColor: 'white',
     borderRadius: '8px',
-    border: '1px solid #e2e8f0'
+    border: '1px solid #e2e8f0',
+    boxSizing: 'border-box'
   },
   recycleStatIcon: {
     fontSize: '24px',
@@ -1153,7 +1241,8 @@ const styles = {
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: '#f1f5f9',
-    borderRadius: '8px'
+    borderRadius: '8px',
+    flexShrink: 0
   },
   recycleStatValue: {
     fontSize: '20px',
@@ -1167,7 +1256,8 @@ const styles = {
     marginTop: '4px'
   },
   deletedSection: {
-    marginBottom: '32px'
+    marginBottom: '32px',
+    width: '100%'
   },
   sectionSubheader: {
     fontSize: '18px',
@@ -1178,7 +1268,11 @@ const styles = {
     borderBottom: '2px solid #e2e8f0',
     display: 'flex',
     alignItems: 'center',
-    gap: '12px'
+    gap: '12px',
+    width: '100%',
+    '@media (max-width: 768px)': {
+      fontSize: '16px'
+    }
   },
   pendingBadge: {
     backgroundColor: '#fef3c7',
@@ -1202,7 +1296,8 @@ const styles = {
   },
   loadingState: {
     textAlign: 'center',
-    padding: '40px 20px'
+    padding: '40px 20px',
+    width: '100%'
   },
   loadingSpinner: {
     border: '3px solid #f3f3f3',
@@ -1215,12 +1310,21 @@ const styles = {
   },
   tableContainer: {
     overflowX: 'auto',
-    marginBottom: '16px'
+    marginBottom: '16px',
+    width: '100%',
+    maxWidth: '100%',
+    WebkitOverflowScrolling: 'touch',
+    msOverflowStyle: '-ms-autohiding-scrollbar'
   },
   table: {
     width: '100%',
     borderCollapse: 'collapse',
-    fontSize: '14px'
+    fontSize: '14px',
+    minWidth: '800px',
+    '@media (max-width: 768px)': {
+      minWidth: '100%',
+      fontSize: '13px'
+    }
   },
   tableHeader: {
     backgroundColor: '#f8fafc',
@@ -1235,7 +1339,10 @@ const styles = {
   tableCell: {
     padding: '12px 16px',
     textAlign: 'left',
-    verticalAlign: 'top'
+    verticalAlign: 'top',
+    '@media (max-width: 768px)': {
+      padding: '10px 12px'
+    }
   },
   pendingStatus: {
     backgroundColor: '#fef3c7',
@@ -1245,7 +1352,8 @@ const styles = {
     fontSize: '12px',
     display: 'inline-flex',
     alignItems: 'center',
-    gap: '4px'
+    gap: '4px',
+    whiteSpace: 'nowrap'
   },
   restoredStatus: {
     backgroundColor: '#d1fae5',
@@ -1255,7 +1363,8 @@ const styles = {
     fontSize: '12px',
     display: 'inline-flex',
     alignItems: 'center',
-    gap: '4px'
+    gap: '4px',
+    whiteSpace: 'nowrap'
   },
   confirmedStatus: {
     backgroundColor: '#fee2e2',
@@ -1265,7 +1374,8 @@ const styles = {
     fontSize: '12px',
     display: 'inline-flex',
     alignItems: 'center',
-    gap: '4px'
+    gap: '4px',
+    whiteSpace: 'nowrap'
   },
   actionButtons: {
     display: 'flex',
@@ -1284,6 +1394,8 @@ const styles = {
     alignItems: 'center',
     gap: '4px',
     transition: 'background-color 0.2s',
+    whiteSpace: 'nowrap',
+    flexShrink: 0,
     '&:hover': {
       backgroundColor: '#059669'
     }
@@ -1300,19 +1412,25 @@ const styles = {
     alignItems: 'center',
     gap: '4px',
     transition: 'background-color 0.2s',
+    whiteSpace: 'nowrap',
+    flexShrink: 0,
     '&:hover': {
       backgroundColor: '#dc2626'
     }
   },
   modalContent: {
-    marginBottom: '20px'
+    marginBottom: '20px',
+    width: '100%'
   },
   modalButtons: {
     display: 'flex',
     justifyContent: 'flex-end',
     gap: '12px',
     paddingTop: '20px',
-    borderTop: '1px solid #e2e8f0'
+    borderTop: '1px solid #e2e8f0',
+    '@media (max-width: 768px)': {
+      flexDirection: 'column'
+    }
   }
 };
 

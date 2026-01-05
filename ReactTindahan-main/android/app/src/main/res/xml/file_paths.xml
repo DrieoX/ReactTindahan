@@ -1,5 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
 <paths xmlns:android="http://schemas.android.com/apk/res/android">
-    <external-path name="my_images" path="." />
-    <cache-path name="my_cache_images" path="." />
+    <!-- For Capacitor 3+ -->
+    <external-path name="external" path="." />
+    <external-files-path name="external_files" path="." />
+    <cache-path name="cache" path="." />
+    <external-cache-path name="external_cache" path="." />
+    <files-path name="files" path="." />
+    
+    <!-- For backup files -->
+    <files-path name="backups" path="backups/" />
+    
+    <!-- For sharing files -->
+    <external-path name="shared" path="Download/" />
 </paths>
