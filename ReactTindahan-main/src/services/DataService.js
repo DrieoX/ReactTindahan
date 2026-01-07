@@ -62,15 +62,13 @@ class DataService {
       return true;
     }
     
-    console.log('🎯 Trying known IP addresses...');
-    const knownIPs = [
-      '192.168.100.53',
-      '192.168.1.100',
-      '192.168.0.100',
-      '10.0.0.100'
+    console.log('🎯 Trying localhost and common addresses...');
+    const commonIPs = [
+      'localhost',
+      '127.0.0.1'
     ];
     
-    for (const ip of knownIPs) {
+    for (const ip of commonIPs) {
       console.log(`🎯 Testing ${ip}...`);
       if (await this.testSpecificConnection(ip)) {
         localStorage.setItem('owner_ip', ip);
@@ -96,10 +94,11 @@ class DataService {
   async quickNetworkScan() {
     const quickIPs = [];
     
+    // Generate quick IPs based on local subnet
     for (let i = 1; i <= 10; i++) {
-      quickIPs.push(`192.168.100.${i}`);
       quickIPs.push(`192.168.1.${i}`);
       quickIPs.push(`192.168.0.${i}`);
+      quickIPs.push(`10.0.0.${i}`);
     }
     
     const promises = quickIPs.map(ip => this.testConnectionWithTimeout(ip, 1000));
@@ -132,8 +131,7 @@ class DataService {
         clearTimeout(timeoutId);
         if (response.ok) {
           return response.json().then(data => {
-            // Updated to match new health response
-            resolve(data.app === 'inventory-system' || data.app === 'inventory-owner');
+            resolve(data.app === 'inventory-system');
           });
         }
         resolve(false);
@@ -168,8 +166,7 @@ class DataService {
           
           if (response.ok) {
             const data = await response.json();
-            // Updated to match new health response
-            if (data.app === 'inventory-system' || data.app === 'inventory-owner') {
+            if (data.app === 'inventory-system') {
               this.apiClient.setBaseURL(testURL);
               localStorage.setItem('owner_ip', ip);
               console.log(`✅ Connected to ${testURL}`);

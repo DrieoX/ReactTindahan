@@ -27,7 +27,9 @@ class ApiClient {
       }
       console.log(`📡 Using saved URL: ${this.baseURL}`);
     } else {
-      console.log('📱 No saved server URL');
+      // Try localhost first for development
+      this.baseURL = 'http://localhost:3001';
+      console.log(`📡 Using default URL: ${this.baseURL}`);
     }
     
     this.initialized = true;
@@ -225,8 +227,7 @@ class ApiClient {
           ? JSON.parse(response.data) 
           : response.data;
           
-        // Updated to match new health response
-        return data.app === 'inventory-system' || data.app === 'inventory-owner';
+        return data.app === 'inventory-system';
       } else {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 5000);
@@ -243,8 +244,7 @@ class ApiClient {
         }
         
         const data = await fetchResponse.json();
-        // Updated to match new health response
-        return data.app === 'inventory-system' || data.app === 'inventory-owner';
+        return data.app === 'inventory-system';
       }
     } catch (error) {
       console.log(`❌ Test failed for ${testURL}:`, error.message);
