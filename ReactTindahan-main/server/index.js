@@ -3,6 +3,7 @@ const bodyParser = require('body-parser');
 const http = require('http');
 const sqlite3 = require('sqlite3').verbose();
 const path = require('path');
+const os = require('os');
 
 const app = express();
 
@@ -510,6 +511,27 @@ function getPrimaryKey(tableName) {
   return primaryKeys[tableName] || 'id';
 }
 
+// Function to get all network addresses
+function getNetworkAddresses() {
+  const interfaces = os.networkInterfaces();
+  const addresses = [];
+  
+  Object.keys(interfaces).forEach((ifaceName) => {
+    interfaces[ifaceName].forEach((iface) => {
+      // Skip internal and non-IPv4 addresses
+      if (iface.internal || iface.family !== 'IPv4') return;
+      
+      addresses.push({
+        interface: ifaceName,
+        address: iface.address,
+        family: iface.family
+      });
+    });
+  });
+  
+  return addresses;
+}
+
 // Health check endpoint
 app.get('/api/health', (req, res) => {
   res.json({
@@ -792,10 +814,25 @@ initDatabase()
     const server = http.createServer(app);
     server.listen(PORT, '0.0.0.0', () => {
       console.log(`📦 Inventory System API Server running on port ${PORT}`);
-      console.log(`🌐 Network: http://192.168.100.53:${PORT}`);
-      console.log(`📊 Health:  http://192.168.100.53:${PORT}/api/health`);
       console.log(`💾 Database: SQLite (${dbPath})`);
       console.log(`📋 Schema Version: 6 (Dexie compatible)`);
+      
+      // Get all network addresses
+      const addresses = getNetworkAddresses();
+      
+      console.log('\n🌐 Available Network Addresses:');
+      console.log(`   Local:  http://localhost:${PORT}`);
+      
+      addresses.forEach((addr, index) => {
+        console.log(`   ${addr.interface}: http://${addr.address}:${PORT}`);
+      });
+      
+      console.log(`\n📊 Health Check:`);
+      console.log(`   http://localhost:${PORT}/api/health`);
+      
+      if (addresses.length > 0) {
+        console.log(`   or http://${addresses[0].address}:${PORT}/api/health`);
+      }
     });
   })
   .catch((err) => {

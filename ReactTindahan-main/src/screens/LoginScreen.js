@@ -5,6 +5,7 @@ import { loginUser } from '../services/UserService';
 export default function LoginScreen({ setUserMode }) {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
 
@@ -41,6 +42,10 @@ export default function LoginScreen({ setUserMode }) {
     }
   };
 
+  const togglePasswordVisibility = () => {
+    setShowPassword(!showPassword);
+  };
+
   const handleKeyPress = (e) => {
     if (e.key === 'Enter') {
       handleLogin();
@@ -49,49 +54,72 @@ export default function LoginScreen({ setUserMode }) {
 
   return (
     <div style={styles.container}>
-      <div style={styles.icon}>🛒</div>
-      <h2 style={styles.title}>Sign in to your account</h2>
-      <p style={styles.subtitle}>Access your POS system</p>
+      <div style={styles.card}>
+        <div style={styles.icon}>🛒</div>
+        <h2 style={styles.title}>Sign in to your account</h2>
+        <p style={styles.subtitle}>Access your POS system</p>
 
-      <label style={styles.label}>Username</label>
-      <input
-        type="text"
-        placeholder="Enter your username"
-        value={username}
-        onChange={(e) => setUsername(e.target.value)}
-        onKeyPress={handleKeyPress}
-        style={styles.input}
-        disabled={loading}
-      />
+        <div style={styles.form}>
+          <div style={styles.inputGroup}>
+            <label style={styles.label}>Username</label>
+            <input
+              type="text"
+              placeholder="Enter your username"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              onKeyPress={handleKeyPress}
+              style={styles.input}
+              disabled={loading}
+            />
+          </div>
 
-      <label style={styles.label}>Password</label>
-      <input
-        type="password"
-        placeholder="Enter your password"
-        value={password}
-        onChange={(e) => setPassword(e.target.value)}
-        onKeyPress={handleKeyPress}
-        style={styles.input}
-        disabled={loading}
-      />
+          <div style={styles.inputGroup}>
+            <label style={styles.label}>Password</label>
+            <div style={styles.passwordWrapper}>
+              <input
+                type={showPassword ? "text" : "password"}
+                placeholder="Enter your password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                onKeyPress={handleKeyPress}
+                style={styles.passwordInput}
+                disabled={loading}
+              />
+              <button
+                type="button"
+                onClick={togglePasswordVisibility}
+                style={styles.passwordToggle}
+                disabled={loading}
+              >
+                {showPassword ? "🙈" : "👁️"}
+              </button>
+            </div>
+          </div>
 
-      <button 
-        style={styles.button} 
-        onClick={handleLogin}
-        disabled={loading}
-      >
-        {loading ? 'Signing in...' : 'Sign in'}
-      </button>
+          <button 
+            style={{...styles.button, ...(loading ? styles.buttonLoading : {})}} 
+            onClick={handleLogin}
+            disabled={loading}
+          >
+            {loading ? (
+              <>
+                <div style={styles.spinner}></div>
+                Signing in...
+              </>
+            ) : 'Sign in'}
+          </button>
+        </div>
 
-      <p style={styles.footer}>
-        Don't have an account?{' '}
-        <span
-          style={styles.link}
-          onClick={() => navigate('/signup')}
-        >
-          Sign up here
-        </span>
-      </p>
+        <p style={styles.footer}>
+          Don't have an account?{' '}
+          <span
+            style={styles.link}
+            onClick={() => navigate('/signup')}
+          >
+            Sign up here
+          </span>
+        </p>
+      </div>
     </div>
   );
 }
@@ -184,6 +212,11 @@ const styles = {
     padding: '4px',
     borderRadius: '4px',
     transition: 'color 0.2s ease',
+    width: '32px',
+    height: '32px',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   button: {
     width: '100%',

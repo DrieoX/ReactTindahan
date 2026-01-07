@@ -10,6 +10,7 @@ export default function SignupScreen() {
   const [storeName, setStoreName] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [showPasswords, setShowPasswords] = useState(false);
   const [role, setRole] = useState('Staff');
   const [isOwnerSignup, setIsOwnerSignup] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -17,6 +18,10 @@ export default function SignupScreen() {
   const handleRoleChange = (selectedRole) => {
     setRole(selectedRole);
     setIsOwnerSignup(selectedRole === 'Owner');
+  };
+
+  const togglePasswordVisibility = () => {
+    setShowPasswords(!showPasswords);
   };
 
   const handleRegister = async () => {
@@ -74,109 +79,140 @@ export default function SignupScreen() {
 
   return (
     <div style={styles.container}>
-      <div style={styles.icon}>🛒</div>
+      <div style={styles.card}>
+        <div style={styles.icon}>🛒</div>
 
-      <h2 style={styles.title}>Create your account</h2>
-      <p style={styles.subtitle}>
-        Start managing your business with our POS system
-      </p>
+        <h2 style={styles.title}>Create your account</h2>
+        <p style={styles.subtitle}>
+          Start managing your business with our POS system
+        </p>
 
-      {/* Role Selection */}
-      <div style={styles.roleContainer}>
-        <button
-          style={{
-            ...styles.roleButton,
-            ...(role === 'Owner' ? styles.activeRoleButton : {})
-          }}
-          onClick={() => handleRoleChange('Owner')}
-          disabled={loading}
-        >
-          Register as Owner
-        </button>
-        <button
-          style={{
-            ...styles.roleButton,
-            ...(role === 'Staff' ? styles.activeRoleButton : {})
-          }}
-          onClick={() => handleRoleChange('Staff')}
-          disabled={loading}
-        >
-          Register as Staff
-        </button>
+        {/* Role Selection */}
+        <div style={styles.roleContainer}>
+          <button
+            style={{
+              ...styles.roleButton,
+              ...(role === 'Owner' ? styles.activeRoleButton : {})
+            }}
+            onClick={() => handleRoleChange('Owner')}
+            disabled={loading}
+          >
+            Register as Owner
+          </button>
+          <button
+            style={{
+              ...styles.roleButton,
+              ...(role === 'Staff' ? styles.activeRoleButton : {})
+            }}
+            onClick={() => handleRoleChange('Staff')}
+            disabled={loading}
+          >
+            Register as Staff
+          </button>
+        </div>
+
+        <div style={styles.roleInfo}>
+          {role === 'Owner' ? 
+            "As an owner, you'll have full access to manage your store, inventory, and staff." : 
+            "As staff, you'll have limited access to process sales and view assigned tasks."}
+        </div>
+
+        <div style={styles.form}>
+          <div style={styles.inputGroup}>
+            <input
+              type="text"
+              placeholder="Username *"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              onKeyPress={handleKeyPress}
+              style={styles.input}
+              disabled={loading}
+            />
+          </div>
+          
+          <div style={styles.inputGroup}>
+            <input
+              type="text"
+              placeholder="Full Name *"
+              value={fullName}
+              onChange={(e) => setFullName(e.target.value)}
+              onKeyPress={handleKeyPress}
+              style={styles.input}
+              disabled={loading}
+            />
+          </div>
+          
+          {isOwnerSignup && (
+            <div style={styles.inputGroup}>
+              <input
+                type="text"
+                placeholder="Store Name *"
+                value={storeName}
+                onChange={(e) => setStoreName(e.target.value)}
+                onKeyPress={handleKeyPress}
+                style={styles.input}
+                disabled={loading}
+              />
+            </div>
+          )}
+          
+          <div style={styles.inputGroup}>
+            <div style={styles.passwordWrapper}>
+              <input
+                type={showPasswords ? "text" : "password"}
+                placeholder="Password (min. 6 characters) *"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                onKeyPress={handleKeyPress}
+                style={styles.passwordInput}
+                disabled={loading}
+              />
+            </div>
+          </div>
+          
+          <div style={styles.inputGroup}>
+            <div style={styles.passwordWrapper}>
+              <input
+                type={showPasswords ? "text" : "password"}
+                placeholder="Confirm Password *"
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                onKeyPress={handleKeyPress}
+                style={styles.passwordInput}
+                disabled={loading}
+              />
+              <button
+                type="button"
+                onClick={togglePasswordVisibility}
+                style={styles.passwordToggle}
+                disabled={loading}
+              >
+                {showPasswords ? "🙈" : "👁️"}
+              </button>
+            </div>
+          </div>
+
+          <button 
+            style={{...styles.button, ...(loading ? styles.buttonLoading : {})}} 
+            onClick={handleRegister}
+            disabled={loading}
+          >
+            {loading ? (
+              <>
+                <div style={styles.spinner}></div>
+                Creating Account...
+              </>
+            ) : `Create ${role} Account`}
+          </button>
+        </div>
+
+        <p style={styles.footer}>
+          Already have an account?{' '}
+          <span style={styles.link} onClick={() => navigate('/')}>
+            Sign in here
+          </span>
+        </p>
       </div>
-
-      <div style={styles.roleInfo}>
-        {role === 'Owner' ? 
-          "As an owner, you'll have full access to manage your store, inventory, and staff." : 
-          "As staff, you'll have limited access to process sales and view assigned tasks."}
-      </div>
-
-      <input
-        type="text"
-        placeholder="Username *"
-        value={username}
-        onChange={(e) => setUsername(e.target.value)}
-        onKeyPress={handleKeyPress}
-        style={styles.input}
-        disabled={loading}
-      />
-      
-      <input
-        type="text"
-        placeholder="Full Name *"
-        value={fullName}
-        onChange={(e) => setFullName(e.target.value)}
-        onKeyPress={handleKeyPress}
-        style={styles.input}
-        disabled={loading}
-      />
-      
-      {isOwnerSignup && (
-        <input
-          type="text"
-          placeholder="Store Name *"
-          value={storeName}
-          onChange={(e) => setStoreName(e.target.value)}
-          onKeyPress={handleKeyPress}
-          style={styles.input}
-          disabled={loading}
-        />
-      )}
-      
-      <input
-        type="password"
-        placeholder="Password (min. 6 characters) *"
-        value={password}
-        onChange={(e) => setPassword(e.target.value)}
-        onKeyPress={handleKeyPress}
-        style={styles.input}
-        disabled={loading}
-      />
-      
-      <input
-        type="password"
-        placeholder="Confirm Password *"
-        value={confirmPassword}
-        onChange={(e) => setConfirmPassword(e.target.value)}
-        onKeyPress={handleKeyPress}
-        style={styles.input}
-        disabled={loading}
-      />
-
-      <button 
-        style={styles.button} 
-        onClick={handleRegister}
-        disabled={loading}
-      >
-        {loading ? 'Creating Account...' : `Create ${role} Account`}
-      </button>
-
-      <p style={styles.footer}>
-        Already have an account?{' '}
-        <span style={styles.link} onClick={() => navigate('/')}>
-          Sign in here
-        </span>
-      </p>
     </div>
   );
 }
@@ -256,13 +292,6 @@ const styles = {
   inputGroup: {
     marginBottom: '20px',
   },
-  label: {
-    display: 'block',
-    fontSize: '14px',
-    fontWeight: '500',
-    color: '#374151',
-    marginBottom: '6px',
-  },
   input: {
     width: '100%',
     padding: '12px 16px',
@@ -300,10 +329,15 @@ const styles = {
     padding: '4px',
     borderRadius: '4px',
     transition: 'color 0.2s ease',
+    width: '32px',
+    height: '32px',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   button: {
     width: '100%',
-    padding: '16px',
+    padding: '14px',
     fontSize: '16px',
     fontWeight: '600',
     color: 'white',
@@ -313,6 +347,22 @@ const styles = {
     cursor: 'pointer',
     marginTop: '16px',
     transition: 'background-color 0.2s ease',
+    display: 'flex',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: '10px',
+  },
+  buttonLoading: {
+    opacity: 0.8,
+    cursor: 'not-allowed',
+  },
+  spinner: {
+    width: '18px',
+    height: '18px',
+    border: '2px solid rgba(255, 255, 255, 0.3)',
+    borderTop: '2px solid white',
+    borderRadius: '50%',
+    animation: 'spin 1s linear infinite',
   },
   footer: {
     marginTop: '24px',
@@ -329,9 +379,14 @@ const styles = {
   },
 };
 
-// Add CSS for focus states
+// Add CSS for focus states and spinner
 const signupStyleSheet = document.createElement('style');
 signupStyleSheet.textContent = `
+  @keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+  }
+  
   input:focus {
     outline: none;
     border-color: #10b981;
