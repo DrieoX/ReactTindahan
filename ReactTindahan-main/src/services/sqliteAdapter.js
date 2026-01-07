@@ -8,7 +8,8 @@ class SQLiteAdapter {
     this.db = null;
     this.isNative = Capacitor.isNativePlatform();
     this.isInitialized = false;
-    this.apiBaseUrl = 'http://192.168.100.53:3001/api'; // Your Express server
+    // Make API URL configurable - defaults to localhost for development
+    this.apiBaseUrl = process.env.REACT_APP_API_URL || 'http://localhost:3001/api';
   }
 
   async init() {
@@ -16,6 +17,7 @@ class SQLiteAdapter {
 
     if (!this.isNative) {
       console.log('🌐 Web environment: Using API server connection');
+      console.log(`🌐 API Server: ${this.apiBaseUrl}`);
       this.isInitialized = true;
       return this;
     }
@@ -613,6 +615,12 @@ class SQLiteAdapter {
       console.error('Error getting user by username:', error);
       return null;
     }
+  }
+
+  // Method to update API URL dynamically (for mobile sync)
+  setApiUrl(url) {
+    this.apiBaseUrl = url.endsWith('/api') ? url : `${url}/api`;
+    console.log(`🔧 API URL updated to: ${this.apiBaseUrl}`);
   }
 }
 
