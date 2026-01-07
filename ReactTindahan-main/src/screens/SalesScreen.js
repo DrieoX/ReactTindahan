@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { dataService } from '../services/DataService'; // CHANGED
+import { dataService } from '../services/DataService';
 
 export default function SalesScreen({ userMode }) {
   const [barcode, setBarcode] = useState('');
@@ -9,6 +9,8 @@ export default function SalesScreen({ userMode }) {
   const [searchResults, setSearchResults] = useState([]);
   const [showSearchResults, setShowSearchResults] = useState(false);
   const [clickedButtons, setClickedButtons] = useState({});
+  const [loading, setLoading] = useState(false);
+  const [paymentLoading, setPaymentLoading] = useState(false);
   const mode = userMode || 'client';
   const inputRef = useRef(null);
   const searchRef = useRef(null);
@@ -18,11 +20,19 @@ export default function SalesScreen({ userMode }) {
   const user = savedUser;
 
   useEffect(() => {
-    console.log(`[AUDIT] VIEW_SALES_SCREEN`, {
+    // ✅ Log audit using backup table
+    dataService.add('backup', {
       user_id: user?.user_id,
-      username: user?.username,
-      timestamp: new Date().toISOString()
-    });
+      backup_name: `AUDIT_VIEW_SALES_SCREEN`,
+      backup_type: 'audit',
+      created_at: new Date().toISOString(),
+      schema_version: '6',
+      details: JSON.stringify({
+        action: 'VIEW_SALES_SCREEN',
+        user_id: user?.user_id,
+        username: user?.username
+      })
+    }).catch(console.error);
 
     loadProducts();
 
@@ -93,14 +103,25 @@ export default function SalesScreen({ userMode }) {
 
   const loadProducts = async () => {
     try {
-      console.log(`[AUDIT] LOAD_SALES_PRODUCTS`, {
+      setLoading(true);
+      
+      // ✅ Log audit using backup table
+      await dataService.add('backup', {
         user_id: user?.user_id,
-        username: user?.username,
-        timestamp: new Date().toISOString()
+        backup_name: `AUDIT_LOAD_SALES_PRODUCTS`,
+        backup_type: 'audit',
+        created_at: new Date().toISOString(),
+        schema_version: '6',
+        details: JSON.stringify({
+          action: 'LOAD_SALES_PRODUCTS',
+          user_id: user?.user_id,
+          username: user?.username
+        })
       });
 
-      const prodRes = await dataService.getAll('products'); // CHANGED
-      const inventoryData = await dataService.getAll('inventory'); // CHANGED
+      // Get products and inventory using dataService
+      const prodRes = await dataService.getProducts();
+      const inventoryData = await dataService.getInventory();
 
       const enrichedProducts = prodRes.map(p => {
         const inv = inventoryData.find(i => i.product_id === p.product_id);
@@ -115,14 +136,25 @@ export default function SalesScreen({ userMode }) {
       });
 
       setProducts(enrichedProducts);
+      setLoading(false);
     } catch (err) {
       console.error('Error loading products:', err);
-      console.error(`[AUDIT] LOAD_SALES_PRODUCTS_ERROR`, {
-        error: err.message,
+      setLoading(false);
+      
+      // ✅ Log audit using backup table
+      dataService.add('backup', {
         user_id: user?.user_id,
-        username: user?.username,
-        timestamp: new Date().toISOString()
-      });
+        backup_name: `AUDIT_LOAD_SALES_PRODUCTS_ERROR`,
+        backup_type: 'audit',
+        created_at: new Date().toISOString(),
+        schema_version: '6',
+        details: JSON.stringify({
+          action: 'LOAD_SALES_PRODUCTS_ERROR',
+          error: err.message,
+          user_id: user?.user_id,
+          username: user?.username
+        })
+      }).catch(console.error);
     }
   };
 
@@ -133,12 +165,20 @@ export default function SalesScreen({ userMode }) {
       return;
     }
 
-    console.log(`[AUDIT] SEARCH_PRODUCT_SALES`, {
-      search_term: searchTerm,
+    // ✅ Log audit using backup table
+    dataService.add('backup', {
       user_id: user?.user_id,
-      username: user?.username,
-      timestamp: new Date().toISOString()
-    });
+      backup_name: `AUDIT_SEARCH_PRODUCT_SALES`,
+      backup_type: 'audit',
+      created_at: new Date().toISOString(),
+      schema_version: '6',
+      details: JSON.stringify({
+        action: 'SEARCH_PRODUCT_SALES',
+        search_term: searchTerm,
+        user_id: user?.user_id,
+        username: user?.username
+      })
+    }).catch(console.error);
 
     const term = searchTerm.toLowerCase();
     const results = products.filter(product => 
@@ -162,13 +202,21 @@ export default function SalesScreen({ userMode }) {
     }
 
     if (product) {
-      console.log(`[AUDIT] SCAN_PRODUCT_SALES`, {
-        barcode: code,
-        product_id: product.id,
-        product_name: product.name,
+      // ✅ Log audit using backup table
+      await dataService.add('backup', {
         user_id: user?.user_id,
-        username: user?.username,
-        timestamp: new Date().toISOString()
+        backup_name: `AUDIT_SCAN_PRODUCT_SALES`,
+        backup_type: 'audit',
+        created_at: new Date().toISOString(),
+        schema_version: '6',
+        details: JSON.stringify({
+          action: 'SCAN_PRODUCT_SALES',
+          barcode: code,
+          product_id: product.id,
+          product_name: product.name,
+          user_id: user?.user_id,
+          username: user?.username
+        })
       });
       
       addToCart(product, 1);
@@ -179,12 +227,20 @@ export default function SalesScreen({ userMode }) {
   };
 
   const handleSearchSelect = async (product) => {
-    console.log(`[AUDIT] SEARCH_SELECT_PRODUCT_SALES`, {
-      product_id: product.id,
-      product_name: product.name,
+    // ✅ Log audit using backup table
+    await dataService.add('backup', {
       user_id: user?.user_id,
-      username: user?.username,
-      timestamp: new Date().toISOString()
+      backup_name: `AUDIT_SEARCH_SELECT_PRODUCT_SALES`,
+      backup_type: 'audit',
+      created_at: new Date().toISOString(),
+      schema_version: '6',
+      details: JSON.stringify({
+        action: 'SEARCH_SELECT_PRODUCT_SALES',
+        product_id: product.id,
+        product_name: product.name,
+        user_id: user?.user_id,
+        username: user?.username
+      })
     });
     
     addToCart(product, 1);
@@ -195,15 +251,23 @@ export default function SalesScreen({ userMode }) {
   const addToCart = async (product, qty = 1) => {
     if (!product) return;
     
-    console.log(`[AUDIT] ADD_TO_CART_SALES`, {
-      product_id: product.id,
-      product_name: product.name,
-      quantity: qty,
-      price: product.price,
-      stock_before: product.stock,
+    // ✅ Log audit using backup table
+    await dataService.add('backup', {
       user_id: user?.user_id,
-      username: user?.username,
-      timestamp: new Date().toISOString()
+      backup_name: `AUDIT_ADD_TO_CART_SALES`,
+      backup_type: 'audit',
+      created_at: new Date().toISOString(),
+      schema_version: '6',
+      details: JSON.stringify({
+        action: 'ADD_TO_CART_SALES',
+        product_id: product.id,
+        product_name: product.name,
+        quantity: qty,
+        price: product.price,
+        stock_before: product.stock,
+        user_id: user?.user_id,
+        username: user?.username
+      })
     });
 
     const existing = cart.find(item => item.id === product.id);
@@ -232,15 +296,23 @@ export default function SalesScreen({ userMode }) {
     } else {
       const oldItem = cart.find(item => item.id === id);
       if (oldItem && oldItem.quantity !== qty) {
-        console.log(`[AUDIT] UPDATE_CART_QUANTITY`, {
-          product_id: id,
-          product_name: product.name,
-          old_quantity: oldItem.quantity,
-          new_quantity: qty,
-          price: product.price,
+        // ✅ Log audit using backup table
+        await dataService.add('backup', {
           user_id: user?.user_id,
-          username: user?.username,
-          timestamp: new Date().toISOString()
+          backup_name: `AUDIT_UPDATE_CART_QUANTITY`,
+          backup_type: 'audit',
+          created_at: new Date().toISOString(),
+          schema_version: '6',
+          details: JSON.stringify({
+            action: 'UPDATE_CART_QUANTITY',
+            product_id: id,
+            product_name: product.name,
+            old_quantity: oldItem.quantity,
+            new_quantity: qty,
+            price: product.price,
+            user_id: user?.user_id,
+            username: user?.username
+          })
         });
       }
       
@@ -256,14 +328,22 @@ export default function SalesScreen({ userMode }) {
   const removeFromCart = async (id) => {
     const item = cart.find(item => item.id === id);
     
-    console.log(`[AUDIT] REMOVE_FROM_CART_SALES`, {
-      product_id: id,
-      product_name: item?.name,
-      quantity: item?.quantity,
-      price: item?.price,
+    // ✅ Log audit using backup table
+    await dataService.add('backup', {
       user_id: user?.user_id,
-      username: user?.username,
-      timestamp: new Date().toISOString()
+      backup_name: `AUDIT_REMOVE_FROM_CART_SALES`,
+      backup_type: 'audit',
+      created_at: new Date().toISOString(),
+      schema_version: '6',
+      details: JSON.stringify({
+        action: 'REMOVE_FROM_CART_SALES',
+        product_id: id,
+        product_name: item?.name,
+        quantity: item?.quantity,
+        price: item?.price,
+        user_id: user?.user_id,
+        username: user?.username
+      })
     });
     
     setCart(cart.filter(item => item.id !== id));
@@ -271,12 +351,20 @@ export default function SalesScreen({ userMode }) {
 
   const cancelAll = async () => {
     if (window.confirm('Are you sure you want to cancel all items?')) {
-      console.log(`[AUDIT] CANCEL_ALL_ITEMS`, {
-        items_count: cart.length,
-        total_amount: calculateTotal(),
+      // ✅ Log audit using backup table
+      await dataService.add('backup', {
         user_id: user?.user_id,
-        username: user?.username,
-        timestamp: new Date().toISOString()
+        backup_name: `AUDIT_CANCEL_ALL_ITEMS`,
+        backup_type: 'audit',
+        created_at: new Date().toISOString(),
+        schema_version: '6',
+        details: JSON.stringify({
+          action: 'CANCEL_ALL_ITEMS',
+          items_count: cart.length,
+          total_amount: calculateTotal(),
+          user_id: user?.user_id,
+          username: user?.username
+        })
       });
       
       setCart([]);
@@ -316,99 +404,103 @@ export default function SalesScreen({ userMode }) {
     }
 
     try {
+      setPaymentLoading(true);
       const saleDate = new Date().toISOString().split('T')[0];
       const transactionDateTime = getFormattedDateTime();
 
-      console.log(`[AUDIT] PAYMENT_ATTEMPT`, {
-        items_count: cart.length,
-        total_items: calculateTotalItems(),
-        total_amount: total,
-        cash_given: given,
-        change: (given - total).toFixed(2),
+      // ✅ Log audit using backup table
+      await dataService.add('backup', {
         user_id: user?.user_id,
-        username: user?.username,
-        timestamp: new Date().toISOString()
-      });
-
-      // ✅ FIXED: Store user_id as well as username
-      const saleId = await dataService.add('sales', { // CHANGED
-        sales_date: saleDate,
-        sales_time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        user_id: user?.user_id,
-        created_by: user?.username,
-        created_at: new Date().toISOString()
-      });
-
-      // Get all inventory data
-      const allInventory = await dataService.getAll('inventory'); // CHANGED
-      
-      for (const item of cart) {
-        const amount = item.quantity * item.price;
-
-        await dataService.add('sale_items', { // CHANGED
-          sales_id: saleId,
-          product_id: item.id,
-          quantity: item.quantity,
-          amount,
+        backup_name: `AUDIT_PAYMENT_ATTEMPT`,
+        backup_type: 'audit',
+        created_at: new Date().toISOString(),
+        schema_version: '6',
+        details: JSON.stringify({
+          action: 'PAYMENT_ATTEMPT',
+          items_count: cart.length,
+          total_items: calculateTotalItems(),
           total_amount: total,
-          created_by: user?.username,
-          created_at: new Date().toISOString()
-        });
-
-        // Find and update inventory
-        const inventoryRecord = allInventory.find(inv => inv.product_id === item.id);
-        
-        if (inventoryRecord) {
-          await dataService.update('inventory', inventoryRecord.product_id, { // CHANGED
-            quantity: Math.max(inventoryRecord.quantity - item.quantity, 0),
-            updated_by: user?.username,
-            updated_at: new Date().toISOString()
-          });
-        }
-
-        // Calculate running balance
-        const updatedInventory = await dataService.getAll('inventory'); // CHANGED
-        const currentInv = updatedInventory.find(inv => inv.product_id === item.id);
-        const runningBalance = currentInv ? currentInv.quantity : 0;
-
-        await dataService.add('stock_card', { // CHANGED
-          product_id: item.id,
-          quantity: -item.quantity,
-          unit_price: item.price,
-          transaction_type: 'SALE',
-          transaction_date: transactionDateTime,
-          sales_id: saleId,
+          cash_given: given,
+          change: (given - total).toFixed(2),
           user_id: user?.user_id,
-          running_balance: runningBalance,
-          created_by: user?.username,
-          created_at: transactionDateTime
-        });
+          username: user?.username
+        })
+      });
 
-        console.log(`[AUDIT] SALE_ITEM`, {
+      // Process sale using dataService
+      const saleData = {
+        user_id: user?.user_id,
+        sales_date: saleDate,
+        items: cart.map(item => ({
           product_id: item.id,
-          product_name: item.name,
           quantity: item.quantity,
-          unit_price: item.price,
-          total_amount: amount,
-          stock_before: item.stock,
-          stock_after: runningBalance,
-          sale_id: saleId,
+          amount: item.price,
+          total_amount: item.price * item.quantity,
+          stockout_reason: null
+        }))
+      };
+
+      // Use dataService.processSale which handles both SQLite and API modes
+      const saleResult = await dataService.processSale(saleData);
+      
+      if (!saleResult || !saleResult.saleId) {
+        throw new Error('Failed to process sale');
+      }
+
+      const saleId = saleResult.saleId;
+      const saleItemIds = saleResult.saleItemIds || [];
+
+      // Log each sale item
+      for (let i = 0; i < cart.length; i++) {
+        const item = cart[i];
+        const saleItemId = saleItemIds[i];
+        
+        // Get updated inventory to calculate running balance
+        const currentInv = await dataService.getById('inventory', item.id);
+        const runningBalance = currentInv?.quantity || 0;
+        
+        // ✅ Log audit using backup table for each item
+        await dataService.add('backup', {
           user_id: user?.user_id,
-          username: user?.username,
-          timestamp: new Date().toISOString()
+          backup_name: `AUDIT_SALE_ITEM`,
+          backup_type: 'audit',
+          created_at: new Date().toISOString(),
+          schema_version: '6',
+          details: JSON.stringify({
+            action: 'SALE_ITEM',
+            product_id: item.id,
+            product_name: item.name,
+            quantity: item.quantity,
+            unit_price: item.price,
+            total_amount: item.price * item.quantity,
+            stock_before: item.stock,
+            stock_after: runningBalance,
+            sale_id: saleId,
+            sale_items_id: saleItemId,
+            user_id: user?.user_id,
+            username: user?.username
+          })
         });
       }
 
-      console.log(`[AUDIT] PAYMENT_SUCCESS`, {
-        sale_id: saleId,
-        items_count: cart.length,
-        total_items: calculateTotalItems(),
-        total_amount: total,
-        cash_given: given,
-        change: (given - total).toFixed(2),
+      // ✅ Log audit using backup table for successful payment
+      await dataService.add('backup', {
         user_id: user?.user_id,
-        username: user?.username,
-        timestamp: new Date().toISOString()
+        backup_name: `AUDIT_PAYMENT_SUCCESS`,
+        backup_type: 'audit',
+        created_at: new Date().toISOString(),
+        schema_version: '6',
+        details: JSON.stringify({
+          action: 'PAYMENT_SUCCESS',
+          sale_id: saleId,
+          items_count: cart.length,
+          total_items: calculateTotalItems(),
+          total_amount: total,
+          cash_given: given,
+          change: (given - total).toFixed(2),
+          user_id: user?.user_id,
+          username: user?.username
+        })
       });
 
       const change = (given - total).toFixed(2);
@@ -418,20 +510,31 @@ export default function SalesScreen({ userMode }) {
       setSearchResults([]);
       setShowSearchResults(false);
       alert(`Payment completed! Change: ₱${change}`);
-      loadProducts();
+      await loadProducts(); // Refresh products
+      
     } catch (err) {
       console.error('Error handling payment:', err);
       
-      console.error(`[AUDIT] PAYMENT_ERROR`, {
-        error: err.message,
-        items_count: cart.length,
-        total_amount: calculateTotal(),
+      // ✅ Log audit using backup table for payment error
+      await dataService.add('backup', {
         user_id: user?.user_id,
-        username: user?.username,
-        timestamp: new Date().toISOString()
+        backup_name: `AUDIT_PAYMENT_ERROR`,
+        backup_type: 'audit',
+        created_at: new Date().toISOString(),
+        schema_version: '6',
+        details: JSON.stringify({
+          action: 'PAYMENT_ERROR',
+          error: err.message,
+          items_count: cart.length,
+          total_amount: calculateTotal(),
+          user_id: user?.user_id,
+          username: user?.username
+        })
       });
       
       alert('Error processing payment. Please try again.');
+    } finally {
+      setPaymentLoading(false);
     }
   };
 
@@ -441,6 +544,12 @@ export default function SalesScreen({ userMode }) {
         <h1 style={styles.pageTitle}>Point of Sale</h1>
         <p style={styles.pageSubtitle}>Scan or search products to add to cart</p>
       </div>
+
+      {loading && (
+        <div style={styles.loadingMessage}>
+          Loading products...
+        </div>
+      )}
 
       {/* Barcode/Search Input */}
       <div style={styles.formCard}>
@@ -460,6 +569,7 @@ export default function SalesScreen({ userMode }) {
               if (searchResults.length > 0) setShowSearchResults(true);
             }}
             onBlur={() => setIsInputFocused(false)}
+            disabled={loading || paymentLoading}
           />
           
           {showSearchResults && searchResults.length > 0 && (
@@ -498,6 +608,7 @@ export default function SalesScreen({ userMode }) {
                 color: clickedButtons['cancelAll'] ? '#DC2626' : '#DC2626',
                 border: clickedButtons['cancelAll'] ? '2px solid #DC2626' : '1px solid #FECACA',
               }}
+              disabled={paymentLoading}
             >
               Cancel All
             </button>
@@ -556,6 +667,7 @@ export default function SalesScreen({ userMode }) {
                                 color: clickedButtons[`decrease-${item.id}`] ? '#0ea5e9' : '#1E293B',
                                 border: clickedButtons[`decrease-${item.id}`] ? '2px solid #0ea5e9' : '1px solid #CBD5E1',
                               }}
+                              disabled={paymentLoading}
                             >
                               −
                             </button>
@@ -565,6 +677,7 @@ export default function SalesScreen({ userMode }) {
                               style={styles.qtyInput}
                               onChange={(e) => handleQuantityInput(item.id, e.target.value)}
                               min="1"
+                              disabled={paymentLoading}
                             />
                             <button 
                               onClick={() => handleButtonClick(`increase-${item.id}`, () => updateQuantity(item.id, item.quantity + 1))}
@@ -574,6 +687,7 @@ export default function SalesScreen({ userMode }) {
                                 color: clickedButtons[`increase-${item.id}`] ? '#0ea5e9' : '#1E293B',
                                 border: clickedButtons[`increase-${item.id}`] ? '2px solid #0ea5e9' : '1px solid #CBD5E1',
                               }}
+                              disabled={paymentLoading}
                             >
                               +
                             </button>
@@ -594,6 +708,7 @@ export default function SalesScreen({ userMode }) {
                             color: clickedButtons[`remove-${item.id}`] ? '#DC2626' : '#DC2626',
                             border: clickedButtons[`remove-${item.id}`] ? '2px solid #DC2626' : '1px solid #FECACA',
                           }}
+                          disabled={paymentLoading}
                         >
                           Remove
                         </button>
@@ -656,6 +771,7 @@ export default function SalesScreen({ userMode }) {
                             color: clickedButtons[`decrease-mobile-${item.id}`] ? '#0ea5e9' : '#1E293B',
                             border: clickedButtons[`decrease-mobile-${item.id}`] ? '2px solid #0ea5e9' : '1px solid #CBD5E1',
                           }}
+                          disabled={paymentLoading}
                         >
                           −
                         </button>
@@ -668,6 +784,7 @@ export default function SalesScreen({ userMode }) {
                             color: clickedButtons[`increase-mobile-${item.id}`] ? '#0ea5e9' : '#1E293B',
                             border: clickedButtons[`increase-mobile-${item.id}`] ? '2px solid #0ea5e9' : '1px solid #CBD5E1',
                           }}
+                          disabled={paymentLoading}
                         >
                           +
                         </button>
@@ -688,6 +805,7 @@ export default function SalesScreen({ userMode }) {
                         color: clickedButtons[`remove-mobile-${item.id}`] ? '#DC2626' : '#DC2626',
                         border: clickedButtons[`remove-mobile-${item.id}`] ? '2px solid #DC2626' : '1px solid #FECACA',
                       }}
+                      disabled={paymentLoading}
                     >
                       Remove Item
                     </button>
@@ -728,6 +846,7 @@ export default function SalesScreen({ userMode }) {
                       style={styles.cashInput}
                       step="0.01"
                       min="0"
+                      disabled={paymentLoading}
                     />
                   </div>
                 </div>
@@ -760,9 +879,9 @@ export default function SalesScreen({ userMode }) {
                   color: clickedButtons['completePayment'] ? '#10B981' : '#fff',
                   border: clickedButtons['completePayment'] ? '2px solid #10B981' : 'none',
                 }}
-                disabled={cart.length === 0}
+                disabled={cart.length === 0 || paymentLoading}
               >
-                Complete Payment
+                {paymentLoading ? 'Processing...' : 'Complete Payment'}
               </button>
             </div>
           </>

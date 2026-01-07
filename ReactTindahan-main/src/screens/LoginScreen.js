@@ -1,134 +1,97 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { loginUser } from '../services/UserService';
-import { dataService } from '../services/DataService'; // Import DataService
 
-export default function LoginScreen({ handleLogin }) { // Changed from setUserMode to handleLogin
+export default function LoginScreen({ setUserMode }) {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
 
-  const handleSubmit = async () => {
+  const handleLogin = async () => {
     if (!username || !password) {
       alert('Please enter both username and password.');
       return;
     }
 
     setLoading(true);
-    try {
-      const result = await loginUser(username, password);
+    const result = await loginUser(username, password);
+    setLoading(false);
+    
+    if (result.success) {
+      const userRole = result.user.role;
+      alert(`Welcome ${result.user.full_name}! Logged in as ${userRole}`);
       
-      if (result.success) {
-        const user = result.user;
-        const userRole = user.role;
-        
-        alert(`Welcome ${user.full_name}! Logged in as ${userRole}`);
-        
-        // Save to localStorage
-        localStorage.setItem("user", JSON.stringify(user));
-        localStorage.setItem("userMode", userRole === 'Owner' ? 'server' : 'client');
-        
-        // Update DataService mode
-        dataService.setUserMode(userRole === 'Owner' ? 'server' : 'client');
-        
-        // Call handleLogin with user object
-        if (handleLogin) {
-          handleLogin(user);
-        }
-        
-        navigate('/dashboard', { replace: true });
-      } else {
-        alert(result.error);
+      // Save to localStorage
+      localStorage.setItem("user", JSON.stringify(result.user));
+      
+      // Owners use server mode, Staff use client mode
+      const mode = userRole === 'Owner' ? 'server' : 'client';
+      localStorage.setItem("userMode", mode);
+      
+      // Update user mode in dataService
+      if (window.dataService) {
+        window.dataService.setUserMode(mode);
       }
-    } catch (error) {
-      console.error('Login error:', error);
-      alert('An error occurred during login. Please try again.');
-    } finally {
-      setLoading(false);
+      
+      setUserMode(mode);
+      navigate('/dashboard', { replace: true, state: { user: result.user, userMode: mode } });
+    } else {
+      alert(result.error || 'Login failed. Please try again.');
     }
   };
 
-  // Handle Enter key press
   const handleKeyPress = (e) => {
     if (e.key === 'Enter') {
-      handleSubmit();
+      handleLogin();
     }
-  };
-
-  const togglePasswordVisibility = () => {
-    setShowPassword(!showPassword);
   };
 
   return (
     <div style={styles.container}>
-      <div style={styles.card}>
-        <div style={styles.icon}>🛒</div>
-        <h2 style={styles.title}>Sign in to your account</h2>
-        <p style={styles.subtitle}>Access your POS system</p>
+      <div style={styles.icon}>🛒</div>
+      <h2 style={styles.title}>Sign in to your account</h2>
+      <p style={styles.subtitle}>Access your POS system</p>
 
-        <div style={styles.form}>
-          <div style={styles.inputGroup}>
-            <label style={styles.label}>Username</label>
-            <input
-              type="text"
-              placeholder="Enter your username"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              onKeyPress={handleKeyPress}
-              style={styles.input}
-              disabled={loading}
-            />
-          </div>
+      <label style={styles.label}>Username</label>
+      <input
+        type="text"
+        placeholder="Enter your username"
+        value={username}
+        onChange={(e) => setUsername(e.target.value)}
+        onKeyPress={handleKeyPress}
+        style={styles.input}
+        disabled={loading}
+      />
 
-          <div style={styles.inputGroup}>
-            <label style={styles.label}>Password</label>
-            <div style={styles.passwordWrapper}>
-              <input
-                type={showPassword ? "text" : "password"}
-                placeholder="Enter your password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                onKeyPress={handleKeyPress}
-                style={styles.passwordInput}
-                disabled={loading}
-              />
-              <button
-                type="button"
-                onClick={togglePasswordVisibility}
-                style={styles.passwordToggle}
-                disabled={loading}
-              >
-                {showPassword ? '🙈' : '👁️'}
-              </button>
-            </div>
-          </div>
+      <label style={styles.label}>Password</label>
+      <input
+        type="password"
+        placeholder="Enter your password"
+        value={password}
+        onChange={(e) => setPassword(e.target.value)}
+        onKeyPress={handleKeyPress}
+        style={styles.input}
+        disabled={loading}
+      />
 
-          <button 
-            style={loading ? {...styles.button, ...styles.buttonLoading} : styles.button} 
-            onClick={handleSubmit}
-            disabled={loading}
-          >
-            {loading ? (
-              <>
-                <span style={styles.spinner}></span>
-                Signing in...
-              </>
-            ) : 'Sign in'}
-          </button>
+      <button 
+        style={styles.button} 
+        onClick={handleLogin}
+        disabled={loading}
+      >
+        {loading ? 'Signing in...' : 'Sign in'}
+      </button>
 
-          <p style={styles.footer}>
-            Don't have an account?{' '}
-            <span
-              style={styles.link}
-              onClick={() => navigate('/signup')}
-            >
-              Sign up here
-            </span>
-          </p>
-        </div>
-      </div>
+      <p style={styles.footer}>
+        Don't have an account?{' '}
+        <span
+          style={styles.link}
+          onClick={() => navigate('/signup')}
+        >
+          Sign up here
+        </span>
+      </p>
     </div>
   );
 }

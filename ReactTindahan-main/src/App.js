@@ -11,9 +11,8 @@ import ReportsScreen from './screens/ReportsScreen';
 import SuppliersScreen from './screens/SuppliersScreen';
 import BackupScreen from './screens/BackupScreen';
 import MainLayout from './components/MainLayout';
-import { dataService } from './services/DataService';
 
-import { db } from './db';
+import { dataService } from './services/DataService';
 import { initAutoBackup, checkAndRunBackup } from './services/autoBackup';
 
 // 🔐 Capacitor storage permission - Dynamically import to avoid build errors
@@ -84,11 +83,11 @@ function ServerStack({ handleLogout, userMode }) {
   );
 }
 
-// 🔹 Auth stack - Updated to use handleLogin
-function AuthStack({ handleLogin }) {
+// 🔹 Auth stack
+function AuthStack({ setUserMode }) {
   return (
     <Routes>
-      <Route path="/" element={<LoginScreen handleLogin={handleLogin} />} />
+      <Route path="/" element={<LoginScreen setUserMode={setUserMode} />} />
       <Route path="/signup" element={<SignupScreen />} />
       <Route path="*" element={<Navigate to="/" />} />
     </Routes>
@@ -98,33 +97,29 @@ function AuthStack({ handleLogin }) {
 export default function App() {
   const [userMode, setUserMode] = useState(null);
   const [loading, setLoading] = useState(true);
-
-  // ✅ Define handleLogin INSIDE the App component
-  const handleLogin = (user) => {
-    const mode = user.role === 'Owner' ? 'server' : 'client';
-    setUserMode(mode);
-    localStorage.setItem('userMode', mode);
-    localStorage.setItem('user', JSON.stringify(user));
-    
-    // Update data service with mode
-    dataService.setUserMode(mode);
-  };
+  const [initializationError, setInitializationError] = useState(null);
 
   useEffect(() => {
     const init = async () => {
       try {
+        console.log('🚀 App initialization started...');
+        
         // Initialize auto backup system
+        console.log('📊 Initializing auto backup system...');
         initAutoBackup();
         
         // 🔐 REQUEST STORAGE PERMISSION (Capacitor Android/iOS)
         if (isCapacitor && Filesystem) {
           try {
+            console.log('🔐 Checking storage permissions...');
+            
             // Check if we have permission
             const hasPermission = await Filesystem.checkPermissions();
             
             // Request permission if needed
             if (hasPermission.publicStorage !== 'granted') {
               try {
+                console.log('🔐 Requesting storage permissions...');
                 await Filesystem.requestPermissions();
                 console.log('✅ Storage permission requested');
               } catch (permError) {
@@ -136,25 +131,26 @@ export default function App() {
           } catch (permissionError) {
             console.warn('⚠️ Permission check failed, continuing:', permissionError);
           }
+        } else {
+          console.log('🌐 Running in web mode (no Capacitor permissions needed)');
         }
-
-        // Initialize database
-        await db.open();
-        console.log('✅ Database initialized');
 
         // Restore user mode from localStorage
         const savedMode = localStorage.getItem('userMode');
         if (savedMode && (savedMode === 'client' || savedMode === 'server')) {
+          console.log(`📱 Restoring user mode: ${savedMode}`);
           setUserMode(savedMode);
-          // Update data service with saved mode
-          dataService.setUserMode(savedMode);
+        } else {
+          console.log('📱 No saved user mode found');
         }
 
+        console.log('✅ App initialization completed');
         setLoading(false);
         
         // Schedule auto backup check for owners
         // Wait 5 seconds for app to fully initialize
         setTimeout(() => {
+          console.log('⏰ Checking for auto backup...');
           checkAndRunBackup().then(success => {
             if (success) {
               console.log('✅ Auto backup completed on startup');
@@ -167,7 +163,8 @@ export default function App() {
         }, 5000);
         
       } catch (err) {
-        console.error('❌ Initialization error:', err);
+        console.error('❌ App initialization error:', err);
+        setInitializationError(err.message);
         setLoading(false);
       }
     };
@@ -176,6 +173,7 @@ export default function App() {
   }, []);
 
   const handleLogout = () => {
+    console.log('🚪 User logging out...');
     setUserMode(null);
     localStorage.removeItem('user');
     localStorage.removeItem('userMode');
@@ -217,11 +215,50 @@ export default function App() {
     );
   }
 
+  if (initializationError) {
+    return (
+      <div style={{ 
+        textAlign: 'center', 
+        marginTop: '40vh', 
+        padding: '20px',
+        fontFamily: 'Arial, sans-serif'
+      }}>
+        <h2 style={{ color: '#dc2626', marginBottom: '20px' }}>❌ App Initialization Error</h2>
+        <p style={{ 
+          backgroundColor: '#fef2f2', 
+          padding: '15px', 
+          borderRadius: '8px',
+          marginBottom: '20px',
+          color: '#991b1b'
+        }}>
+          {initializationError}
+        </p>
+        <p style={{ marginBottom: '20px', color: '#64748b' }}>
+          Please check your internet connection and try again.
+        </p>
+        <button 
+          onClick={() => window.location.reload()}
+          style={{
+            padding: '10px 20px',
+            backgroundColor: '#3498db',
+            color: 'white',
+            border: 'none',
+            borderRadius: '6px',
+            cursor: 'pointer',
+            fontSize: '16px'
+          }}
+        >
+          Reload App
+        </button>
+      </div>
+    );
+  }
+
   return (
     <Router>
       <Routes>
         {!userMode ? (
-          <Route path="/*" element={<AuthStack handleLogin={handleLogin} />} />
+          <Route path="/*" element={<AuthStack setUserMode={setUserMode} />} />
         ) : userMode === 'server' ? (
           <Route
             path="/*"

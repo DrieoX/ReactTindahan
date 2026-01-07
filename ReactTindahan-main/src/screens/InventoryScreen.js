@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react'; 
-import { dataService } from '../services/DataService'; // CHANGED: Import DataService
+import { dataService } from '../services/DataService';
 
 export default function InventoryScreen({ userMode }) {
   const mode = userMode || 'client';
@@ -71,19 +71,21 @@ export default function InventoryScreen({ userMode }) {
   const fetchProductAuditLogs = async (productId) => {
     try {
       // Get product creation info
-      const product = await dataService.getById('products', productId); // CHANGED
+      const product = await dataService.getById('products', productId);
       if (!product) return;
       
       // Get all stock card records for this product
       const stockRecords = await dataService.getAll('stock_card', { 
         where: { product_id: productId } 
-      }); // CHANGED
+      });
       
-      // Take only last 10 records
-      const recentRecords = stockRecords.slice(-10).reverse();
+      // Sort by date and limit
+      const sortedRecords = stockRecords
+        .sort((a, b) => new Date(b.transaction_date || b.created_at) - new Date(a.transaction_date || a.created_at))
+        .slice(0, 10);
       
       // Format as audit logs using existing data
-      const logs = recentRecords.map(record => ({
+      const logs = sortedRecords.map(record => ({
         action: record.transaction_type || 'STOCK_TRANSACTION',
         username: record.created_by || 'System',
         timestamp: record.transaction_date || record.created_at,
@@ -122,13 +124,15 @@ export default function InventoryScreen({ userMode }) {
     try {
       const logs = await dataService.getAll('stock_card', { 
         where: { product_id: productId } 
-      }); // CHANGED
+      });
       
-      // Take only last 20 records and reverse for recent first
-      const recentLogs = logs.slice(-20).reverse();
+      // Sort by date and limit
+      const sortedLogs = logs
+        .sort((a, b) => new Date(b.transaction_date || b.created_at) - new Date(a.transaction_date || a.created_at))
+        .slice(0, 20);
       
       // Format as audit logs
-      const auditLogs = recentLogs.map(record => ({
+      const auditLogs = sortedLogs.map(record => ({
         action: record.transaction_type || 'STOCK_TRANSACTION',
         username: record.created_by || 'System',
         timestamp: record.transaction_date || record.created_at,
@@ -150,22 +154,26 @@ export default function InventoryScreen({ userMode }) {
     try {
       setDeletedItemsLoading(true);
       
-      // Get all backup records
-      const allBackups = await dataService.getAll('backup'); // CHANGED
+      // Fetch all backup records
+      const allBackups = await dataService.getAll('backup');
       
       // Filter deleted products
-      const deletedProductsData = allBackups.filter(item => 
-        item.backup_type === 'deleted_product' && 
-        !item.restored_at && 
-        !item.confirmed_at
-      ).reverse();
+      const deletedProductsData = allBackups
+        .filter(item => 
+          item.backup_type === 'deleted_product' && 
+          !item.restored_at && 
+          !item.confirmed_at
+        )
+        .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
       
       // Filter deleted categories
-      const deletedCategoriesData = allBackups.filter(item => 
-        item.backup_type === 'deleted_category' && 
-        !item.restored_at && 
-        !item.confirmed_at
-      ).reverse();
+      const deletedCategoriesData = allBackups
+        .filter(item => 
+          item.backup_type === 'deleted_category' && 
+          !item.restored_at && 
+          !item.confirmed_at
+        )
+        .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
       
       setDeletedProducts(deletedProductsData);
       setDeletedCategories(deletedCategoriesData);
@@ -234,10 +242,8 @@ export default function InventoryScreen({ userMode }) {
 
   const prepopulateCategories = async () => {
     try {
-      const allCategories = await dataService.getAll('categories'); // CHANGED
-      const count = allCategories.length;
-      
-      if (count === 0) {
+      const categoriesList = await dataService.getAll('categories');
+      if (categoriesList.length === 0) {
         const defaultCategories = [
           'Beverages',
           'Bakery',
@@ -257,7 +263,7 @@ export default function InventoryScreen({ userMode }) {
         ];
         
         // ✅ FIXED: Include created_by and created_at
-        await Promise.all(defaultCategories.map(name => dataService.add('categories', { // CHANGED
+        await Promise.all(defaultCategories.map(name => dataService.add('categories', { 
           name,
           created_by: user?.username || 'System',
           created_at: new Date().toISOString()
@@ -283,7 +289,7 @@ export default function InventoryScreen({ userMode }) {
 
   const fetchCategories = async () => {
     try {
-      const list = await dataService.getAll('categories'); // CHANGED
+      const list = await dataService.getAll('categories');
       setCategories(list);
     } catch (err) {
       console.error('Error fetching categories:', err);
@@ -303,9 +309,9 @@ export default function InventoryScreen({ userMode }) {
         timestamp: new Date().toISOString()
       });
 
-      const products = await dataService.getAll('products'); // CHANGED
-      const inventoryRecords = await dataService.getAll('inventory'); // CHANGED
-      const supplierList = await dataService.getAll('suppliers'); // CHANGED
+      const products = await dataService.getAll('products');
+      const inventoryRecords = await dataService.getAll('inventory');
+      const supplierList = await dataService.getAll('suppliers');
 
       const items = products.map((p) => {
         const invRecord = inventoryRecords.find(inv => inv.product_id === p.product_id);
@@ -352,7 +358,7 @@ export default function InventoryScreen({ userMode }) {
 
   const fetchSuppliers = async () => {
     try {
-      const list = await dataService.getAll('suppliers'); // CHANGED
+      const list = await dataService.getAll('suppliers');
       setSuppliers(list);
     } catch (err) {
       console.error('Error fetching suppliers:', err);
@@ -370,9 +376,9 @@ export default function InventoryScreen({ userMode }) {
       return alert('Please fill out all required fields.');
 
     try {
-      const allProducts = await dataService.getAll('products'); // CHANGED
-      const existing = allProducts.find(p => p.sku === newItem.sku);
-      
+      // Check for duplicate SKU
+      const products = await dataService.getAll('products');
+      const existing = products.find(p => p.sku === newItem.sku && p.sku);
       if (existing) {
         alert('A product with this SKU already exists.');
         // ✅ FIXED: Just log to console
@@ -383,7 +389,7 @@ export default function InventoryScreen({ userMode }) {
         return;
       }
 
-      const productId = await dataService.add('products', { // CHANGED
+      const productData = {
         sku: newItem.sku || null,
         name: newItem.name,
         unit_price: parseFloat(newItem.unit_price),
@@ -392,9 +398,12 @@ export default function InventoryScreen({ userMode }) {
         // ✅ ADDED: Include created_by and created_at for audit trail
         created_by: user?.username,
         created_at: new Date().toISOString()
-      });
+      };
 
-      await dataService.add('inventory', { // CHANGED
+      const productResult = await dataService.add('products', productData);
+      const productId = productResult?.product_id || productResult?.id || Date.now();
+
+      await dataService.add('inventory', {
         product_id: productId,
         supplier_id: null,
         quantity: 0,
@@ -447,9 +456,9 @@ export default function InventoryScreen({ userMode }) {
 
   const handleSaveEdit = async () => {
     try {
-      const oldProduct = await dataService.getById('products', editingItem.product_id); // CHANGED
+      const oldProduct = await dataService.getById('products', editingItem.product_id);
       
-      await dataService.update('products', editingItem.product_id, { // CHANGED
+      await dataService.update('products', editingItem.product_id, {
         sku: editingItem.sku,
         name: editingItem.name,
         unit_price: parseFloat(editingItem.unit_price),
@@ -457,12 +466,14 @@ export default function InventoryScreen({ userMode }) {
         category_id: editingItem.category_id || null,
       });
 
-      // Get inventory record and update
-      const allInventory = await dataService.getAll('inventory'); // CHANGED
-      const inventoryRecord = allInventory.find(inv => inv.product_id === editingItem.product_id);
+      // Find and update inventory record
+      const inventoryRecords = await dataService.getAll('inventory', { 
+        where: { product_id: editingItem.product_id } 
+      });
       
-      if (inventoryRecord) {
-        await dataService.update('inventory', inventoryRecord.product_id, { // CHANGED
+      if (inventoryRecords.length > 0) {
+        const inventoryRecord = inventoryRecords[0];
+        await dataService.update('inventory', inventoryRecord.inventory_id || inventoryRecord.id, {
           threshold: parseInt(editingItem.threshold) || 5,
           updated_by: user?.username,
           updated_at: new Date().toISOString()
@@ -501,13 +512,13 @@ export default function InventoryScreen({ userMode }) {
       const productName = editingItem.name;
       
       // Store the deleted product in backup table for recycle bin
-      await dataService.add('backup', { // CHANGED
+      await dataService.add('backup', {
         user_id: user?.user_id,
         username: user?.username,
         backup_name: `DELETED_PRODUCT_${productName}`,
         backup_type: 'deleted_product',
         created_at: new Date().toISOString(),
-        schema_version: '5',
+        schema_version: '6',
         details: JSON.stringify(editingItem),
         restored_at: null,
         confirmed_at: null,
@@ -515,32 +526,24 @@ export default function InventoryScreen({ userMode }) {
       });
       
       // Now delete from original tables
-      await dataService.delete('products', productId); // CHANGED
+      await dataService.delete('products', productId);
       
-      // Get inventory records for this product and delete them
-      const allInventory = await dataService.getAll('inventory'); // CHANGED
-      const inventoryRecords = allInventory.filter(inv => inv.product_id === productId);
-      for (const invRecord of inventoryRecords) {
-        await dataService.delete('inventory', invRecord.product_id); // CHANGED
+      // Delete related inventory record
+      const inventoryRecords = await dataService.getAll('inventory', { 
+        where: { product_id: productId } 
+      });
+      for (const record of inventoryRecords) {
+        await dataService.delete('inventory', record.inventory_id || record.id);
       }
       
-      // Get and delete other related records
-      const allResuppliedItems = await dataService.getAll('resupplied_items'); // CHANGED
-      const resuppliedRecords = allResuppliedItems.filter(r => r.product_id === productId);
-      for (const record of resuppliedRecords) {
-        await dataService.delete('resupplied_items', record.resupplied_items_id); // CHANGED
-      }
-      
-      const allStockCard = await dataService.getAll('stock_card'); // CHANGED
-      const stockCardRecords = allStockCard.filter(s => s.product_id === productId);
-      for (const record of stockCardRecords) {
-        await dataService.delete('stock_card', record.stock_card_id); // CHANGED
-      }
-      
-      const allSaleItems = await dataService.getAll('sale_items'); // CHANGED
-      const saleItemRecords = allSaleItems.filter(s => s.product_id === productId);
-      for (const record of saleItemRecords) {
-        await dataService.delete('sale_items', record.sales_items_id); // CHANGED
+      // Delete related records from other tables
+      const tables = ['resupplied_items', 'stock_card', 'sale_items'];
+      for (const table of tables) {
+        const records = await dataService.getAll(table, { where: { product_id: productId } });
+        for (const record of records) {
+          const recordId = record[`${table.slice(0, -1)}_id`] || record.id;
+          await dataService.delete(table, recordId);
+        }
       }
 
       // ✅ FIXED: Just log to console
@@ -590,9 +593,9 @@ export default function InventoryScreen({ userMode }) {
       // Fetch all stock card records for this product
       const stockRecords = await dataService.getAll('stock_card', { 
         where: { product_id: item.product_id } 
-      }); // CHANGED
-      
-      // Sort by transaction_date
+      });
+
+      // Sort by date
       const sortedRecords = stockRecords.sort((a, b) => 
         new Date(a.transaction_date || a.created_at) - new Date(b.transaction_date || b.created_at)
       );
@@ -608,11 +611,9 @@ export default function InventoryScreen({ userMode }) {
       }
 
       // Fetch all supplier info
-      const allSuppliers = await dataService.getAll('suppliers'); // CHANGED
-      
       const supplierInfo = await Promise.all(sortedRecords.map(async (record) => {
         const supplier = record.supplier_id 
-          ? allSuppliers.find(s => s.supplier_id === record.supplier_id)
+          ? await dataService.getById('suppliers', record.supplier_id) 
           : null;
         
         // Determine if it's stock-in or stock-out
@@ -665,7 +666,7 @@ export default function InventoryScreen({ userMode }) {
     }
     
     try {
-      const categoryId = await dataService.add('categories', { // CHANGED
+      const categoryResult = await dataService.add('categories', { 
         name: newCategoryName.trim(),
         // ✅ ADDED: Include created_by and created_at for audit trail
         created_by: user?.username,
@@ -674,7 +675,7 @@ export default function InventoryScreen({ userMode }) {
       
       // ✅ FIXED: Just log to console
       console.log(`[AUDIT] ADD_CATEGORY`, {
-        category_id: categoryId,
+        category_id: categoryResult?.category_id || categoryResult?.id,
         category_name: newCategoryName.trim(),
         user_id: user?.user_id,
         username: user?.username
@@ -714,10 +715,10 @@ export default function InventoryScreen({ userMode }) {
     }
     
     try {
-      const oldCategory = await dataService.getById('categories', editingCategory.category_id); // CHANGED
+      const oldCategory = await dataService.getById('categories', editingCategory.category_id);
       
-      await dataService.update('categories', editingCategory.category_id, { // CHANGED
-        name: newCategoryName.trim()
+      await dataService.update('categories', editingCategory.category_id, { 
+        name: newCategoryName.trim() 
       });
       
       // ✅ FIXED: Just log to console
@@ -749,8 +750,8 @@ export default function InventoryScreen({ userMode }) {
     
     try {
       // Check if any products use this category
-      const allProducts = await dataService.getAll('products'); // CHANGED
-      const productsWithCategory = allProducts.filter(p => p.category_id === category.category_id);
+      const products = await dataService.getAll('products');
+      const productsWithCategory = products.filter(p => p.category_id === category.category_id);
       
       if (productsWithCategory.length > 0) {
         if (!window.confirm(`This category is used by ${productsWithCategory.length} product(s). Products will lose their category. Continue?`)) {
@@ -759,13 +760,13 @@ export default function InventoryScreen({ userMode }) {
       }
       
       // Store deleted category in backup table
-      await dataService.add('backup', { // CHANGED
+      await dataService.add('backup', {
         user_id: user?.user_id,
         username: user?.username,
         backup_name: `DELETED_CATEGORY_${category.name}`,
         backup_type: 'deleted_category',
         created_at: new Date().toISOString(),
-        schema_version: '5',
+        schema_version: '6',
         details: JSON.stringify(category),
         restored_at: null,
         confirmed_at: null,
@@ -773,13 +774,11 @@ export default function InventoryScreen({ userMode }) {
       });
       
       // Delete category
-      await dataService.delete('categories', category.category_id); // CHANGED
+      await dataService.delete('categories', category.category_id);
       
       // Update products to remove category reference
       for (const product of productsWithCategory) {
-        await dataService.update('products', product.product_id, { // CHANGED
-          category_id: null
-        });
+        await dataService.update('products', product.product_id, { category_id: null });
       }
       
       // ✅ FIXED: Just log to console
@@ -856,21 +855,25 @@ export default function InventoryScreen({ userMode }) {
 
   // Handle restoring deleted item (owner only)
   const handleRestoreItem = async (deletedItem) => {
-    if (!window.confirm(`Are you sure you want to restore "${deletedItem.backup_name.replace('DELETED_', '').replace('PRODUCT_', '').replace('CATEGORY_', '')}"?`)) return;
+    const itemName = deletedItem.backup_name.replace('DELETED_', '').replace('PRODUCT_', '').replace('CATEGORY_', '');
+    
+    if (!window.confirm(`Are you sure you want to restore "${itemName}"?`)) return;
     
     try {
       const details = JSON.parse(deletedItem.details);
       
       if (deletedItem.backup_type === 'deleted_product') {
         // Restore product
-        const productId = await dataService.add('products', { // CHANGED
+        const productResult = await dataService.add('products', {
           ...details,
           created_at: new Date().toISOString(),
           created_by: `${deletedItem.username} (restored)`
         });
         
+        const productId = productResult?.product_id || productResult?.id;
+        
         // Restore inventory entry
-        await dataService.add('inventory', { // CHANGED
+        await dataService.add('inventory', {
           product_id: productId,
           supplier_id: null,
           quantity: 0,
@@ -880,7 +883,7 @@ export default function InventoryScreen({ userMode }) {
         });
         
         // Update backup record
-        await dataService.update('backup', deletedItem.backup_id, { // CHANGED
+        await dataService.update('backup', deletedItem.backup_id || deletedItem.id, {
           restored_at: new Date().toISOString(),
           restored_by: user?.username
         });
@@ -889,14 +892,14 @@ export default function InventoryScreen({ userMode }) {
         
       } else if (deletedItem.backup_type === 'deleted_category') {
         // Restore category
-        const categoryId = await dataService.add('categories', { // CHANGED
+        await dataService.add('categories', {
           ...details,
           created_at: new Date().toISOString(),
           created_by: `${deletedItem.username} (restored)`
         });
         
         // Update backup record
-        await dataService.update('backup', deletedItem.backup_id, { // CHANGED
+        await dataService.update('backup', deletedItem.backup_id || deletedItem.id, {
           restored_at: new Date().toISOString(),
           restored_by: user?.username
         });
@@ -922,7 +925,7 @@ export default function InventoryScreen({ userMode }) {
     
     try {
       // Mark as confirmed deletion
-      await dataService.update('backup', deletedItem.backup_id, { // CHANGED
+      await dataService.update('backup', deletedItem.backup_id || deletedItem.id, {
         confirmed_at: new Date().toISOString(),
         confirmed_by: user?.username
       });
@@ -1428,7 +1431,7 @@ export default function InventoryScreen({ userMode }) {
                           const isPending = !item.restored_at && !item.confirmed_at;
                           
                           return (
-                            <tr key={item.backup_id} style={{
+                            <tr key={item.backup_id || item.id} style={{
                               ...styles.tableRow,
                               backgroundColor: isNew ? '#fffbeb' : 'transparent',
                               borderLeft: isNew ? '4px solid #f59e0b' : 'none'
@@ -1531,7 +1534,7 @@ export default function InventoryScreen({ userMode }) {
                           const isPending = !item.restored_at && !item.confirmed_at;
                           
                           return (
-                            <tr key={item.backup_id} style={{
+                            <tr key={item.backup_id || item.id} style={{
                               ...styles.tableRow,
                               backgroundColor: isNew ? '#fffbeb' : 'transparent',
                               borderLeft: isNew ? '4px solid #f59e0b' : 'none'

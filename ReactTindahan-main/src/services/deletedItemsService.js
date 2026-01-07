@@ -25,7 +25,7 @@ export const deletedItemsService = {
       }
 
       // Store the deleted item
-      const deletedId = await dataService.add('deleted_items', {
+      const deletedResult = await dataService.add('deleted_items', {
         entity_type: entityType,
         entity_id: entityId,
         original_data: JSON.stringify(originalData || entity),
@@ -37,6 +37,9 @@ export const deletedItemsService = {
         // Store related data that might be needed for restoration
         related_data: await this.getRelatedData(entityType, entityId)
       });
+
+      // Get the actual ID returned by dataService
+      const deletedId = deletedResult?.deleted_id || deletedResult?.id || Date.now();
 
       // Now actually delete from the original table
       await this.hardDeleteFromTable(entityType, entityId);
@@ -156,28 +159,18 @@ export const deletedItemsService = {
   // Helper: Delete related records by foreign key
   async deleteRelatedRecords(tableName, foreignKey, entityId) {
     try {
-      // For owner mode, we need to handle bulk deletion
-      if (dataService.isOwner) {
-        // Get all records with this foreign key
-        const records = await dataService.getAll(tableName, { where: { [foreignKey]: entityId } });
+      // Get all records with this foreign key
+      const records = await dataService.getAll(tableName, { where: { [foreignKey]: entityId } });
+      
+      // Delete them one by one
+      for (const record of records) {
+        const idField = this.getPrimaryKeyField(tableName);
+        const recordId = record[idField] || record.id;
         
-        // Delete them one by one
-        for (const record of records) {
-          const idField = this.getPrimaryKeyField(tableName);
-          if (record[idField]) {
-            await dataService.delete(tableName, record[idField]);
-          }
-        }
-      } else {
-        // For client mode, we'll need to handle this differently
-        // Since we can't do bulk delete, we'll make individual requests
-        const records = await dataService.getAll(tableName, { where: { [foreignKey]: entityId } });
-        
-        for (const record of records) {
-          const idField = this.getPrimaryKeyField(tableName);
-          if (record[idField]) {
-            await dataService.delete(tableName, record[idField]);
-          }
+        if (recordId) {
+          await dataService.delete(tableName, recordId);
+        } else {
+          console.warn(`No ID found for record in ${tableName}`, record);
         }
       }
     } catch (error) {
@@ -198,11 +191,16 @@ export const deletedItemsService = {
       });
       
       for (const item of inventoryItems) {
-        await dataService.update('inventory', item.product_id, {
-          supplier_id: null,
-          updated_at: new Date().toISOString(),
-          updated_by: 'System (Supplier Deleted)'
-        });
+        const idField = this.getPrimaryKeyField('inventory');
+        const itemId = item[idField] || item.product_id;
+        
+        if (itemId) {
+          await dataService.update('inventory', itemId, {
+            supplier_id: null,
+            updated_at: new Date().toISOString(),
+            updated_by: 'System (Supplier Deleted)'
+          });
+        }
       }
     } catch (error) {
       console.error('Error handling supplier deletion cleanup:', error);
@@ -217,11 +215,15 @@ export const deletedItemsService = {
       });
       
       for (const product of products) {
-        await dataService.update('products', product.product_id, {
-          category_id: null,
-          updated_at: new Date().toISOString(),
-          updated_by: 'System (Category Deleted)'
-        });
+        const productId = product.product_id || product.id;
+        
+        if (productId) {
+          await dataService.update('products', productId, {
+            category_id: null,
+            updated_at: new Date().toISOString(),
+            updated_by: 'System (Category Deleted)'
+          });
+        }
       }
     } catch (error) {
       console.error('Error updating products without category:', error);
@@ -261,19 +263,24 @@ export const deletedItemsService = {
       
       switch (deletedItem.entity_type) {
         case 'products':
+          // Remove the old ID to let database generate a new one
+          const { product_id, id, ...productData } = originalData;
+          
           // Restore product
-          const newProductId = await dataService.add('products', {
-            ...originalData,
-            product_id: undefined, // Let it generate new ID
+          const productResult = await dataService.add('products', {
+            ...productData,
             created_at: new Date().toISOString(),
             created_by: deletedItem.deleted_by + ' (restored)'
           });
 
+          const newProductId = productResult?.product_id || productResult?.id;
+
           // Restore related data if available
           if (relatedData.inventory && relatedData.inventory.length > 0) {
             for (const inv of relatedData.inventory) {
+              const { inventory_id, id, ...inventoryData } = inv;
               await dataService.add('inventory', {
-                ...inv,
+                ...inventoryData,
                 product_id: newProductId // Use new product ID
               });
             }
@@ -281,8 +288,9 @@ export const deletedItemsService = {
           
           if (relatedData.stock_cards && relatedData.stock_cards.length > 0) {
             for (const stock of relatedData.stock_cards) {
+              const { stock_card_id, id, ...stockData } = stock;
               await dataService.add('stock_card', {
-                ...stock,
+                ...stockData,
                 product_id: newProductId // Use new product ID
               });
             }
@@ -292,26 +300,33 @@ export const deletedItemsService = {
           break;
 
         case 'suppliers':
-          restoredId = await dataService.add('suppliers', {
-            ...originalData,
-            supplier_id: undefined, // Let it generate new ID
+          const { supplier_id: oldSupplierId, id: supplierOldId, ...supplierData } = originalData;
+          
+          const supplierResult = await dataService.add('suppliers', {
+            ...supplierData,
             created_at: new Date().toISOString(),
             created_by: deletedItem.deleted_by + ' (restored)'
           });
+
+          restoredId = supplierResult?.supplier_id || supplierResult?.id;
           break;
 
         case 'categories':
-          restoredId = await dataService.add('categories', {
-            ...originalData,
-            category_id: undefined, // Let it generate new ID
+          const { category_id: oldCategoryId, id: categoryOldId, ...categoryData } = originalData;
+          
+          const categoryResult = await dataService.add('categories', {
+            ...categoryData,
             created_at: new Date().toISOString(),
             created_by: deletedItem.deleted_by + ' (restored)'
           });
+
+          restoredId = categoryResult?.category_id || categoryResult?.id;
           break;
       }
 
       // Mark as restored
-      await dataService.update('deleted_items', deletedId, {
+      const deletedItemId = deletedItem.deleted_id || deletedItem.id;
+      await dataService.update('deleted_items', deletedItemId, {
         restored_at: new Date().toISOString(),
         restored_by: this.getCurrentUsername(),
         restored_to_id: restoredId
@@ -331,7 +346,8 @@ export const deletedItemsService = {
       if (!deletedItem) throw new Error('Deleted item not found');
 
       // Mark as confirmed (permanently deleted)
-      await dataService.update('deleted_items', deletedId, {
+      const deletedItemId = deletedItem.deleted_id || deletedItem.id;
+      await dataService.update('deleted_items', deletedItemId, {
         confirmed_at: new Date().toISOString(),
         confirmed_by: this.getCurrentUsername()
       });
@@ -472,7 +488,11 @@ export const deletedItemsService = {
       // Delete these old confirmed items
       for (const item of oldItems) {
         const idField = this.getPrimaryKeyField('deleted_items');
-        await dataService.delete('deleted_items', item[idField]);
+        const itemId = item[idField] || item.id;
+        
+        if (itemId) {
+          await dataService.delete('deleted_items', itemId);
+        }
       }
       
       console.log(`Cleaned up ${oldItems.length} old confirmed deletions`);

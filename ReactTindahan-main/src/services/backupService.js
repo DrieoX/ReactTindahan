@@ -1,29 +1,58 @@
-import { dataService } from '../services/DataService';
-import { Capacitor } from '@capacitor/core';
-import {
-  Filesystem,
-  Directory
-} from '@capacitor/filesystem';
-import { Share } from '@capacitor/share';
+import { dataService } from './DataService';
 
-/* --------------------------------------------------
-   CHECKSUM (SIMPLE BUT SAFE)
--------------------------------------------------- */
-function checksum(text) {
-  let hash = 0;
-  for (let i = 0; i < text.length; i++) {
-    hash = (hash << 5) - hash + text.charCodeAt(i);
-    hash |= 0;
+// Using try-catch for Capacitor to handle version issues
+let Filesystem;
+let Share;
+
+// Check if we're in a Capacitor environment
+const isCapacitor = typeof window !== 'undefined' && window.Capacitor;
+
+if (isCapacitor) {
+  try {
+    import('@capacitor/filesystem').then(module => {
+      Filesystem = module.Filesystem;
+    }).catch(() => {
+      console.log('Filesystem plugin not available');
+    });
+    
+    import('@capacitor/share').then(module => {
+      Share = module.Share;
+    }).catch(() => {
+      console.log('Share plugin not available');
+    });
+  } catch (error) {
+    console.log('Capacitor plugins not available:', error);
   }
-  return hash.toString();
 }
 
-/* --------------------------------------------------
-   CREATE BACKUP
--------------------------------------------------- */
-export async function createBackup(userId, username, backupName) {
+/**
+ * Utility: Generate checksum
+ */
+function generateChecksum(data) {
   try {
-    const data = {};
+    return btoa(
+      JSON.stringify(data)
+        .split('')
+        .reduce((acc, char) => acc + char.charCodeAt(0), 0)
+    );
+  } catch (error) {
+    return 'no-checksum';
+  }
+}
+
+/**
+ * CREATE BACKUP
+ */
+export async function createBackup(userId, username = 'System', backupName = 'Automatic Backup') {
+  try {
+    const backupData = {
+      schema_version: '6', // Your current schema version
+      created_at: new Date().toISOString(),
+      created_by: userId,
+      created_by_name: username,
+      data: {}
+    };
+
     const tables = [
       'users',
       'suppliers',
@@ -35,424 +64,255 @@ export async function createBackup(userId, username, backupName) {
       'sales',
       'sale_items',
       'stock_card',
-      'backup'
+      'backup',
+      'deleted_items'
     ];
 
-    // CHANGED: Use DataService to get all table data
+    // Collect data from all tables using dataService
     for (const table of tables) {
       try {
-        data[table] = await dataService.getAll(table);
+        backupData.data[table] = await dataService.getAll(table);
       } catch (err) {
         console.warn(`Table ${table} not found or error:`, err);
-        data[table] = [];
+        backupData.data[table] = [];
       }
     }
 
-    const payload = {
-      schema_version: '5',
-      created_at: new Date().toISOString(),
-      created_by: userId,
-      created_by_name: username,
-      backup_name: backupName,
-      data
-    };
+    const checksum = generateChecksum(backupData);
+    const fileName = `TindaTrack_Auto_${backupName.replace(/\s+/g, '_')}_${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
+    const jsonString = JSON.stringify(backupData, null, 2);
 
-    const json = JSON.stringify(payload, null, 2);
-    const fileName =
-      `TindaTrack_${backupName.replace(/\s+/g, '_')}_${Date.now()}.json`;
+    // Log the backup in database
+    try {
+      await dataService.add('backup', {
+        user_id: userId,
+        username: username,
+        backup_name: backupName,
+        backup_type: 'full',
+        created_at: new Date().toISOString(),
+        schema_version: '6',
+        file_name: fileName,
+        file_size: jsonString.length,
+        checksum,
+        is_auto_backup: false
+      });
+    } catch (dbError) {
+      console.warn('Could not log backup to database:', dbError);
+    }
 
-    // CHANGED: Use DataService to log backup
-    await dataService.add('backup', {
-      user_id: userId,
-      username,
-      backup_name: backupName,
-      backup_type: 'full',
-      created_at: new Date().toISOString(),
-      schema_version: '5',
-      file_name: fileName,
-      file_size: json.length,
-      checksum: checksum(json)
-    });
-
-    return { success: true, json, fileName };
+    return { success: true, json: jsonString, fileName, backupId: Date.now() };
   } catch (error) {
-    console.error('Backup creation error:', error);
+    console.error('Backup creation failed:', error);
     return { success: false, error };
   }
 }
 
-/* --------------------------------------------------
-   RESTORE BACKUP WITH OPTIONS
--------------------------------------------------- */
-export async function restoreBackup(file, userId, username, restoreOption = 'merge', tablesToRestore = {}) {
+/**
+ * RESTORE BACKUP
+ */
+export async function restoreBackup(file, userId, username) {
   try {
     const text = await file.text();
     const parsed = JSON.parse(text);
 
-    if (!parsed.data) {
-      throw new Error('Invalid backup file format');
+    // Verify it's a valid backup file
+    if (!parsed.data || !parsed.schema_version) {
+      throw new Error('Invalid backup file format.');
     }
 
-    let stats = {
-      restored: 0,
-      skipped: 0,
-      errors: 0
-    };
+    // Show warning about data overwrite
+    if (!window.confirm(`⚠️ WARNING: This will overwrite ALL current data.\n\nTables to restore: ${Object.keys(parsed.data).join(', ')}\n\nContinue?`)) {
+      return { success: false, error: 'Restore cancelled by user' };
+    }
 
-    // If overwrite mode, clear selected tables first
-    if (restoreOption === 'overwrite') {
-      for (const tableName of Object.keys(tablesToRestore)) {
-        if (tablesToRestore[tableName]) {
-          try {
-            // Get all records in the table
-            const allRecords = await dataService.getAll(tableName);
-            
-            // Delete all records one by one (since DataService.delete doesn't support clear all)
-            // For better performance in owner mode, we'll use batch operations
-            if (dataService.isOwner) {
-              // For IndexedDB (owner mode), we can use a more efficient approach
-              for (const record of allRecords) {
-                const idField = getPrimaryKeyField(tableName);
-                if (record[idField]) {
-                  await dataService.delete(tableName, record[idField]);
+    // Restore each table
+    const tableNames = Object.keys(parsed.data);
+    
+    for (const tableName of tableNames) {
+      try {
+        const tableData = parsed.data[tableName];
+        
+        if (tableData && Array.isArray(tableData) && tableData.length > 0) {
+          console.log(`Restoring ${tableData.length} records to ${tableName}...`);
+          
+          // Clear existing data (skip for backup table to keep history)
+          if (tableName !== 'backup') {
+            try {
+              // For web/API mode, we can't clear tables directly
+              // We'll just overwrite with new data
+              await dataService.bulkAdd(tableName, tableData);
+            } catch (bulkError) {
+              console.log(`Bulk add failed for ${tableName}, trying individual inserts...`);
+              
+              // Fallback to individual inserts
+              for (const record of tableData) {
+                try {
+                  await dataService.add(tableName, record);
+                } catch (recordError) {
+                  console.warn(`Failed to insert record into ${tableName}:`, recordError);
                 }
               }
             }
-            stats.skipped += allRecords.length; // These are being deleted, not skipped
-          } catch (error) {
-            console.warn(`Failed to clear table ${tableName}:`, error);
           }
         }
-      }
-    }
-
-    // Process each table
-    for (const [tableName, backupData] of Object.entries(parsed.data)) {
-      // Skip if not selected for restore
-      if (!tablesToRestore[tableName] && Object.keys(tablesToRestore).length > 0) {
-        console.log(`Skipping ${tableName} - not selected for restore`);
-        continue;
-      }
-
-      if (!Array.isArray(backupData)) {
-        console.warn(`Invalid data format for ${tableName}, skipping`);
-        continue;
-      }
-
-      console.log(`Restoring ${tableName}: ${backupData.length} records (${restoreOption} mode)`);
-
-      for (const record of backupData) {
-        try {
-          // For merge mode, check if record already exists
-          if (restoreOption === 'merge') {
-            const existing = await findExistingRecord(tableName, record);
-            if (existing) {
-              stats.skipped++;
-              continue; // Skip duplicates in merge mode
-            }
-          }
-
-          // Prepare record for insertion
-          const recordToInsert = prepareRecordForRestore(record, userId, username);
-
-          // Insert record
-          await dataService.add(tableName, recordToInsert);
-          stats.restored++;
-        } catch (error) {
-          console.error(`Error restoring record in ${tableName}:`, error);
-          stats.errors++;
-        }
+      } catch (tableError) {
+        console.error(`Error restoring ${tableName}:`, tableError);
+        // Continue with other tables
       }
     }
 
     // Log the restore operation
-    await dataService.add('backup', {
-      user_id: userId,
-      username,
-      backup_name: `Restore: ${file.name} (${restoreOption})`,
-      backup_type: 'restore',
-      created_at: new Date().toISOString(),
-      schema_version: '5',
-      file_name: file.name,
-      file_size: text.length,
-      checksum: checksum(text),
-      restore_mode: restoreOption,
-      tables_restored: Object.keys(tablesToRestore).filter(t => tablesToRestore[t]),
-      stats: stats
-    });
+    try {
+      await dataService.add('backup', {
+        user_id: userId,
+        username,
+        backup_name: `Restore: ${file.name}`,
+        backup_type: 'restore',
+        created_at: new Date().toISOString(),
+        schema_version: '6',
+        file_name: file.name,
+        file_size: text.length,
+        checksum: generateChecksum(text),
+        details: `Restored ${tableNames.length} tables with data from backup file`
+      });
+    } catch (logError) {
+      console.warn('Could not log restore to database:', logError);
+    }
 
-    return { success: true, stats };
+    return { success: true, restoredTables: tableNames.length };
   } catch (error) {
     console.error('Restore error:', error);
-    return { success: false, error };
+    return { success: false, error: error.message };
   }
 }
 
-/* --------------------------------------------------
-   HELPER: Find existing record (for merge mode)
--------------------------------------------------- */
-async function findExistingRecord(tableName, record) {
+/**
+ * DOWNLOAD BACKUP FILE
+ */
+export async function downloadBackupFile(json, fileName) {
   try {
-    // Different lookup strategies for different tables
-    switch (tableName) {
-      case 'users':
-        if (record.user_id) {
-          return await dataService.getById('users', record.user_id);
+    // For Capacitor (mobile)
+    if (isCapacitor && Filesystem) {
+      try {
+        console.log('Downloading backup to device...');
+        
+        // Try Documents directory first
+        try {
+          const result = await Filesystem.writeFile({
+            path: fileName,
+            data: json,
+            directory: Filesystem.Directory.Documents,
+            recursive: true
+          });
+          
+          console.log(`✅ Backup saved to Documents:`, result.uri);
+          
+          // Try to share the file
+          if (Share) {
+            try {
+              await Share.share({
+                title: 'TindaTrack Backup',
+                text: 'Backup file',
+                url: result.uri,
+                dialogTitle: 'Save or share backup file'
+              });
+            } catch (shareError) {
+              console.log('Share not available:', shareError);
+            }
+          }
+          
+          return { 
+            success: true, 
+            uri: result.uri,
+            location: 'Documents folder',
+            platform: 'capacitor'
+          };
+        } catch (docError) {
+          console.log('Failed to save to Documents:', docError);
+          
+          // Fallback to Data directory
+          try {
+            const result = await Filesystem.writeFile({
+              path: fileName,
+              data: json,
+              directory: Filesystem.Directory.Data,
+              recursive: true
+            });
+            
+            console.log(`✅ Backup saved to Data:`, result.uri);
+            return { 
+              success: true, 
+              uri: result.uri,
+              location: 'App Data folder',
+              platform: 'capacitor'
+            };
+          } catch (dataError) {
+            console.log('Failed to save to Data:', dataError);
+            throw new Error('Could not save to device storage');
+          }
         }
-        if (record.username) {
-          const users = await dataService.getAll('users', { where: { username: record.username } });
-          return users[0];
-        }
-        break;
-      
-      case 'products':
-        if (record.product_id) {
-          return await dataService.getById('products', record.product_id);
-        }
-        if (record.sku) {
-          const products = await dataService.getAll('products', { where: { sku: record.sku } });
-          return products[0];
-        }
-        if (record.name) {
-          const products = await dataService.getAll('products', { where: { name: record.name } });
-          return products[0];
-        }
-        break;
-      
-      case 'suppliers':
-        if (record.supplier_id) {
-          return await dataService.getById('suppliers', record.supplier_id);
-        }
-        if (record.name) {
-          const suppliers = await dataService.getAll('suppliers', { where: { name: record.name } });
-          return suppliers[0];
-        }
-        break;
-      
-      case 'categories':
-        if (record.category_id) {
-          return await dataService.getById('categories', record.category_id);
-        }
-        if (record.name) {
-          const categories = await dataService.getAll('categories', { where: { name: record.name } });
-          return categories[0];
-        }
-        break;
-      
-      default:
-        // For other tables, try to find by primary key
-        const idField = getPrimaryKeyField(tableName);
-        if (record[idField]) {
-          return await dataService.getById(tableName, record[idField]);
-        }
+      } catch (mobileError) {
+        console.error('Mobile download failed:', mobileError);
+        throw mobileError;
+      }
     }
     
-    return null;
-  } catch (error) {
-    console.warn(`Error finding existing record in ${tableName}:`, error);
-    return null;
-  }
-}
-
-/* --------------------------------------------------
-   HELPER: Prepare record for restoration
--------------------------------------------------- */
-function prepareRecordForRestore(record, userId, username) {
-  const prepared = { ...record };
-  
-  // Remove auto-increment IDs for fresh insertion
-  const idFields = ['id', '_id'];
-  idFields.forEach(field => {
-    if (prepared[field] !== undefined) {
-      delete prepared[field];
-    }
-  });
-  
-  // Add audit fields
-  if (!prepared.created_at) {
-    prepared.created_at = new Date().toISOString();
-  }
-  
-  if (!prepared.created_by) {
-    prepared.created_by = username || 'System (Restored)';
-  }
-  
-  if (!prepared.updated_at) {
-    prepared.updated_at = new Date().toISOString();
-  }
-  
-  if (!prepared.updated_by) {
-    prepared.updated_by = username || 'System (Restored)';
-  }
-  
-  return prepared;
-}
-
-/* --------------------------------------------------
-   HELPER: Get primary key field for a table
--------------------------------------------------- */
-function getPrimaryKeyField(tableName) {
-  const primaryKeys = {
-    'users': 'user_id',
-    'products': 'product_id',
-    'categories': 'category_id',
-    'suppliers': 'supplier_id',
-    'inventory': 'product_id', // inventory uses product_id as primary key
-    'sales': 'sales_id',
-    'sale_items': 'sale_items_id',
-    'stock_card': 'stock_card_id',
-    'product_units': 'product_units_id',
-    'resupplied_items': 'resupplied_items_id',
-    'backup': 'backup_id'
-  };
-  
-  return primaryKeys[tableName] || 'id';
-}
-
-/* --------------------------------------------------
-   DOWNLOAD BACKUP (ANDROID / iOS / WEB)
--------------------------------------------------- */
-export async function downloadBackupFile(json, fileName) {
-  const platform = Capacitor.getPlatform();
-
-  /* ---------- ANDROID ---------- */
-  if (platform === 'android') {
+    // For Web (fallback)
     try {
-      await Filesystem.requestPermissions();
-
-      const base64Data = btoa(
-        unescape(encodeURIComponent(json))
-      );
-
-      await Filesystem.writeFile({
-        path: `Download/${fileName}`,
-        data: base64Data,
-        directory: Directory.ExternalStorage,
-        recursive: true
-      });
-
-      return {
-        success: true,
-        platform: 'android',
-        location: 'Downloads folder',
-        length: json.length
+      const blob = new Blob([json], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = fileName;
+      link.style.display = 'none';
+      document.body.appendChild(link);
+      
+      link.click();
+      
+      document.body.removeChild(link);
+      setTimeout(() => URL.revokeObjectURL(url), 100);
+      
+      console.log(`✅ Backup downloaded via web: ${fileName}`);
+      return { 
+        success: true, 
+        location: 'Browser downloads folder',
+        platform: 'web'
       };
-    } catch (error) {
-      console.error('Android download failed:', error);
-      // Fall back to web download
+    } catch (webError) {
+      console.error('Web download failed:', webError);
+      throw webError;
     }
-  }
-
-  /* ---------- iOS ---------- */
-  if (platform === 'ios') {
-    try {
-      const result = await Filesystem.writeFile({
-        path: fileName,
-        data: json,
-        directory: Directory.Documents
-      });
-
-      await Share.share({
-        title: 'Backup File',
-        text: 'TindaTrack Backup',
-        url: result.uri
-      });
-
-      return {
-        success: true,
-        platform: 'ios',
-        location: 'Documents folder',
-        length: json.length
-      };
-    } catch (error) {
-      console.error('iOS download failed:', error);
-      // Fall back to web download
-    }
-  }
-
-  /* ---------- WEB (Fallback) ---------- */
-  try {
-    const blob = new Blob([json], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = fileName;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-
-    return {
-      success: true,
-      platform: 'web',
-      location: 'Browser downloads',
-      length: json.length
-    };
   } catch (error) {
-    console.error('Web download failed:', error);
-    return {
-      success: false,
+    console.error('Download failed:', error);
+    return { 
+      success: false, 
       error: error.message,
       platform: 'unknown'
     };
   }
 }
 
-/* --------------------------------------------------
-   ANALYZE BACKUP FILE
--------------------------------------------------- */
-export async function analyzeBackupFile(file) {
-  try {
-    const text = await file.text();
-    const parsed = JSON.parse(text);
-    
-    if (!parsed.data) {
-      throw new Error('Invalid backup file format');
-    }
-    
-    const stats = {
-      file_name: file.name,
-      file_size: file.size,
-      schema_version: parsed.schema_version || 'unknown',
-      created_at: parsed.created_at || 'unknown',
-      created_by: parsed.created_by_name || parsed.created_by || 'unknown',
-      backup_name: parsed.backup_name || 'Unnamed Backup',
-      tables: {},
-      total_records: 0
-    };
-    
-    Object.entries(parsed.data).forEach(([tableName, records]) => {
-      if (Array.isArray(records)) {
-        stats.tables[tableName] = records.length;
-        stats.total_records += records.length;
-      }
-    });
-    
-    return { success: true, stats };
-  } catch (error) {
-    console.error('Analyze backup error:', error);
-    return { success: false, error };
-  }
-}
-
-/* --------------------------------------------------
-   LOG AUDIT (for compatibility)
--------------------------------------------------- */
-export async function logAudit(action, details = {}) {
+/**
+ * Audit logging function
+ */
+export async function logAudit(action, details = {}, userId = null, username = null) {
   try {
     const user = JSON.parse(localStorage.getItem('user') || '{}');
     
-    // Simply log to console
-    console.log(`[AUDIT] ${action}`, {
-      user_id: user?.user_id,
-      username: user?.username,
-      details,
-      timestamp: new Date().toISOString()
+    await dataService.add('backup', {
+      user_id: userId || user?.user_id,
+      username: username || user?.username,
+      backup_name: `AUDIT_${action}`,
+      backup_type: 'audit',
+      created_at: new Date().toISOString(),
+      schema_version: '6',
+      details: JSON.stringify(details)
     });
     
-    return { success: true };
+    return true;
   } catch (error) {
-    console.error('Failed to log audit:', error);
-    return { success: false, error };
+    console.error('Audit logging failed:', error);
+    return false;
   }
 }

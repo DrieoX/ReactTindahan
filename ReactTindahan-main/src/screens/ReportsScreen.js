@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from 'react';
-import { dataService } from '../services/DataService'; // CHANGED
+import { dataService } from '../services/DataService';
 
 export const addReport = async (report) => {
-  await dataService.add('backup', report); // CHANGED
+  await dataService.add('backup', report);
 };
 
 export default function ReportsScreen({ userMode }) {
@@ -16,6 +16,8 @@ export default function ReportsScreen({ userMode }) {
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [costData, setCostData] = useState({});
+  const [loading, setLoading] = useState(false);
+  const [resupplyLoading, setResupplyLoading] = useState(false);
 
   useEffect(() => {
     const today = new Date().toISOString().split('T')[0];
@@ -28,6 +30,21 @@ export default function ReportsScreen({ userMode }) {
       page: 'reports',
       timestamp: new Date().toISOString()
     });
+    
+    // Log audit using backup table
+    dataService.add('backup', {
+      user_id: user?.user_id,
+      backup_name: `AUDIT_VIEW_REPORTS_SCREEN`,
+      backup_type: 'audit',
+      created_at: new Date().toISOString(),
+      schema_version: '6',
+      details: JSON.stringify({
+        action: 'VIEW_REPORTS_SCREEN',
+        user_id: user?.user_id,
+        username: user?.username,
+        page: 'reports'
+      })
+    }).catch(console.error);
   }, []);
 
   useEffect(() => {
@@ -35,18 +52,22 @@ export default function ReportsScreen({ userMode }) {
   }, []);
 
   useEffect(() => {
-    fetchReport();
-    fetchResupplyReport();
+    if (startDate && endDate) {
+      fetchReport();
+      fetchResupplyReport();
+    }
   }, [timeFilter, startDate, endDate, costData]);
 
   const fetchProductCostData = async () => {
     try {
-      const resupplyItems = await dataService.getAll('resupplied_items'); // CHANGED
-      const stockCardItems = await dataService.getAll('stock_card'); // CHANGED
+      const resupplyItems = await dataService.getAll('resupplied_items');
+      const stockCardItems = await dataService.getAll('stock_card');
       
       const costMap = {};
       
+      // Sort by date descending and get latest cost for each product
       resupplyItems
+        .filter(item => item && item.resupply_date)
         .sort((a, b) => new Date(b.resupply_date) - new Date(a.resupply_date))
         .forEach(item => {
           if (item.product_id && item.unit_cost) {
@@ -59,13 +80,15 @@ export default function ReportsScreen({ userMode }) {
           }
         });
       
+      // Fallback to stock card if no resupply data
       stockCardItems
-        .sort((a, b) => new Date(b.transaction_date) - new Date(a.transaction_date))
+        .filter(item => item && item.transaction_type === 'RESUPPLY')
+        .sort((a, b) => new Date(b.created_at || b.transaction_date) - new Date(a.created_at || a.transaction_date))
         .forEach(item => {
           if (item.product_id && item.unit_cost && !costMap[item.product_id]) {
             costMap[item.product_id] = {
               cost: item.unit_cost,
-              date: item.transaction_date
+              date: item.created_at || item.transaction_date || new Date().toISOString()
             };
           }
         });
@@ -78,6 +101,20 @@ export default function ReportsScreen({ userMode }) {
         username: user?.username,
         timestamp: new Date().toISOString()
       });
+      
+      // Log audit
+      dataService.add('backup', {
+        user_id: user?.user_id,
+        backup_name: `AUDIT_FETCH_COST_DATA`,
+        backup_type: 'audit',
+        created_at: new Date().toISOString(),
+        schema_version: '6',
+        details: JSON.stringify({
+          action: 'FETCH_COST_DATA',
+          products_with_cost: Object.keys(costMap).length,
+          user_id: user?.user_id
+        })
+      }).catch(console.error);
     } catch (err) {
       console.error("Error fetching cost data:", err);
       console.error(`[AUDIT] FETCH_COST_DATA_ERROR`, {
@@ -91,45 +128,67 @@ export default function ReportsScreen({ userMode }) {
 
   const isToday = (dateStr) => {
     if (!dateStr) return false;
-    const date = new Date(dateStr);
-    const today = new Date();
-    return (
-      date.getDate() === today.getDate() &&
-      date.getMonth() === today.getMonth() &&
-      date.getFullYear() === today.getFullYear()
-    );
+    try {
+      const date = new Date(dateStr.split('T')[0]);
+      const today = new Date();
+      return (
+        date.getDate() === today.getDate() &&
+        date.getMonth() === today.getMonth() &&
+        date.getFullYear() === today.getFullYear()
+      );
+    } catch {
+      return false;
+    }
   };
 
   const isThisWeek = (dateStr) => {
-    const date = new Date(dateStr);
-    const now = new Date();
-    const firstDay = new Date(now.setDate(now.getDate() - now.getDay()));
-    const lastDay = new Date(now.setDate(now.getDate() - now.getDay() + 6));
-    return date >= firstDay && date <= lastDay;
+    try {
+      const date = new Date(dateStr.split('T')[0]);
+      const now = new Date();
+      const firstDay = new Date(now.setDate(now.getDate() - now.getDay()));
+      const lastDay = new Date(now.setDate(now.getDate() - now.getDay() + 6));
+      return date >= firstDay && date <= lastDay;
+    } catch {
+      return false;
+    }
   };
 
   const isThisMonth = (dateStr) => {
-    const date = new Date(dateStr);
-    const now = new Date();
-    return date.getMonth() === now.getMonth() && date.getFullYear() === now.getFullYear();
+    try {
+      const date = new Date(dateStr.split('T')[0]);
+      const now = new Date();
+      return date.getMonth() === now.getMonth() && date.getFullYear() === now.getFullYear();
+    } catch {
+      return false;
+    }
   };
 
   const isThisYear = (dateStr) => {
-    const date = new Date(dateStr);
-    const now = new Date();
-    return date.getFullYear() === now.getFullYear();
+    try {
+      const date = new Date(dateStr.split('T')[0]);
+      const now = new Date();
+      return date.getFullYear() === now.getFullYear();
+    } catch {
+      return false;
+    }
   };
 
   const isInDateRange = (dateStr) => {
     if (!startDate || !endDate) return false;
-    const date = new Date(dateStr);
-    const start = new Date(startDate);
-    const end = new Date(endDate);
-    end.setHours(23, 59, 59, 999);
-    return date >= start && date <= end;
+    try {
+      const date = new Date(dateStr.split('T')[0]);
+      const start = new Date(startDate);
+      const end = new Date(endDate);
+      end.setHours(23, 59, 59, 999);
+      return date >= start && date <= end;
+    } catch {
+      return false;
+    }
   };
 
   const matchesFilter = (dateStr) => {
+    if (!dateStr) return false;
+    
     if (timeFilter === 'custom' && startDate && endDate) {
       return isInDateRange(dateStr);
     }
@@ -162,6 +221,23 @@ export default function ReportsScreen({ userMode }) {
     if (timeFilter !== 'custom') {
       setTimeFilter('custom');
     }
+    
+    // Log audit
+    dataService.add('backup', {
+      user_id: user?.user_id,
+      backup_name: `AUDIT_CHANGE_REPORT_FILTER`,
+      backup_type: 'audit',
+      created_at: new Date().toISOString(),
+      schema_version: '6',
+      details: JSON.stringify({
+        action: 'CHANGE_REPORT_FILTER',
+        old_filter: timeFilter,
+        new_filter: 'custom',
+        start_date: newStartDate,
+        end_date: newEndDate,
+        user_id: user?.user_id
+      })
+    }).catch(console.error);
   };
 
   const handleTimeFilterChange = async (newFilter) => {
@@ -176,6 +252,21 @@ export default function ReportsScreen({ userMode }) {
     });
     
     setTimeFilter(newFilter);
+    
+    // Log audit
+    dataService.add('backup', {
+      user_id: user?.user_id,
+      backup_name: `AUDIT_CHANGE_TIME_FILTER`,
+      backup_type: 'audit',
+      created_at: new Date().toISOString(),
+      schema_version: '6',
+      details: JSON.stringify({
+        action: 'CHANGE_TIME_FILTER',
+        old_filter: timeFilter,
+        new_filter: newFilter,
+        user_id: user?.user_id
+      })
+    }).catch(console.error);
   };
 
   const getDateRangeLabel = () => {
@@ -226,6 +317,25 @@ export default function ReportsScreen({ userMode }) {
       timestamp: new Date().toISOString()
     });
 
+    // Log audit
+    dataService.add('backup', {
+      user_id: user?.user_id,
+      backup_name: `AUDIT_DOWNLOAD_REPORT_CSV`,
+      backup_type: 'audit',
+      created_at: new Date().toISOString(),
+      schema_version: '6',
+      details: JSON.stringify({
+        action: 'DOWNLOAD_REPORT_CSV',
+        report_type: 'sales_with_income',
+        time_filter: timeFilter,
+        total_records: report.length,
+        total_revenue: totalRevenue,
+        total_cost: totalCost,
+        total_income: totalIncome,
+        user_id: user?.user_id
+      })
+    }).catch(console.error);
+
     const headers = ['Date', 'Created By', 'Created At', 'Product', 'Quantity', 'Selling Price', 'Cost Price', 'Income', 'Total Sale', 'Total Cost', 'Total Income'];
     
     const csvData = report.flatMap(sale => {
@@ -263,7 +373,7 @@ export default function ReportsScreen({ userMode }) {
       ['Total Income (Profit)', '', '', '', '', '', '', '', '', '', `₱${totalIncome.toFixed(2)}`],
       ['Total Transactions', '', '', '', '', '', '', '', totalTransactions, '', ''],
       ['Total Items Sold', '', '', '', '', '', '', '', totalItemsSold, '', ''],
-      ['Average Transaction Value', '', '', '', '', '', '', '', `₱${(totalRevenue / totalTransactions).toFixed(2)}`, '', ''],
+      ['Average Transaction Value', '', '', '', '', '', '', '', `₱${(totalRevenue / totalTransactions || 0).toFixed(2)}`, '', ''],
       ['Profit Margin', '', '', '', '', '', '', '', `${totalRevenue > 0 ? ((totalIncome / totalRevenue) * 100).toFixed(2) : '0.00'}%`, '', '']
     ].map(row => row.join(',')).join('\n');
 
@@ -291,7 +401,7 @@ export default function ReportsScreen({ userMode }) {
     const totalItemsSold = report.reduce((sum, sale) => 
       sum + sale.items.reduce((itemSum, item) => itemSum + item.quantity, 0), 0
     );
-    const averageTransaction = totalRevenue / totalTransactions;
+    const averageTransaction = totalRevenue / totalTransactions || 0;
     const profitMargin = totalRevenue > 0 ? (totalIncome / totalRevenue) * 100 : 0;
 
     console.log(`[AUDIT] DOWNLOAD_REPORT_PDF`, {
@@ -307,6 +417,25 @@ export default function ReportsScreen({ userMode }) {
       username: user?.username,
       timestamp: new Date().toISOString()
     });
+
+    // Log audit
+    dataService.add('backup', {
+      user_id: user?.user_id,
+      backup_name: `AUDIT_DOWNLOAD_REPORT_PDF`,
+      backup_type: 'audit',
+      created_at: new Date().toISOString(),
+      schema_version: '6',
+      details: JSON.stringify({
+        action: 'DOWNLOAD_REPORT_PDF',
+        report_type: 'income',
+        time_filter: timeFilter,
+        total_records: report.length,
+        total_revenue: totalRevenue,
+        total_cost: totalCost,
+        total_income: totalIncome,
+        user_id: user?.user_id
+      })
+    }).catch(console.error);
 
     const printWindow = window.open('', '_blank');
 
@@ -481,6 +610,7 @@ export default function ReportsScreen({ userMode }) {
 
   const fetchReport = async () => {
     try {
+      setLoading(true);
       console.log(`[AUDIT] FETCH_SALES_REPORT`, {
         time_filter: timeFilter,
         start_date: startDate,
@@ -490,20 +620,36 @@ export default function ReportsScreen({ userMode }) {
         timestamp: new Date().toISOString()
       });
 
-      const salesData = await dataService.getAll('sale_items'); // CHANGED
-      const sales = await dataService.getAll('sales'); // CHANGED
-      const products = await dataService.getAll('products'); // CHANGED
-
+      // Get all sales
+      const sales = await dataService.getSales();
+      
+      // Filter sales by date
       const filteredSales = sales.filter(s => matchesFilter(s.sales_date));
 
-      const groupedSales = {};
-      for (const item of salesData) {
-        if (filteredSales.find(s => s.sales_id === item.sales_id)) {
-          if (!groupedSales[item.sales_id]) groupedSales[item.sales_id] = [];
-          groupedSales[item.sales_id].push(item);
-        }
+      if (filteredSales.length === 0) {
+        setReport([]);
+        setLoading(false);
+        return;
       }
 
+      // Get sale items for filtered sales
+      const saleItems = [];
+      for (const sale of filteredSales) {
+        const items = await dataService.getSaleItems(sale.sales_id);
+        saleItems.push(...items.map(item => ({ ...item, sales_id: sale.sales_id })));
+      }
+
+      // Get all products for lookup
+      const products = await dataService.getProducts();
+
+      // Group sale items by sales_id
+      const groupedSales = {};
+      for (const item of saleItems) {
+        if (!groupedSales[item.sales_id]) groupedSales[item.sales_id] = [];
+        groupedSales[item.sales_id].push(item);
+      }
+
+      // Enrich sales data with cost calculations
       const enriched = Object.entries(groupedSales).map(([sales_id, items]) => {
         const sale = filteredSales.find(s => s.sales_id === parseInt(sales_id));
         
@@ -514,7 +660,7 @@ export default function ReportsScreen({ userMode }) {
         items.forEach(i => {
           const product = products.find(p => p.product_id === i.product_id);
           const productName = product?.name || 'Unknown Product';
-          const sellingPrice = i.unit_price || product?.unit_price || 0;
+          const sellingPrice = i.unit_price || i.amount || product?.unit_price || 0;
           const costPrice = costData[i.product_id]?.cost || 0;
           const quantity = i.quantity || 0;
           const revenue = (sellingPrice * quantity) || 0;
@@ -545,6 +691,7 @@ export default function ReportsScreen({ userMode }) {
         const productDetails = Object.values(combinedItems);
 
         return {
+          sales_id: parseInt(sales_id),
           sales_date: sale?.sales_date,
           created_by: sale?.created_by || 'Unknown',
           created_at: sale?.created_at || '',
@@ -556,6 +703,23 @@ export default function ReportsScreen({ userMode }) {
       }).sort((a, b) => new Date(b.sales_date) - new Date(a.sales_date));
 
       setReport(enriched);
+      
+      // Log audit
+      dataService.add('backup', {
+        user_id: user?.user_id,
+        backup_name: `AUDIT_FETCH_SALES_REPORT`,
+        backup_type: 'audit',
+        created_at: new Date().toISOString(),
+        schema_version: '6',
+        details: JSON.stringify({
+          action: 'FETCH_SALES_REPORT',
+          time_filter: timeFilter,
+          start_date: startDate,
+          end_date: endDate,
+          total_sales: filteredSales.length,
+          user_id: user?.user_id
+        })
+      }).catch(console.error);
     } catch (err) {
       console.error("Error fetching sales report:", err);
       console.error(`[AUDIT] FETCH_SALES_REPORT_ERROR`, {
@@ -565,11 +729,14 @@ export default function ReportsScreen({ userMode }) {
         username: user?.username,
         timestamp: new Date().toISOString()
       });
+    } finally {
+      setLoading(false);
     }
   };
 
   const fetchResupplyReport = async () => {
     try {
+      setResupplyLoading(true);
       console.log(`[AUDIT] FETCH_RESUPPLY_REPORT`, {
         time_filter: timeFilter,
         start_date: startDate,
@@ -579,28 +746,32 @@ export default function ReportsScreen({ userMode }) {
         timestamp: new Date().toISOString()
       });
 
-      // Fetch from stock_card instead of resupplied_items
-      const stockCardItems = await dataService.getAll('stock_card'); // CHANGED
-      const products = await dataService.getAll('products'); // CHANGED
-      const suppliers = await dataService.getAll('suppliers'); // CHANGED
+      // Get resupply items directly
+      const resupplyItems = await dataService.getResuppliedItems();
+      const products = await dataService.getProducts();
+      const suppliers = await dataService.getSuppliers();
 
-      // Filter for RESUPPLY transactions and by date
-      const filteredResupplies = stockCardItems.filter(i => 
-        i.transaction_type === 'RESUPPLY' && matchesFilter(i.transaction_date)
+      // Filter resupply items by date
+      const filteredResupplies = resupplyItems.filter(i => 
+        i.resupply_date && matchesFilter(i.resupply_date)
       );
 
+      if (filteredResupplies.length === 0) {
+        setResupplyReport([]);
+        setResupplyLoading(false);
+        return;
+      }
+
+      // Group resupply items by date
       const groupedResupplies = {};
       for (const item of filteredResupplies) {
-        const key = item.transaction_date?.split(' ')[0] || item.resupply_date; // Use date part only
+        const key = item.resupply_date.split('T')[0]; // Use date part only
         if (!groupedResupplies[key]) groupedResupplies[key] = [];
         groupedResupplies[key].push(item);
       }
 
+      // Enrich resupply data
       const enriched = Object.entries(groupedResupplies).map(([date, items]) => {
-        // Get supplier details for the group
-        const groupSupplierId = items[0]?.supplier_id;
-        const groupSupplier = suppliers.find(s => s.supplier_id === groupSupplierId);
-        
         const productDetails = items.map(i => {
           const product = products.find(p => p.product_id === i.product_id);
           const supplier = suppliers.find(s => s.supplier_id === i.supplier_id);
@@ -608,24 +779,21 @@ export default function ReportsScreen({ userMode }) {
           
           return {
             product_name: product?.name || 'Unknown Product',
-            supplier_name: supplier?.name || groupSupplier?.name || 'Unknown Supplier',
+            supplier_name: supplier?.name || 'Unknown Supplier',
             quantity: i.quantity,
             unit_cost: i.unit_cost,
             total_cost: totalCost,
             expiration_date: i.expiration_date || 'N/A',
-            created_by: i.created_by || 'System',
-            created_at: i.transaction_date || i.created_at || date
+            created_by: i.created_by || 'System'
           };
         });
         
         const totalItems = items.reduce((sum, i) => sum + (i.quantity || 0), 0);
         const totalCost = items.reduce((sum, i) => sum + ((i.unit_cost || 0) * (i.quantity || 0)), 0);
         
-        // Get group created_by info - use the most common creator in the group
+        // Get group created_by info
         const creators = items.map(i => i.created_by).filter(Boolean);
-        const groupCreatedBy = creators.length > 0 
-          ? creators[0] // You could also find the most frequent creator here
-          : 'System';
+        const groupCreatedBy = creators.length > 0 ? creators[0] : 'System';
         
         return {
           resupply_date: date,
@@ -633,12 +801,28 @@ export default function ReportsScreen({ userMode }) {
           totalItems,
           totalCost,
           created_by: groupCreatedBy,
-          created_at: items[0]?.transaction_date || date,
-          supplier_name: groupSupplier?.name || 'Unknown Supplier'
+          created_at: items[0]?.created_at || date
         };
       }).sort((a, b) => new Date(b.resupply_date) - new Date(a.resupply_date));
 
       setResupplyReport(enriched);
+      
+      // Log audit
+      dataService.add('backup', {
+        user_id: user?.user_id,
+        backup_name: `AUDIT_FETCH_RESUPPLY_REPORT`,
+        backup_type: 'audit',
+        created_at: new Date().toISOString(),
+        schema_version: '6',
+        details: JSON.stringify({
+          action: 'FETCH_RESUPPLY_REPORT',
+          time_filter: timeFilter,
+          start_date: startDate,
+          end_date: endDate,
+          total_resupplies: filteredResupplies.length,
+          user_id: user?.user_id
+        })
+      }).catch(console.error);
     } catch (err) {
       console.error("Error fetching resupply report:", err);
       console.error(`[AUDIT] FETCH_RESUPPLY_REPORT_ERROR`, {
@@ -648,6 +832,8 @@ export default function ReportsScreen({ userMode }) {
         username: user?.username,
         timestamp: new Date().toISOString()
       });
+    } finally {
+      setResupplyLoading(false);
     }
   };
 
@@ -673,6 +859,7 @@ export default function ReportsScreen({ userMode }) {
             value={timeFilter}
             onChange={(e) => handleTimeFilterChange(e.target.value)}
             style={styles.filterSelect}
+            disabled={loading}
           >
             <option value="daily">Daily</option>
             <option value="weekly">Weekly</option>
@@ -690,6 +877,7 @@ export default function ReportsScreen({ userMode }) {
                 value={startDate}
                 onChange={(e) => handleDateRangeChange(e.target.value, endDate)}
                 style={styles.dateInput}
+                disabled={loading}
               />
             </div>
             <div style={styles.dateInputGroup}>
@@ -699,6 +887,7 @@ export default function ReportsScreen({ userMode }) {
                 value={endDate}
                 onChange={(e) => handleDateRangeChange(startDate, e.target.value)}
                 style={styles.dateInput}
+                disabled={loading}
               />
             </div>
           </div>
@@ -708,14 +897,14 @@ export default function ReportsScreen({ userMode }) {
             <button 
               onClick={downloadCSV}
               style={styles.downloadButton}
-              disabled={report.length === 0}
+              disabled={report.length === 0 || loading}
             >
               📥 CSV
             </button>
             <button 
               onClick={downloadPDF}
               style={styles.downloadButton}
-              disabled={report.length === 0}
+              disabled={report.length === 0 || loading}
             >
               📥 PDF
             </button>
@@ -778,7 +967,11 @@ export default function ReportsScreen({ userMode }) {
               </div>
             </div>
             
-            {report.length === 0 ? (
+            {loading ? (
+              <div style={styles.placeholderCard}>
+                <p style={styles.placeholderText}>Loading sales data...</p>
+              </div>
+            ) : report.length === 0 ? (
               <div style={styles.placeholderCard}>
                 <p style={styles.placeholderText}>No sales for this {timeFilter === 'custom' ? 'date range' : timeFilter}</p>
                 <p style={styles.placeholderSubText}>
@@ -888,7 +1081,11 @@ export default function ReportsScreen({ userMode }) {
         <div style={styles.sideSection}>
           <div style={styles.section}>
             <h3 style={styles.sectionHeader}>Resupply History (Cost Incurred)</h3>
-            {resupplyReport.length === 0 ? (
+            {resupplyLoading ? (
+              <div style={styles.placeholderCard}>
+                <p style={styles.placeholderText}>Loading resupply data...</p>
+              </div>
+            ) : resupplyReport.length === 0 ? (
               <div style={styles.placeholderCard}>
                 <p style={styles.placeholderText}>No resupply data for this {timeFilter === 'custom' ? 'date range' : timeFilter}</p>
                 <p style={styles.placeholderSubText}>
@@ -958,10 +1155,10 @@ const styles = {
     fontWeight: 'bold',
     marginBottom: '8px',
     color: '#2c3e50',
-    '@media (min-width: 768px)': {
+    '@media (minWidth: 768px)': {
       fontSize: '28px',
     },
-    '@media (max-width: 480px)': {
+    '@media (maxWidth: 480px)': {
       fontSize: '20px',
     },
   },
@@ -970,10 +1167,10 @@ const styles = {
     fontWeight: '600',
     marginBottom: '4px',
     color: '#34495e',
-    '@media (min-width: 768px)': {
+    '@media (minWidth: 768px)': {
       fontSize: '22px',
     },
-    '@media (max-width: 480px)': {
+    '@media (maxWidth: 480px)': {
       fontSize: '18px',
     },
   },
@@ -1006,7 +1203,7 @@ const styles = {
     gap: '12px',
     flexWrap: 'wrap',
     width: '100%',
-    '@media (max-width: 768px)': {
+    '@media (maxWidth: 768px)': {
       flexDirection: 'column',
       alignItems: 'stretch',
     },
@@ -1016,7 +1213,7 @@ const styles = {
     fontWeight: '600',
     color: '#2c3e50',
     whiteSpace: 'nowrap',
-    '@media (max-width: 480px)': {
+    '@media (maxWidth: 480px)': {
       fontSize: '13px',
     },
   },
@@ -1032,7 +1229,7 @@ const styles = {
     outline: 'none',
     transition: 'all 0.2s ease',
     minWidth: '160px',
-    '@media (max-width: 768px)': {
+    '@media (maxWidth: 768px)': {
       width: '100%',
       minWidth: 'auto',
     },
@@ -1054,7 +1251,7 @@ const styles = {
     alignItems: 'center',
     gap: '12px',
     flexWrap: 'wrap',
-    '@media (max-width: 768px)': {
+    '@media (maxWidth: 768px)': {
       flexDirection: 'column',
       alignItems: 'stretch',
       gap: '8px',
@@ -1066,7 +1263,7 @@ const styles = {
     gap: '8px',
     flex: '1',
     minWidth: '200px',
-    '@media (max-width: 768px)': {
+    '@media (maxWidth: 768px)': {
       width: '100%',
       minWidth: 'auto',
     },
@@ -1076,7 +1273,7 @@ const styles = {
     fontWeight: '600',
     color: '#2c3e50',
     minWidth: '50px',
-    '@media (max-width: 480px)': {
+    '@media (maxWidth: 480px)': {
       fontSize: '13px',
       minWidth: '40px',
     },
@@ -1088,7 +1285,7 @@ const styles = {
     fontSize: '14px',
     flex: '1',
     minWidth: '140px',
-    '@media (max-width: 768px)': {
+    '@media (maxWidth: 768px)': {
       minWidth: 'auto',
       width: '100%',
     },
@@ -1134,11 +1331,11 @@ const styles = {
     gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
     gap: '16px',
     marginBottom: '24px',
-    '@media (max-width: 640px)': {
+    '@media (maxWidth: 640px)': {
       gridTemplateColumns: 'repeat(2, 1fr)',
       gap: '12px',
     },
-    '@media (max-width: 480px)': {
+    '@media (maxWidth: 480px)': {
       gridTemplateColumns: '1fr',
     },
   },
@@ -1149,7 +1346,7 @@ const styles = {
     textAlign: 'center',
     boxShadow: '0 4px 6px rgba(0, 0, 0, 0.05)',
     borderLeft: '5px solid #3498db',
-    '@media (max-width: 768px)': {
+    '@media (maxWidth: 768px)': {
       padding: '16px',
     },
   },
@@ -1161,7 +1358,7 @@ const styles = {
     '@media (min-width: 768px)': {
       fontSize: '28px',
     },
-    '@media (max-width: 480px)': {
+    '@media (maxWidth: 480px)': {
       fontSize: '20px',
     },
   },
@@ -1205,7 +1402,7 @@ const styles = {
     borderRadius: '12px',
     boxShadow: '0 4px 6px rgba(0, 0, 0, 0.05)',
     marginBottom: '0',
-    '@media (max-width: 768px)': {
+    '@media (maxWidth: 768px)': {
       padding: '16px',
     },
   },
@@ -1216,7 +1413,7 @@ const styles = {
     marginBottom: '16px',
     flexWrap: 'wrap',
     gap: '10px',
-    '@media (max-width: 480px)': {
+    '@media (maxWidth: 480px)': {
       flexDirection: 'column',
       alignItems: 'stretch',
     },
@@ -1226,7 +1423,7 @@ const styles = {
     fontWeight: '600',
     color: '#2c3e50',
     margin: '0',
-    '@media (max-width: 480px)': {
+    '@media (maxWidth: 480px)': {
       fontSize: '16px',
     },
   },
@@ -1239,7 +1436,7 @@ const styles = {
   dateLabel: {
     fontSize: '14px',
     color: '#7f8c8d',
-    '@media (max-width: 480px)': {
+    '@media (maxWidth: 480px)': {
       fontSize: '13px',
     },
   },
@@ -1247,7 +1444,7 @@ const styles = {
     fontSize: '14px',
     color: '#2c3e50',
     fontWeight: '500',
-    '@media (max-width: 480px)': {
+    '@media (maxWidth: 480px)': {
       fontSize: '13px',
     },
   },
@@ -1255,7 +1452,7 @@ const styles = {
     overflowX: 'auto',
     borderRadius: '8px',
     border: '1px solid #e0e0e0',
-    '@media (max-width: 768px)': {
+    '@media (maxWidth: 768px)': {
       margin: '0 -8px',
       border: 'none',
     },
@@ -1264,7 +1461,7 @@ const styles = {
     width: '100%',
     borderCollapse: 'collapse',
     backgroundColor: '#ffffff',
-    '@media (max-width: 768px)': {
+    '@media (maxWidth: 768px)': {
       minWidth: '600px',
     },
   },
@@ -1276,7 +1473,7 @@ const styles = {
     fontWeight: '600',
     fontSize: '14px',
     borderBottom: '1px solid #2980b9',
-    '@media (max-width: 480px)': {
+    '@media (maxWidth: 480px)': {
       padding: '10px 12px',
       fontSize: '13px',
     },
@@ -1292,7 +1489,7 @@ const styles = {
     borderBottom: '1px solid #e0e0e0',
     fontSize: '14px',
     color: '#2c3e50',
-    '@media (max-width: 480px)': {
+    '@media (maxWidth: 480px)': {
       padding: '10px 12px',
       fontSize: '13px',
     },
@@ -1306,7 +1503,7 @@ const styles = {
     borderTop: '2px solid #27ae60',
     fontSize: '14px',
     color: '#2c3e50',
-    '@media (max-width: 480px)': {
+    '@media (maxWidth: 480px)': {
       padding: '10px 12px',
       fontSize: '13px',
     },
@@ -1328,7 +1525,7 @@ const styles = {
     fontWeight: '600',
     color: '#7f8c8d',
     marginBottom: '4px',
-    '@media (max-width: 480px)': {
+    '@media (maxWidth: 480px)': {
       fontSize: '13px',
     },
   },
@@ -1347,7 +1544,7 @@ const styles = {
     fontWeight: 'bold',
     color: '#27ae60',
     margin: '0',
-    '@media (max-width: 480px)': {
+    '@media (maxWidth: 480px)': {
       fontSize: '14px',
     },
   },
@@ -1356,7 +1553,7 @@ const styles = {
     padding: '30px 20px',
     borderRadius: '8px',
     textAlign: 'center',
-    '@media (max-width: 768px)': {
+    '@media (maxWidth: 768px)': {
       padding: '24px 16px',
     },
   },
@@ -1365,14 +1562,14 @@ const styles = {
     color: '#7f8c8d',
     marginBottom: '8px',
     fontWeight: '500',
-    '@media (max-width: 480px)': {
+    '@media (maxWidth: 480px)': {
       fontSize: '14px',
     },
   },
   placeholderSubText: {
     fontSize: '14px',
     color: '#95a5a6',
-    '@media (max-width: 480px)': {
+    '@media (maxWidth: 480px)': {
       fontSize: '13px',
     },
   },

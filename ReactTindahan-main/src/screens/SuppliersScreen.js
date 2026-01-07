@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { dataService } from '../services/DataService';
 import { useLocation } from 'react-router-dom';
+import { dataService } from '../services/DataService';
 
 export default function SuppliersScreen({ userMode }) {
   const location = useLocation();
@@ -14,6 +14,8 @@ export default function SuppliersScreen({ userMode }) {
   const [address, setAddress] = useState('');
   const [editingId, setEditingId] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [saveLoading, setSaveLoading] = useState(false);
   
   // Recycle Bin states
   const [showRecycleBinModal, setShowRecycleBinModal] = useState(false);
@@ -21,15 +23,16 @@ export default function SuppliersScreen({ userMode }) {
   const [newDeletedItems, setNewDeletedItems] = useState(0);
   const [deletedItemsLoading, setDeletedItemsLoading] = useState(false);
 
-  // ✅ FIXED Audit logging function - uses console logging
+  // ✅ Audit logging function - uses backup table
   const logAudit = async (action, details = {}) => {
     try {
-      // Simply log to console - no separate audits table needed
-      console.log(`[AUDIT] ${action}`, {
+      await dataService.add('backup', {
         user_id: user?.user_id,
-        username: user?.username,
-        details,
-        timestamp: new Date().toISOString()
+        backup_name: `AUDIT_${action}`,
+        backup_type: 'audit',
+        created_at: new Date().toISOString(),
+        schema_version: '6',
+        details: JSON.stringify(details)
       });
     } catch (error) {
       console.error('Failed to log audit:', error);
@@ -37,10 +40,11 @@ export default function SuppliersScreen({ userMode }) {
   };
 
   useEffect(() => {
-    // ✅ FIXED: Just log to console
-    console.log(`[AUDIT] VIEW_SUPPLIERS_SCREEN`, {
+    // ✅ Log to backup table
+    logAudit('VIEW_SUPPLIERS_SCREEN', {
       user_id: user?.user_id,
-      username: user?.username
+      username: user?.username,
+      page: 'suppliers'
     });
     
     fetchSuppliers();
@@ -56,9 +60,11 @@ export default function SuppliersScreen({ userMode }) {
     try {
       setDeletedItemsLoading(true);
       
-      // CHANGED: Use DataService
-      const deletedSuppliersData = await dataService.getAll('backup');
-      const filteredData = deletedSuppliersData
+      // Get deleted items from backup table
+      const deletedItems = await dataService.getAll('backup');
+      
+      // Filter for deleted suppliers
+      const deletedSuppliersData = deletedItems
         .filter(item => 
           item.backup_type === 'deleted_supplier' && 
           !item.restored_at && 
@@ -66,13 +72,13 @@ export default function SuppliersScreen({ userMode }) {
         )
         .reverse();
       
-      setDeletedSuppliers(filteredData);
+      setDeletedSuppliers(deletedSuppliersData);
       
       // Count new items (deleted in last 7 days)
       const sevenDaysAgo = new Date();
       sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
       
-      const newDeletedCount = filteredData
+      const newDeletedCount = deletedSuppliersData
         .filter(item => new Date(item.created_at) > sevenDaysAgo)
         .length;
       
@@ -87,18 +93,24 @@ export default function SuppliersScreen({ userMode }) {
 
   const fetchSuppliers = async () => {
     try {
-      // ✅ FIXED: Just log to console
-      console.log(`[AUDIT] FETCH_SUPPLIERS`, {
+      setLoading(true);
+      
+      // ✅ Log to backup table
+      await logAudit('FETCH_SUPPLIERS', {
         user_id: user?.user_id
       });
 
-      // CHANGED: Use DataService
+      // Get suppliers using dataService
       const list = await dataService.getSuppliers();
       setSuppliers(list);
+      
+      setLoading(false);
     } catch (err) {
       console.error('Error fetching suppliers:', err);
-      // ✅ FIXED: Just log to console
-      console.error(`[AUDIT] FETCH_SUPPLIERS_ERROR`, {
+      setLoading(false);
+      
+      // ✅ Log to backup table
+      await logAudit('FETCH_SUPPLIERS_ERROR', {
         error: err.message,
         user_id: user?.user_id
       });
@@ -112,36 +124,44 @@ export default function SuppliersScreen({ userMode }) {
     }
     
     try {
+      setSaveLoading(true);
+      
       if (editingId) {
         const oldSupplier = await dataService.getById('suppliers', editingId);
         
-        // CHANGED: Use DataService
+        // Update supplier
         await dataService.update('suppliers', editingId, { 
           name, 
           contact_info: contact, 
-          address 
+          address,
+          updated_by: user?.username,
+          updated_at: new Date().toISOString()
         });
 
-        // ✅ FIXED: Just log to console
-        console.log(`[AUDIT] UPDATE_SUPPLIER`, {
+        // ✅ Log to backup table
+        await logAudit('UPDATE_SUPPLIER', {
           supplier_id: editingId,
-          supplier_name: name,
+          old_name: oldSupplier?.name,
+          new_name: name,
           user_id: user?.user_id,
           username: user?.username
         });
       } else {
-        // CHANGED: Use DataService
-        const supplierId = await dataService.addSupplier({ 
+        // Add new supplier
+        const supplierData = {
           name, 
           contact_info: contact, 
           address,
-          // ✅ ADDED: Include created_by and created_at for audit trail
-          created_by: user?.username,
+          created_by: user?.user_id || user?.username,
           created_at: new Date().toISOString()
-        });
+        };
 
-        // ✅ FIXED: Just log to console
-        console.log(`[AUDIT] ADD_SUPPLIER`, {
+        const result = await dataService.add('suppliers', supplierData);
+        
+        const supplierId = result?.supplier_id || result?.id;
+
+        // ✅ Log to backup table
+        await logAudit('ADD_SUPPLIER', {
           supplier_id: supplierId,
           supplier_name: name,
           user_id: user?.user_id,
@@ -149,26 +169,35 @@ export default function SuppliersScreen({ userMode }) {
         });
       }
       
+      // Reset form
       setName('');
       setContact('');
       setAddress('');
       setEditingId(null);
-      fetchSuppliers();
+      
+      // Refresh suppliers list
+      await fetchSuppliers();
+      
     } catch (err) {
       console.error('Error saving supplier:', err);
-      // ✅ FIXED: Just log to console
-      console.error(`[AUDIT] SAVE_SUPPLIER_ERROR`, {
+      
+      // ✅ Log to backup table
+      await logAudit('SAVE_SUPPLIER_ERROR', {
         error: err.message,
         supplier_name: name,
         editing: !!editingId,
         user_id: user?.user_id
       });
+      
+      alert('Error saving supplier. Please try again.');
+    } finally {
+      setSaveLoading(false);
     }
   };
 
   const handleEdit = (supplier) => {
-    // ✅ FIXED: Just log to console
-    console.log(`[AUDIT] VIEW_EDIT_SUPPLIER`, {
+    // ✅ Log to backup table
+    logAudit('VIEW_EDIT_SUPPLIER', {
       supplier_id: supplier.supplier_id,
       supplier_name: supplier.name,
       user_id: user?.user_id
@@ -176,8 +205,8 @@ export default function SuppliersScreen({ userMode }) {
     
     setEditingId(supplier.supplier_id);
     setName(supplier.name);
-    setContact(supplier.contact_info);
-    setAddress(supplier.address);
+    setContact(supplier.contact_info || '');
+    setAddress(supplier.address || '');
   };
 
   // Soft delete supplier (move to recycle bin)
@@ -185,6 +214,7 @@ export default function SuppliersScreen({ userMode }) {
     if (!window.confirm('Are you sure you want to delete this supplier? This will be moved to recycle bin.')) return;
     
     try {
+      // Get supplier details
       const supplier = await dataService.getById('suppliers', id);
       if (!supplier) return;
       
@@ -214,7 +244,7 @@ export default function SuppliersScreen({ userMode }) {
         backup_name: `DELETED_SUPPLIER_${supplier.name}`,
         backup_type: 'deleted_supplier',
         created_at: new Date().toISOString(),
-        schema_version: '5',
+        schema_version: '6',
         details: JSON.stringify(supplier),
         restored_at: null,
         confirmed_at: null,
@@ -224,30 +254,34 @@ export default function SuppliersScreen({ userMode }) {
       // Now delete from original table
       await dataService.delete('suppliers', id);
       
-      // ✅ FIXED: Just log to console
-      console.log(`[AUDIT] DELETE_SUPPLIER_TO_RECYCLE`, {
+      // ✅ Log to backup table
+      await logAudit('DELETE_SUPPLIER_TO_RECYCLE', {
         supplier_id: id,
         supplier_name: supplier.name,
         user_id: user?.user_id,
         username: user?.username
       });
       
-      fetchSuppliers();
+      // Refresh data
+      await fetchSuppliers();
       
       // Refresh deleted items count for owner
       if (user?.role === 'Owner') {
-        fetchDeletedSuppliers();
+        await fetchDeletedSuppliers();
       }
       
       alert(`Supplier "${supplier.name}" moved to recycle bin. Only owner can restore or permanently delete.`);
     } catch (err) {
       console.error('Error deleting supplier:', err);
-      // ✅ FIXED: Just log to console
-      console.error(`[AUDIT] DELETE_SUPPLIER_ERROR`, {
+      
+      // ✅ Log to backup table
+      await logAudit('DELETE_SUPPLIER_ERROR', {
         error: err.message,
         supplier_id: id,
         user_id: user?.user_id
       });
+      
+      alert('Error deleting supplier. Please try again.');
     }
   };
 
@@ -264,12 +298,19 @@ export default function SuppliersScreen({ userMode }) {
     if (!window.confirm(`Are you sure you want to restore supplier "${details.name}"?`)) return;
     
     try {
-      // Restore supplier using DataService
-      const supplierId = await dataService.addSupplier({
+      // Restore supplier
+      const supplierData = {
         ...details,
         created_at: new Date().toISOString(),
         created_by: `${deletedItem.username} (restored)`
-      });
+      };
+      
+      // Remove the deleted fields before restoring
+      delete supplierData.deleted_at;
+      delete supplierData.restored_at;
+      delete supplierData.confirmed_at;
+      
+      const result = await dataService.add('suppliers', supplierData);
       
       // Update backup record
       await dataService.update('backup', deletedItem.backup_id, {
@@ -277,9 +318,17 @@ export default function SuppliersScreen({ userMode }) {
         restored_by: user?.username
       });
       
-      // Refresh suppliers list
-      fetchSuppliers();
-      fetchDeletedSuppliers();
+      // ✅ Log to backup table
+      await logAudit('RESTORE_SUPPLIER', {
+        backup_id: deletedItem.backup_id,
+        supplier_name: details.name,
+        user_id: user?.user_id,
+        username: user?.username
+      });
+      
+      // Refresh data
+      await fetchSuppliers();
+      await fetchDeletedSuppliers();
       
       alert('Supplier restored successfully!');
       
@@ -302,8 +351,16 @@ export default function SuppliersScreen({ userMode }) {
         confirmed_by: user?.username
       });
       
+      // ✅ Log to backup table
+      await logAudit('PERMANENT_DELETE_SUPPLIER', {
+        backup_id: deletedItem.backup_id,
+        supplier_name: details.name,
+        user_id: user?.user_id,
+        username: user?.username
+      });
+      
       // Refresh deleted suppliers
-      fetchDeletedSuppliers();
+      await fetchDeletedSuppliers();
       
       alert('Supplier permanently deleted.');
       
@@ -314,8 +371,8 @@ export default function SuppliersScreen({ userMode }) {
   };
 
   const handleCancelEdit = () => {
-    // ✅ FIXED: Just log to console
-    console.log(`[AUDIT] CANCEL_EDIT_SUPPLIER`, {
+    // ✅ Log to backup table
+    logAudit('CANCEL_EDIT_SUPPLIER', {
       supplier_id: editingId,
       user_id: user?.user_id
     });
@@ -327,9 +384,9 @@ export default function SuppliersScreen({ userMode }) {
   };
 
   const handleSearch = (query) => {
-    // ✅ FIXED: Just log to console
+    // ✅ Log to backup table
     if (query !== searchQuery) {
-      console.log(`[AUDIT] SEARCH_SUPPLIERS`, {
+      logAudit('SEARCH_SUPPLIERS', {
         search_query: query,
         user_id: user?.user_id
       });
@@ -338,8 +395,8 @@ export default function SuppliersScreen({ userMode }) {
   };
 
   const handleClearSearch = () => {
-    // ✅ FIXED: Just log to console
-    console.log(`[AUDIT] CLEAR_SUPPLIER_SEARCH`, {
+    // ✅ Log to backup table
+    logAudit('CLEAR_SUPPLIER_SEARCH', {
       previous_query: searchQuery,
       user_id: user?.user_id
     });
@@ -355,18 +412,21 @@ export default function SuppliersScreen({ userMode }) {
 
   // Format date for recycle bin
   const formatRecycleDate = (dateString) => {
-    const date = new Date(dateString);
-    const now = new Date();
-    const diffHours = Math.floor((now - date) / (1000 * 60 * 60));
-    
-    if (diffHours < 24) {
-      return `${diffHours} hour${diffHours !== 1 ? 's' : ''} ago`;
-    } else {
-      return date.toLocaleDateString();
+    try {
+      const date = new Date(dateString);
+      const now = new Date();
+      const diffHours = Math.floor((now - date) / (1000 * 60 * 60));
+      
+      if (diffHours < 24) {
+        return `${diffHours} hour${diffHours !== 1 ? 's' : ''} ago`;
+      } else {
+        return date.toLocaleDateString();
+      }
+    } catch {
+      return 'Unknown date';
     }
   };
 
-  // All styles remain the same...
   return (
     <div style={styles.container}>
       <div style={styles.header}>
@@ -380,6 +440,7 @@ export default function SuppliersScreen({ userMode }) {
             placeholder="Search suppliers..."
             value={searchQuery}
             onChange={(e) => handleSearch(e.target.value)}
+            disabled={loading}
           />
           {/* Owner-only recycle bin button */}
           {user?.role === 'Owner' && (
@@ -391,6 +452,7 @@ export default function SuppliersScreen({ userMode }) {
               }}
               onClick={handleOpenRecycleBin}
               title={`Recycle Bin (${newDeletedItems} new)`}
+              disabled={loading}
             >
               🗑️ Recycle Bin
               {newDeletedItems > 0 && (
@@ -437,6 +499,13 @@ export default function SuppliersScreen({ userMode }) {
         </div>
       </div>
 
+      {/* Loading State */}
+      {loading && (
+        <div style={styles.loadingMessage}>
+          Loading suppliers...
+        </div>
+      )}
+
       {/* Form Section */}
       <div style={styles.formContainer}>
         <h3 style={styles.formHeader}>{editingId ? 'Edit Supplier' : 'Add New Supplier'}</h3>
@@ -444,31 +513,39 @@ export default function SuppliersScreen({ userMode }) {
           placeholder="Supplier Name *" 
           value={name} 
           onChange={(e) => setName(e.target.value)} 
-          style={styles.input} 
+          style={styles.input}
+          disabled={saveLoading}
         />
         <input 
           placeholder="Contact Information (Phone/Email)" 
           value={contact} 
           onChange={(e) => setContact(e.target.value)} 
-          style={styles.input} 
+          style={styles.input}
+          disabled={saveLoading}
         />
         <input 
           placeholder="Address" 
           value={address} 
           onChange={(e) => setAddress(e.target.value)} 
-          style={styles.input} 
+          style={styles.input}
+          disabled={saveLoading}
         />
         <div style={styles.formButtons}>
           {editingId && (
             <button 
               onClick={handleCancelEdit} 
               style={styles.cancelButton}
+              disabled={saveLoading}
             >
               Cancel Edit
             </button>
           )}
-          <button onClick={handleSave} style={styles.saveButton}>
-            {editingId ? 'Update Supplier' : 'Add Supplier'}
+          <button 
+            onClick={handleSave} 
+            style={styles.saveButton}
+            disabled={saveLoading || !name.trim()}
+          >
+            {saveLoading ? 'Saving...' : (editingId ? 'Update Supplier' : 'Add Supplier')}
           </button>
         </div>
       </div>
@@ -484,12 +561,18 @@ export default function SuppliersScreen({ userMode }) {
             <button 
               style={styles.clearSearchButton}
               onClick={handleClearSearch}
+              disabled={loading}
             >
               Clear Search
             </button>
           )}
         </div>
-        {filteredSuppliers.length === 0 ? (
+        {loading ? (
+          <div style={styles.loadingState}>
+            <div style={styles.loadingSpinner}></div>
+            <p>Loading suppliers...</p>
+          </div>
+        ) : filteredSuppliers.length === 0 ? (
           <div style={styles.emptyState}>
             <div style={styles.emptyStateIcon}>🏢</div>
             <p style={styles.emptyText}>
@@ -510,8 +593,18 @@ export default function SuppliersScreen({ userMode }) {
                 <div style={styles.supplierCardHeader}>
                   <p style={styles.supplierName}>{item.name}</p>
                   <div style={styles.supplierActions}>
-                    <button onClick={() => handleEdit(item)} style={styles.editButton}>Edit</button>
-                    <button onClick={() => handleDelete(item.supplier_id)} style={styles.deleteButton}>Delete</button>
+                    <button 
+                      onClick={() => handleEdit(item)} 
+                      style={styles.editButton}
+                    >
+                      Edit
+                    </button>
+                    <button 
+                      onClick={() => handleDelete(item.supplier_id)} 
+                      style={styles.deleteButton}
+                    >
+                      Delete
+                    </button>
                   </div>
                 </div>
                 
@@ -559,7 +652,12 @@ export default function SuppliersScreen({ userMode }) {
                   Deleted suppliers waiting for owner confirmation
                 </p>
               </div>
-              <button style={styles.closeButton} onClick={() => setShowRecycleBinModal(false)}>✕</button>
+              <button 
+                style={styles.closeButton} 
+                onClick={() => setShowRecycleBinModal(false)}
+              >
+                ✕
+              </button>
             </div>
 
             {/* Stats */}
@@ -614,7 +712,13 @@ export default function SuppliersScreen({ userMode }) {
                       </thead>
                       <tbody>
                         {deletedSuppliers.map((item) => {
-                          const details = JSON.parse(item.details || '{}');
+                          let details = {};
+                          try {
+                            details = JSON.parse(item.details || '{}');
+                          } catch {
+                            details = { name: 'Unknown Supplier' };
+                          }
+                          
                           const isNew = new Date(item.created_at) > new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
                           const isPending = !item.restored_at && !item.confirmed_at;
                           
@@ -636,8 +740,8 @@ export default function SuppliersScreen({ userMode }) {
                                 {details.contact_info || 'N/A'}
                               </td>
                               <td style={styles.tableCell}>
-                                {item.username}<br/>
-                                <small style={{ color: '#94a3b8' }}>ID: {item.user_id}</small>
+                                {item.username || 'Unknown'}<br/>
+                                <small style={{ color: '#94a3b8' }}>ID: {item.user_id || 'N/A'}</small>
                               </td>
                               <td style={styles.tableCell}>
                                 {formatRecycleDate(item.created_at)}
@@ -688,7 +792,10 @@ export default function SuppliersScreen({ userMode }) {
             </div>
 
             <div style={styles.modalButtons}>
-              <button style={styles.cancelButton} onClick={() => setShowRecycleBinModal(false)}>
+              <button 
+                style={styles.cancelButton} 
+                onClick={() => setShowRecycleBinModal(false)}
+              >
                 Close
               </button>
             </div>

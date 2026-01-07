@@ -1,4 +1,4 @@
-import { dataService } from '../services/DataService';
+import { dataService } from './DataService';
 
 // Using try-catch for Capacitor to handle version issues
 let Filesystem;
@@ -39,11 +39,10 @@ function generateChecksum(data) {
 async function createBackup(userId, username = 'System', backupName = 'Automatic Backup') {
   try {
     const backupData = {
-      schema_version: '5',
+      schema_version: '6', // Your current schema version
       created_at: new Date().toISOString(),
       created_by: userId,
       created_by_name: username,
-      backup_name: backupName,
       data: {}
     };
 
@@ -58,10 +57,11 @@ async function createBackup(userId, username = 'System', backupName = 'Automatic
       'sales',
       'sale_items',
       'stock_card',
-      'backup'
+      'backup',
+      'deleted_items'
     ];
 
-    // CHANGED: Use DataService to get table data
+    // Collect data from all tables using dataService
     for (const table of tables) {
       try {
         backupData.data[table] = await dataService.getAll(table);
@@ -75,7 +75,7 @@ async function createBackup(userId, username = 'System', backupName = 'Automatic
     const fileName = `TindaTrack_Auto_${backupName.replace(/\s+/g, '_')}_${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
     const jsonString = JSON.stringify(backupData, null, 2);
 
-    // Log the backup in database using DataService
+    // Log the backup in database
     try {
       await dataService.add('backup', {
         user_id: userId,
@@ -83,7 +83,7 @@ async function createBackup(userId, username = 'System', backupName = 'Automatic
         backup_name: backupName,
         backup_type: 'full',
         created_at: new Date().toISOString(),
-        schema_version: '5',
+        schema_version: '6',
         file_name: fileName,
         file_size: jsonString.length,
         checksum,
@@ -101,9 +101,9 @@ async function createBackup(userId, username = 'System', backupName = 'Automatic
 }
 
 /**
- * Download backup file for auto backup
+ * Download backup file for auto backup - FIXED VERSION
  */
-async function downloadBackupFile(backupData, fileName) {
+async function downloadBackupFile(json, fileName) {
   try {
     // For Capacitor (mobile)
     if (isCapacitor && Filesystem) {
@@ -123,7 +123,7 @@ async function downloadBackupFile(backupData, fileName) {
             console.log(`Trying to save to ${directory}...`);
             const result = await Filesystem.writeFile({
               path: fileName,
-              data: backupData,
+              data: json,
               directory,
               recursive: true
             });
@@ -148,7 +148,7 @@ async function downloadBackupFile(backupData, fileName) {
     
     // For Web (fallback) - This always works
     try {
-      const blob = new Blob([backupData], { type: 'application/json' });
+      const blob = new Blob([json], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
       
       const link = document.createElement('a');
@@ -181,7 +181,14 @@ async function downloadBackupFile(backupData, fileName) {
  */
 export async function runDailyBackup() {
   try {
-    // Check if database is ready
+    // Check if database is ready by testing a simple query
+    try {
+      await dataService.getAll('users', { limit: 1 });
+    } catch (dbError) {
+      console.log('Database not ready, skipping auto backup');
+      return false;
+    }
+
     const userData = localStorage.getItem('user');
     if (!userData) {
       console.log('No user logged in, skipping auto backup');

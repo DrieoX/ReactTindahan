@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
-import { dataService } from "../services/DataService"; // CHANGED
+import { dataService } from '../services/DataService';
 
 export default function ResupplyScreen() {
   const [barcode, setBarcode] = useState("");
@@ -10,6 +10,8 @@ export default function ResupplyScreen() {
   const [lowStockProducts, setLowStockProducts] = useState([]);
   const [searchResults, setSearchResults] = useState([]);
   const [showSearchResults, setShowSearchResults] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [resupplyLoading, setResupplyLoading] = useState(false);
   const inputRef = useRef(null);
   const searchRef = useRef(null);
   const quantityInputRefs = useRef({});
@@ -18,17 +20,18 @@ export default function ResupplyScreen() {
   const savedUser = JSON.parse(localStorage.getItem("user") || "{}");
   const user = savedUser;
 
-  // ✅ FIXED Audit logging function - uses console logging instead of non-existent audits table
+  // ✅ Audit logging function - uses backup table
   const logAudit = async (action, details = {}) => {
     try {
-      // Just log to console - no separate audits table
-      console.log(`[AUDIT] ${action}`, {
+      await dataService.add('backup', {
         user_id: user?.user_id,
-        username: user?.username,
-        details,
-        timestamp: new Date().toISOString()
+        backup_name: `AUDIT_${action}`,
+        backup_type: 'audit',
+        created_at: new Date().toISOString(),
+        schema_version: '6',
+        details: JSON.stringify(details)
       });
-      return Date.now(); // Return timestamp for compatibility
+      return Date.now();
     } catch (error) {
       console.error('Failed to log audit:', error);
       return null;
@@ -50,10 +53,11 @@ export default function ResupplyScreen() {
 
   // ✅ Load data once
   useEffect(() => {
-    // ✅ FIXED: Just log to console
-    console.log(`[AUDIT] VIEW_RESUPPLY_SCREEN`, {
+    // ✅ Log to backup table
+    logAudit('VIEW_RESUPPLY_SCREEN', {
       user_id: user?.user_id,
-      username: user?.username
+      username: user?.username,
+      page: 'resupply'
     });
 
     loadProductsAndSuppliers();
@@ -110,14 +114,17 @@ export default function ResupplyScreen() {
 
   const loadProductsAndSuppliers = async () => {
     try {
-      // ✅ FIXED: Just log to console
-      console.log(`[AUDIT] LOAD_RESUPPLY_DATA`, {
+      setLoading(true);
+      
+      // ✅ Log to backup table
+      await logAudit('LOAD_RESUPPLY_DATA', {
         user_id: user?.user_id
       });
 
-      const prodRes = await dataService.getAll('products'); // CHANGED
-      const supRes = await dataService.getAll('suppliers'); // CHANGED
-      const inventoryData = await dataService.getAll('inventory'); // CHANGED
+      // Get data using dataService
+      const prodRes = await dataService.getProducts();
+      const supRes = await dataService.getSuppliers();
+      const inventoryData = await dataService.getInventory();
 
       const enrichedProducts = prodRes.map((p) => {
         const inv = inventoryData.find((i) => i.product_id === p.product_id);
@@ -128,7 +135,7 @@ export default function ResupplyScreen() {
           price: parseFloat(p.unit_price) || 0,
           stock: inv?.quantity || 0,
           baseUnit: p.base_unit || "pcs",
-          threshold: p.threshold || 5,
+          threshold: inv?.threshold || 5,
         };
       });
 
@@ -137,10 +144,14 @@ export default function ResupplyScreen() {
 
       const lowStock = enrichedProducts.filter((p) => p.stock <= p.threshold);
       setLowStockProducts(lowStock);
+      
+      setLoading(false);
     } catch (err) {
       console.error("Error loading data:", err);
-      // ✅ FIXED: Just log to console
-      console.error(`[AUDIT] LOAD_RESUPPLY_DATA_ERROR`, {
+      setLoading(false);
+      
+      // ✅ Log to backup table
+      await logAudit('LOAD_RESUPPLY_DATA_ERROR', {
         error: err.message,
         user_id: user?.user_id
       });
@@ -154,8 +165,8 @@ export default function ResupplyScreen() {
       return;
     }
 
-    // ✅ FIXED: Just log to console
-    console.log(`[AUDIT] SEARCH_PRODUCT_RESUPPLY`, {
+    // ✅ Log to backup table
+    logAudit('SEARCH_PRODUCT_RESUPPLY', {
       search_term: searchTerm,
       user_id: user?.user_id
     });
@@ -188,8 +199,8 @@ export default function ResupplyScreen() {
       if (!selectedSupplierId) {
         alert("⚠️ Please select a supplier before scanning.");
         
-        // ✅ FIXED: Just log to console
-        console.log(`[AUDIT] SCAN_NO_SUPPLIER`, {
+        // ✅ Log to backup table
+        await logAudit('SCAN_NO_SUPPLIER', {
           barcode: code,
           product_id: product.id,
           product_name: product.name,
@@ -200,8 +211,8 @@ export default function ResupplyScreen() {
         return;
       }
       
-      // ✅ FIXED: Just log to console
-      console.log(`[AUDIT] SCAN_PRODUCT_RESUPPLY`, {
+      // ✅ Log to backup table
+      await logAudit('SCAN_PRODUCT_RESUPPLY', {
         barcode: code,
         product_id: product.id,
         product_name: product.name,
@@ -221,8 +232,8 @@ export default function ResupplyScreen() {
     if (!selectedSupplierId) {
       alert("⚠️ Please select a supplier first.");
       
-      // ✅ FIXED: Just log to console
-      console.log(`[AUDIT] SEARCH_SELECT_NO_SUPPLIER`, {
+      // ✅ Log to backup table
+      await logAudit('SEARCH_SELECT_NO_SUPPLIER', {
         product_id: product.id,
         product_name: product.name,
         user_id: user?.user_id
@@ -231,8 +242,8 @@ export default function ResupplyScreen() {
       return;
     }
     
-    // ✅ FIXED: Just log to console
-    console.log(`[AUDIT] SEARCH_SELECT_PRODUCT`, {
+    // ✅ Log to backup table
+    await logAudit('SEARCH_SELECT_PRODUCT', {
       product_id: product.id,
       product_name: product.name,
       supplier_id: selectedSupplierId,
@@ -248,8 +259,8 @@ export default function ResupplyScreen() {
     if (!selectedSupplierId) {
       alert("Select a supplier first!");
       
-      // ✅ FIXED: Just log to console
-      console.log(`[AUDIT] ADD_TO_CART_NO_SUPPLIER`, {
+      // ✅ Log to backup table
+      await logAudit('ADD_TO_CART_NO_SUPPLIER', {
         product_id: product.id,
         product_name: product.name,
         quantity: qty,
@@ -259,8 +270,8 @@ export default function ResupplyScreen() {
       return;
     }
 
-    // ✅ FIXED: Just log to console
-    console.log(`[AUDIT] ADD_TO_CART`, {
+    // ✅ Log to backup table
+    await logAudit('ADD_TO_CART', {
       product_id: product.id,
       product_name: product.name,
       supplier_id: selectedSupplierId,
@@ -310,8 +321,8 @@ export default function ResupplyScreen() {
   const removeFromCart = async (id, supplier_id) => {
     const item = cart.find(item => item.id === id && item.supplier_id === supplier_id);
     
-    // ✅ FIXED: Just log to console
-    console.log(`[AUDIT] REMOVE_FROM_CART`, {
+    // ✅ Log to backup table
+    await logAudit('REMOVE_FROM_CART', {
       product_id: id,
       product_name: item?.name,
       supplier_id: supplier_id,
@@ -345,11 +356,12 @@ export default function ResupplyScreen() {
     }
 
     try {
+      setResupplyLoading(true);
       const today = new Date().toISOString().split("T")[0];
       const transactionDateTime = getFormattedDateTime();
       
-      // ✅ FIXED: Just log to console
-      console.log(`[AUDIT] RESUPPLY_ATTEMPT`, {
+      // ✅ Log to backup table
+      await logAudit('RESUPPLY_ATTEMPT', {
         supplier_id: selectedSupplierId,
         items_count: cart.length,
         total_quantity: cart.reduce((sum, item) => sum + item.quantity, 0),
@@ -357,90 +369,92 @@ export default function ResupplyScreen() {
         user_id: user?.user_id
       });
 
-      // Get all inventory data for updating
-      const allInventory = await dataService.getAll('inventory'); // CHANGED
-      
+      // Process each item in cart
       for (const item of cart) {
         const resupplyData = {
           product_id: item.id,
+          user_id: user.user_id,
           supplier_id: item.supplier_id,
           quantity: item.quantity,
           unit_cost: parseFloat(item.unitCost) || 0,
-          expiration_date: item.noExpiry ? "" : item.expirationDate || "",
           unit_type: item.unitType,
-          user_id: user.user_id,
           resupply_date: today,
-          // ✅ ADDED: Include created_by and created_at
-          created_by: user?.username,
+          expiration_date: item.noExpiry ? "" : item.expirationDate || "",
           created_at: transactionDateTime
         };
 
-        // Add resupply record
-        await dataService.add('resupplied_items', resupplyData); // CHANGED
+        try {
+          // Add resupply record using dataService
+          await dataService.add('resupplied_items', resupplyData);
+          
+          // Update inventory
+          const currentInventory = await dataService.getById('inventory', item.id);
+          
+          if (!currentInventory) {
+            // Create new inventory entry
+            await dataService.add('inventory', {
+              product_id: item.id,
+              supplier_id: item.supplier_id,
+              quantity: item.quantity,
+              expiration_date: resupplyData.expiration_date,
+              threshold: item.threshold || 10,
+              updated_by: user.user_id,
+              updated_at: transactionDateTime
+            });
+          } else {
+            // Update existing inventory
+            await dataService.update('inventory', item.id, {
+              quantity: (currentInventory.quantity || 0) + item.quantity,
+              supplier_id: item.supplier_id,
+              expiration_date: resupplyData.expiration_date || currentInventory.expiration_date,
+              updated_by: user.user_id,
+              updated_at: transactionDateTime
+            });
+          }
 
-        // Update inventory
-        const existingInv = allInventory.find(inv => inv.product_id === item.id);
-
-        if (!existingInv) {
-          await dataService.add('inventory', { // CHANGED
+          // Get product details for stock card
+          const product = await dataService.getById('products', item.id);
+          
+          // Calculate current stock for running balance
+          const currentStock = (currentInventory?.quantity || 0) + item.quantity;
+          
+          // ✅ Log to backup table
+          await logAudit('RESUPPLY_ITEM', {
             product_id: item.id,
+            product_name: item.name,
             supplier_id: item.supplier_id,
             quantity: item.quantity,
+            unit_cost: parseFloat(item.unitCost) || 0,
+            total_cost: (parseFloat(item.unitCost) || 0) * item.quantity,
             expiration_date: resupplyData.expiration_date,
-            updated_by: user?.username,
-            updated_at: new Date().toISOString()
+            user_id: user?.user_id
           });
-        } else {
-          await dataService.update('inventory', existingInv.product_id, { // CHANGED
-            quantity: existingInv.quantity + item.quantity,
+          
+          // ✅ ADD STOCK CARD RECORD FOR RESUPPLY (STOCK-IN)
+          const stockCardData = {
+            product_id: item.id,
             supplier_id: item.supplier_id,
+            user_id: user.user_id,
+            quantity: item.quantity, // Positive for stock-in
+            unit_cost: parseFloat(item.unitCost) || 0,
+            unit_price: product?.unit_price || 0,
+            resupply_date: today,
             expiration_date: resupplyData.expiration_date,
-            updated_by: user?.username,
-            updated_at: new Date().toISOString()
-          });
+            transaction_type: "RESUPPLY",
+            running_balance: currentStock,
+            created_at: transactionDateTime
+          };
+          
+          await dataService.add('stock_card', stockCardData);
+          
+        } catch (itemError) {
+          console.error(`Error processing item ${item.id}:`, itemError);
+          throw new Error(`Failed to process ${item.name}: ${itemError.message}`);
         }
-
-        // Get current running balance for stock card
-        const currentStock = existingInv ? existingInv.quantity + item.quantity : item.quantity;
-        
-        // Get product price
-        const productData = await dataService.getAll('products'); // CHANGED
-        const prod = productData.find(p => p.product_id === item.id);
-        
-        // ✅ FIXED: Just log to console
-        console.log(`[AUDIT] RESUPPLY_ITEM`, {
-          product_id: item.id,
-          product_name: item.name,
-          supplier_id: item.supplier_id,
-          quantity: item.quantity,
-          unit_cost: parseFloat(item.unitCost) || 0,
-          total_cost: (parseFloat(item.unitCost) || 0) * item.quantity,
-          expiration_date: resupplyData.expiration_date,
-          user_id: user?.user_id
-        });
-        
-        // ✅ ADD STOCK CARD RECORD FOR RESUPPLY (STOCK-IN) with created_by
-        await dataService.add('stock_card', { // CHANGED
-          product_id: item.id,
-          supplier_id: item.supplier_id,
-          user_id: user.user_id,
-          quantity: item.quantity, // Positive for stock-in
-          unit_cost: parseFloat(item.unitCost) || 0,
-          unit_price: prod?.unit_price || 0,
-          resupply_date: today,
-          expiration_date: resupplyData.expiration_date,
-          unit_type: item.unitType,
-          transaction_type: "RESUPPLY",
-          transaction_date: transactionDateTime,
-          running_balance: currentStock,
-          // ✅ ADDED: Include created_by and created_at for audit trail
-          created_by: user?.username,
-          created_at: transactionDateTime
-        });
       }
 
-      // ✅ FIXED: Just log to console
-      console.log(`[AUDIT] RESUPPLY_SUCCESS`, {
+      // ✅ Log to backup table
+      await logAudit('RESUPPLY_SUCCESS', {
         supplier_id: selectedSupplierId,
         items_count: cart.length,
         total_quantity: cart.reduce((sum, item) => sum + item.quantity, 0),
@@ -454,25 +468,28 @@ export default function ResupplyScreen() {
       setBarcode("");
       setSearchResults([]);
       setShowSearchResults(false);
-      loadProductsAndSuppliers(); // Refresh data
+      await loadProductsAndSuppliers(); // Refresh data
+      
     } catch (err) {
       console.error("Error during resupply:", err);
       
-      // ✅ FIXED: Just log to console
-      console.error(`[AUDIT] RESUPPLY_ERROR`, {
+      // ✅ Log to backup table
+      await logAudit('RESUPPLY_ERROR', {
         error: err.message,
         supplier_id: selectedSupplierId,
         items_count: cart.length,
         user_id: user?.user_id
       });
       
-      alert("❌ Failed to resupply products. Please try again.");
+      alert(`❌ Failed to resupply products: ${err.message}. Please try again.`);
+    } finally {
+      setResupplyLoading(false);
     }
   };
 
   const handleClearCart = async () => {
-    // ✅ FIXED: Just log to console
-    console.log(`[AUDIT] CLEAR_RESUPPLY_CART`, {
+    // ✅ Log to backup table
+    await logAudit('CLEAR_RESUPPLY_CART', {
       items_count: cart.length,
       total_quantity: cart.reduce((sum, item) => sum + item.quantity, 0),
       user_id: user?.user_id
@@ -482,9 +499,9 @@ export default function ResupplyScreen() {
   };
 
   const handleSupplierChange = async (supplierId) => {
-    // ✅ FIXED: Just log to console
+    // ✅ Log to backup table
     if (supplierId !== selectedSupplierId) {
-      console.log(`[AUDIT] CHANGE_RESUPPLY_SUPPLIER`, {
+      await logAudit('CHANGE_RESUPPLY_SUPPLIER', {
         old_supplier_id: selectedSupplierId,
         new_supplier_id: supplierId,
         user_id: user?.user_id
@@ -500,8 +517,8 @@ export default function ResupplyScreen() {
       return;
     }
     
-    // ✅ FIXED: Just log to console
-    console.log(`[AUDIT] LOW_STOCK_CLICK`, {
+    // ✅ Log to backup table
+    await logAudit('LOW_STOCK_CLICK', {
       product_id: product.id,
       product_name: product.name,
       current_stock: product.stock,
@@ -551,6 +568,7 @@ export default function ResupplyScreen() {
           value={selectedSupplierId}
           onChange={(e) => handleSupplierChange(e.target.value)}
           required
+          disabled={loading}
         >
           <option value="">Select Supplier</option>
           {suppliers.map((s) => (
@@ -576,7 +594,7 @@ export default function ResupplyScreen() {
               if (searchResults.length > 0) setShowSearchResults(true);
             }}
             onBlur={() => setIsInputFocused(false)}
-            disabled={!selectedSupplierId}
+            disabled={!selectedSupplierId || loading}
           />
           
           {showSearchResults && searchResults.length > 0 && (
@@ -600,8 +618,14 @@ export default function ResupplyScreen() {
         </div>
       </div>
 
+      {loading && (
+        <div style={styles.loadingMessage}>
+          Loading products and suppliers...
+        </div>
+      )}
+
       {/* Low Stock Section */}
-      {lowStockProducts.length > 0 && (
+      {!loading && lowStockProducts.length > 0 && (
         <div style={styles.lowStockCard}>
           <h3 style={styles.lowStockTitle}>⚠️ Low Stock Products</h3>
           <p style={styles.lowStockHint}>
@@ -644,7 +668,11 @@ export default function ResupplyScreen() {
             </div>
           </div>
           {cart.length > 0 && (
-            <button style={styles.clearCartButton} onClick={handleClearCart}>
+            <button 
+              style={styles.clearCartButton} 
+              onClick={handleClearCart}
+              disabled={resupplyLoading}
+            >
               Clear All
             </button>
           )}
@@ -687,6 +715,7 @@ export default function ResupplyScreen() {
                           )
                         }
                         style={styles.qtyBtn}
+                        disabled={resupplyLoading}
                       >
                         −
                       </button>
@@ -705,6 +734,7 @@ export default function ResupplyScreen() {
                         min="1"
                         required
                         ref={(el) => setQuantityInputRef(item.id, item.supplier_id, el)}
+                        disabled={resupplyLoading}
                       />
                       <button
                         onClick={() =>
@@ -716,6 +746,7 @@ export default function ResupplyScreen() {
                           )
                         }
                         style={styles.qtyBtn}
+                        disabled={resupplyLoading}
                       >
                         +
                       </button>
@@ -737,6 +768,7 @@ export default function ResupplyScreen() {
                         step="0.01"
                         min="0"
                         required
+                        disabled={resupplyLoading}
                       />
                     </div>
                     <div style={styles.costTotal}>
@@ -752,6 +784,7 @@ export default function ResupplyScreen() {
                         updateCartField(item.id, item.supplier_id, "unitType", e.target.value)
                       }
                       style={styles.smallInput}
+                      disabled={resupplyLoading}
                     >
                       {unitOptions(item.baseUnit).map((u) => (
                         <option key={u} value={u}>
@@ -771,7 +804,7 @@ export default function ResupplyScreen() {
                           updateCartField(item.id, item.supplier_id, "expirationDate", e.target.value)
                         }
                         style={styles.dateInput}
-                        disabled={item.noExpiry}
+                        disabled={item.noExpiry || resupplyLoading}
                         min={new Date().toISOString().split('T')[0]}
                       />
                       <label style={styles.checkboxLabel}>
@@ -782,6 +815,7 @@ export default function ResupplyScreen() {
                             updateCartField(item.id, item.supplier_id, "noExpiry", e.target.checked)
                           }
                           style={styles.checkbox}
+                          disabled={resupplyLoading}
                         />{" "}
                         No Expiry
                       </label>
@@ -791,6 +825,7 @@ export default function ResupplyScreen() {
                   <button
                     onClick={() => removeFromCart(item.id, item.supplier_id)}
                     style={styles.removeButton}
+                    disabled={resupplyLoading}
                   >
                     Remove
                   </button>
@@ -808,8 +843,12 @@ export default function ResupplyScreen() {
             <span>Total Quantity: <strong>{cart.reduce((sum, item) => sum + item.quantity, 0)}</strong></span>
             <span>Total Cost: <strong style={styles.totalCost}>₱{cart.reduce((sum, item) => sum + (parseFloat(item.unitCost) || 0) * item.quantity, 0).toFixed(2)}</strong></span>
           </div>
-          <button style={styles.submitButton} onClick={handleResupply}>
-            ✅ Complete Resupply
+          <button 
+            style={styles.submitButton} 
+            onClick={handleResupply}
+            disabled={resupplyLoading}
+          >
+            {resupplyLoading ? 'Processing...' : '✅ Complete Resupply'}
           </button>
         </div>
       )}
@@ -933,7 +972,7 @@ const styles = {
     display: "grid",
     gridTemplateColumns: "repeat(auto-fill, minmax(250px, 1fr))",
     gap: "10px",
-    "@media (max-width: 640px)": {
+    "@media (maxWidth: 640px)": {
       gridTemplateColumns: "1fr",
     },
   },

@@ -1,4 +1,4 @@
-// src/services/apiClient.js
+// apiClient.js
 import { Capacitor } from '@capacitor/core';
 import { CapacitorHttp } from '@capacitor/core';
 
@@ -7,176 +7,196 @@ class ApiClient {
     this.baseURL = null;
     this.isNative = Capacitor.isNativePlatform();
     this.isWeb = !this.isNative;
+    this.timeout = 15000; // 15 seconds
+    this.initialized = false;
     
-    // Initialize with default values
+    // Initialize synchronously
     this.initialize();
   }
 
   initialize() {
-    // Try saved IP first
+    if (this.initialized) return;
+    
     const savedIP = localStorage.getItem('owner_ip');
     
     if (savedIP) {
-      this.baseURL = `http://${savedIP}:3001`;
-      console.log(`📡 Using saved owner IP: ${savedIP}`);
-    } else if (this.isWeb) {
-      // For web development, use localhost
-      this.baseURL = 'http://localhost:3001';
-      localStorage.setItem('owner_ip', 'localhost');
-      console.log('🌐 Web mode: Using localhost');
+      if (savedIP.startsWith('http')) {
+        this.baseURL = savedIP;
+      } else {
+        this.baseURL = `http://${savedIP}:3001`;
+      }
+      console.log(`📡 Using saved URL: ${this.baseURL}`);
     } else {
-      // For mobile, we need to discover server
-      console.log('📱 Mobile mode: Server IP not set');
+      console.log('📱 No saved server URL');
     }
+    
+    this.initialized = true;
   }
 
-  async request(method, endpoint, data = null) {
-    // Check if we have a baseURL
-    if (!this.baseURL) {
-      throw new Error('Owner server address not set. Please connect to the owner server first.');
+  async request(options) {
+    if (!this.initialized) {
+      this.initialize();
     }
-
-    let url = `${this.baseURL}${endpoint}`;
     
-    // Handle query parameters for GET requests
-    if (data && method === 'GET') {
-      const params = new URLSearchParams();
-      Object.entries(data).forEach(([key, value]) => {
-        if (value !== undefined && value !== null) {
-          params.append(key, value.toString());
-        }
-      });
-      
-      if (params.toString()) {
-        url = `${url}?${params.toString()}`;
-      }
+    if (!this.baseURL) {
+      throw new Error('Server address not set. Please connect to owner server first.');
     }
 
+    const { method, url, data, headers = {} } = options;
+    
+    let fullUrl = url.startsWith('http') ? url : `${this.baseURL}${url}`;
+    
+    console.log(`📱 ${method} ${fullUrl}`);
+    if (data) console.log('📦 Request data:', data);
+    
     try {
-      let response;
-      
       if (this.isNative) {
-        // Use Capacitor HTTP for native apps (better on mobile)
-        console.log(`📤 ${method} ${url}`);
-        
-        const options = {
-          url: url,
+        const requestOptions = {
+          url: fullUrl,
           method: method,
           headers: {
             'Content-Type': 'application/json',
-            'Accept': 'application/json'
-          }
+            'Accept': 'application/json',
+            ...headers
+          },
+          connectTimeout: this.timeout,
+          readTimeout: this.timeout
         };
 
-        if (data && (method === 'POST' || method === 'PUT')) {
-          options.data = data;
+        if (data && (method === 'POST' || method === 'PUT' || method === 'PATCH')) {
+          requestOptions.data = typeof data === 'string' ? data : JSON.stringify(data);
         }
 
-        response = await CapacitorHttp.request(options);
+        const response = await CapacitorHttp.request(requestOptions);
         
-        // CapacitorHttp returns the response differently
         if (response.status >= 400) {
-          throw new Error(`HTTP ${response.status}: ${response.data}`);
+          let errorMessage = `HTTP ${response.status}`;
+          
+          if (response.data) {
+            if (typeof response.data === 'string') {
+              try {
+                const errorData = JSON.parse(response.data);
+                if (errorData.error) errorMessage = `${errorMessage}: ${errorData.error}`;
+                else if (errorData.message) errorMessage = `${errorMessage}: ${errorData.message}`;
+                else errorMessage = `${errorMessage}: ${response.data.substring(0, 100)}`;
+              } catch {
+                errorMessage = `${errorMessage}: ${response.data.substring(0, 100)}`;
+              }
+            } else if (typeof response.data === 'object') {
+              if (response.data.message) {
+                errorMessage = `${errorMessage}: ${response.data.message}`;
+              } else if (response.data.error) {
+                errorMessage = `${errorMessage}: ${response.data.error}`;
+              } else {
+                try {
+                  errorMessage = `${errorMessage}: ${JSON.stringify(response.data)}`;
+                } catch {
+                  errorMessage = `${errorMessage}: Server error`;
+                }
+              }
+            }
+          } else {
+            errorMessage = `${errorMessage}: Server error`;
+          }
+          
+          throw new Error(errorMessage);
         }
         
-        // Parse JSON if it's a string
-        const result = typeof response.data === 'string' 
-          ? JSON.parse(response.data) 
-          : response.data;
-          
-        return result.data || result;
-      } else {
-        // Use fetch for web
-        console.log(`📤 ${method} ${url}`);
+        let result;
+        if (typeof response.data === 'string') {
+          try {
+            result = JSON.parse(response.data);
+          } catch {
+            result = { data: response.data };
+          }
+        } else {
+          result = response.data;
+        }
         
-        const options = {
+        // Return success data if available
+        if (result && result.success !== undefined) {
+          return result.data || result;
+        }
+        
+        return result;
+      } else {
+        const fetchOptions = {
           method: method,
           headers: {
             'Content-Type': 'application/json',
-            'Accept': 'application/json'
+            'Accept': 'application/json',
+            ...headers
           }
         };
 
-        if (data && (method === 'POST' || method === 'PUT')) {
-          options.body = JSON.stringify(data);
+        if (data && (method === 'POST' || method === 'PUT' || method === 'PATCH')) {
+          fetchOptions.body = typeof data === 'string' ? data : JSON.stringify(data);
         }
 
-        // Add timeout for fetch
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
-        
-        options.signal = controller.signal;
+        const timeoutId = setTimeout(() => controller.abort(), this.timeout);
+        fetchOptions.signal = controller.signal;
 
-        const fetchResponse = await fetch(url, options);
+        const fetchResponse = await fetch(fullUrl, fetchOptions);
         clearTimeout(timeoutId);
 
         if (!fetchResponse.ok) {
-          let errorText = 'Unknown error';
+          let errorText = 'Server error';
           try {
             errorText = await fetchResponse.text();
+            try {
+              const errorJson = JSON.parse(errorText);
+              if (errorJson.message) {
+                errorText = errorJson.message;
+              } else if (errorJson.error) {
+                errorText = errorJson.error;
+              }
+            } catch {
+              // Not JSON, use as is
+            }
           } catch {}
           
           throw new Error(`HTTP ${fetchResponse.status}: ${errorText}`);
         }
 
         const result = await fetchResponse.json();
-        return result.data || result;
+        
+        // Return success data if available
+        if (result && result.success !== undefined) {
+          return result.data || result;
+        }
+        
+        return result;
       }
     } catch (error) {
-      console.error(`❌ API Error [${method} ${url}]:`, error.message);
+      console.error(`❌ API Error [${method} ${fullUrl}]:`, error.message);
       
-      // Provide helpful error messages
       if (error.name === 'AbortError' || error.message.includes('timeout')) {
-        throw new Error(`Timeout connecting to owner server at ${this.baseURL}. Please check:
-        1. Owner app is running
-        2. Owner IP is correct: ${this.baseURL}
-        3. Both devices are on same WiFi network`);
+        throw new Error(`Connection timeout. Server may be offline or unreachable.`);
       }
       
       if (error.message.includes('Failed to fetch') || 
           error.message.includes('Network request failed') ||
           error.message.includes('Network Error')) {
-        throw new Error(`Cannot connect to owner server at ${this.baseURL}. Please check:
-        1. Owner app is running (node owner-api.js)
-        2. Owner IP is correct: ${this.baseURL}
-        3. Both devices are on same WiFi network
-        4. Firewall allows port 3001`);
-      }
-      
-      if (error.message.includes('Unexpected token') && error.message.includes('<!doctype')) {
-        throw new Error(`Received HTML instead of JSON from ${this.baseURL}. This means:
-        1. The React dev server is running instead of the API server
-        2. Wrong port (maybe 3000 instead of 3001)
-        Make sure to start the API server: node owner-api.js`);
+        throw new Error(`Cannot connect to server. Please check:
+        1. Owner app is running
+        2. Both devices on same WiFi
+        3. Server IP: ${this.baseURL}`);
       }
       
       throw error;
     }
   }
 
-  // Convenience methods
-  get(endpoint, params = {}) {
-    return this.request('GET', endpoint, params);
-  }
-
-  post(endpoint, data) {
-    return this.request('POST', endpoint, data);
-  }
-
-  put(endpoint, data) {
-    return this.request('PUT', endpoint, data);
-  }
-
-  delete(endpoint) {
-    return this.request('DELETE', endpoint);
-  }
-
-  // Test connection to owner
   async testConnection(ip = null) {
     let testURL = this.baseURL;
     
     if (ip) {
-      testURL = `http://${ip}:3001`;
+      if (ip.startsWith('http')) {
+        testURL = ip;
+      } else {
+        testURL = `http://${ip}:3001`;
+      }
     }
     
     if (!testURL) {
@@ -184,68 +204,161 @@ class ApiClient {
     }
     
     try {
-      console.log(`🔗 Testing connection to ${testURL}...`);
+      console.log(`🔗 Testing ${testURL}...`);
       
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 5000);
+      let response;
       
-      const response = await fetch(`${testURL}/api/health`, {
-        signal: controller.signal,
-        headers: { 'Accept': 'application/json' }
-      });
-      
-      clearTimeout(timeoutId);
-      
-      if (response.ok) {
-        const data = await response.json();
-        const isValid = data.app === 'inventory-owner';
+      if (this.isNative) {
+        response = await CapacitorHttp.request({
+          url: `${testURL}/api/health`,
+          method: 'GET',
+          headers: { 'Accept': 'application/json' },
+          connectTimeout: 5000,
+          readTimeout: 5000
+        });
         
-        if (isValid) {
-          console.log(`✅ Connected to owner server: ${data.app} v${data.version}`);
-          
-          // Update baseURL if testing a new IP
-          if (ip && ip !== this.baseURL) {
-            this.setBaseURL(testURL);
-          }
-          
-          return true;
+        if (response.status >= 400) {
+          return false;
         }
+        
+        const data = typeof response.data === 'string' 
+          ? JSON.parse(response.data) 
+          : response.data;
+          
+        // Updated to match new health response
+        return data.app === 'inventory-system' || data.app === 'inventory-owner';
+      } else {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 5000);
+        
+        const fetchResponse = await fetch(`${testURL}/api/health`, {
+          signal: controller.signal,
+          headers: { 'Accept': 'application/json' }
+        });
+        
+        clearTimeout(timeoutId);
+        
+        if (!fetchResponse.ok) {
+          return false;
+        }
+        
+        const data = await fetchResponse.json();
+        // Updated to match new health response
+        return data.app === 'inventory-system' || data.app === 'inventory-owner';
       }
-      
-      return false;
     } catch (error) {
-      console.log(`❌ Connection test failed for ${testURL}:`, error.message);
+      console.log(`❌ Test failed for ${testURL}:`, error.message);
       return false;
     }
   }
 
-  // Set owner IP manually
-  setOwnerIP(ip) {
-    this.baseURL = `http://${ip}:3001`;
-    localStorage.setItem('owner_ip', ip);
-    console.log(`✅ Owner IP set to: ${ip}`);
-  }
-
-  // Set base URL directly
   setBaseURL(url) {
-    this.baseURL = url;
-    // Extract IP from URL for storage
-    const ipMatch = url.match(/http:\/\/([^:]+)/);
+    let cleanURL = url.trim();
+    
+    if (!cleanURL.startsWith('http')) {
+      cleanURL = `http://${cleanURL}`;
+    }
+    
+    if (!cleanURL.includes(':') && !cleanURL.endsWith('/')) {
+      cleanURL = `${cleanURL}:3001`;
+    } else if (cleanURL.endsWith('/')) {
+      cleanURL = cleanURL.slice(0, -1);
+    }
+    
+    this.baseURL = cleanURL;
+    
+    const ipMatch = cleanURL.match(/http:\/\/([^:/]+)/);
     if (ipMatch) {
       localStorage.setItem('owner_ip', ipMatch[1]);
     }
-    console.log(`✅ Base URL set to: ${url}`);
+    
+    console.log(`✅ Server URL set: ${cleanURL}`);
   }
 
-  // Get current server info
+  setOwnerIP(ip) {
+    this.setBaseURL(ip);
+  }
+
   getServerInfo() {
     return {
       baseURL: this.baseURL,
       isNative: this.isNative,
-      savedIP: localStorage.getItem('owner_ip')
+      savedIP: localStorage.getItem('owner_ip'),
+      protocol: 'HTTP',
+      healthEndpoint: `${this.baseURL}/api/health`
     };
+  }
+
+  async checkStatus() {
+    if (!this.baseURL) {
+      return { 
+        connected: false, 
+        error: 'No server URL set',
+        timestamp: new Date().toISOString()
+      };
+    }
+    
+    try {
+      const healthy = await this.testConnection();
+      return { 
+        connected: healthy, 
+        url: this.baseURL,
+        timestamp: new Date().toISOString()
+      };
+    } catch (error) {
+      return { 
+        connected: false, 
+        error: error.message,
+        url: this.baseURL,
+        timestamp: new Date().toISOString()
+      };
+    }
+  }
+
+  get(endpoint, params = {}) {
+    let url = endpoint;
+    if (params && Object.keys(params).length > 0) {
+      const query = new URLSearchParams();
+      Object.entries(params).forEach(([key, value]) => {
+        if (value !== undefined && value !== null) {
+          query.append(key, value.toString());
+        }
+      });
+      url = `${url}?${query.toString()}`;
+    }
+    
+    return this.request({
+      method: 'GET',
+      url,
+      headers: { 'Accept': 'application/json' }
+    });
+  }
+
+  post(endpoint, data = {}) {
+    return this.request({
+      method: 'POST',
+      url: endpoint,
+      data: data,
+      headers: { 'Content-Type': 'application/json' }
+    });
+  }
+
+  put(endpoint, data = {}) {
+    return this.request({
+      method: 'PUT',
+      url: endpoint,
+      data: data,
+      headers: { 'Content-Type': 'application/json' }
+    });
+  }
+
+  delete(endpoint) {
+    return this.request({
+      method: 'DELETE',
+      url: endpoint,
+      headers: { 'Accept': 'application/json' }
+    });
   }
 }
 
-// Create singleton instance
 export const apiClient = new ApiClient();

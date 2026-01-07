@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { createBackup, restoreBackup, downloadBackupFile, logAudit } from '../services/backupService';
 import { runDailyBackup } from '../services/autoBackup';
-import { dataService } from '../services/DataService'; // CHANGED: Use DataService instead of direct db import
+import { dataService } from '../services/DataService';
 
 export default function BackupScreen() {
   const user = JSON.parse(localStorage.getItem('user') || '{}');
@@ -10,25 +10,12 @@ export default function BackupScreen() {
   const [restoring, setRestoring] = useState(false);
   const [backupName, setBackupName] = useState('');
   const [message, setMessage] = useState({ type: '', text: '' });
-  const [showRestoreOptions, setShowRestoreOptions] = useState(false);
+  const [showConfirmRestore, setShowConfirmRestore] = useState(false);
   const [selectedFile, setSelectedFile] = useState(null);
   const [isMobile, setIsMobile] = useState(false);
   const [capAvailable, setCapAvailable] = useState(false);
   const [lastDownloadInfo, setLastDownloadInfo] = useState(null);
-  const [restoreOption, setRestoreOption] = useState('merge'); // 'overwrite' or 'merge'
-  const [tablesToRestore, setTablesToRestore] = useState({
-    products: true,
-    categories: true,
-    suppliers: true,
-    inventory: true,
-    sales: true,
-    sale_items: true,
-    stock_card: true,
-    users: true,
-    product_units: true,
-    resupplied_items: true
-  });
-  const [backupStats, setBackupStats] = useState(null);
+  const [loadingHistory, setLoadingHistory] = useState(false);
 
   useEffect(() => {
     checkCapacitor();
@@ -52,23 +39,30 @@ export default function BackupScreen() {
 
   const fetchBackupHistory = async () => {
     try {
-      // CHANGED: Use DataService
+      setLoadingHistory(true);
+      
+      // Fetch backup history using dataService
       const allBackups = await dataService.getAll('backup');
+      
+      // Filter only actual backups (not audit logs)
       const filteredBackups = allBackups
         .filter(backup => 
+          backup && backup.backup_type && 
           backup.backup_type !== 'audit' && 
-          ['full', 'restore', 'deleted_product', 'deleted_category'].includes(backup.backup_type)
+          ['full', 'restore', 'deleted_product', 'deleted_category', 'deleted_supplier'].includes(backup.backup_type)
         )
         .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
         .slice(0, 50);
       
       setBackupHistory(filteredBackups);
+      setLoadingHistory(false);
     } catch (error) {
       console.error('Error fetching backup history:', error);
       setMessage({ 
         type: 'error', 
         text: `Failed to load backup history: ${error.message}` 
       });
+      setLoadingHistory(false);
     }
   };
 
@@ -137,7 +131,7 @@ export default function BackupScreen() {
     }
   };
 
-  const handleFileSelect = async (event) => {
+  const handleFileSelect = (event) => {
     const file = event.target.files[0];
     if (!file) return;
 
@@ -146,49 +140,16 @@ export default function BackupScreen() {
       return;
     }
 
-    try {
-      // Preview backup stats
-      const text = await file.text();
-      const backupData = JSON.parse(text);
-      
-      // Analyze backup content
-      const stats = {
-        file_name: file.name,
-        file_size: file.size,
-        tables: {},
-        total_records: 0
-      };
-      
-      Object.keys(backupData).forEach(tableName => {
-        if (Array.isArray(backupData[tableName])) {
-          const count = backupData[tableName].length;
-          stats.tables[tableName] = count;
-          stats.total_records += count;
-        }
-      });
-      
-      setBackupStats(stats);
-      setSelectedFile(file);
-      setMessage({ 
-        type: 'info', 
-        text: `📊 Backup file loaded!\n📁 ${file.name}\n📊 ${stats.total_records} records across ${Object.keys(stats.tables).length} tables` 
-      });
-    } catch (error) {
-      setMessage({ 
-        type: 'error', 
-        text: `❌ Invalid backup file: ${error.message}` 
-      });
-      setSelectedFile(null);
-      setBackupStats(null);
-    }
+    setSelectedFile(file);
+    setMessage({ type: '', text: '' });
   };
 
-  const showRestoreDialog = () => {
+  const confirmRestore = () => {
     if (!selectedFile) {
       setMessage({ type: 'error', text: 'Please select a backup file first' });
       return;
     }
-    setShowRestoreOptions(true);
+    setShowConfirmRestore(true);
   };
 
   const handleRestoreBackup = async () => {
@@ -198,18 +159,12 @@ export default function BackupScreen() {
     setMessage({ type: '', text: '' });
 
     try {
-      const result = await restoreBackup(
-        selectedFile, 
-        user.user_id, 
-        user.username,
-        restoreOption,
-        tablesToRestore
-      );
+      const result = await restoreBackup(selectedFile, user.user_id, user.username);
       
       if (result.success) {
         setMessage({ 
           type: 'success', 
-          text: `✅ Backup ${restoreOption === 'overwrite' ? 'restored' : 'merged'} successfully!\n\n📊 ${result.stats?.restored || 0} records restored\n🔄 ${result.stats?.skipped || 0} records skipped\n⏳ Page will refresh in 2 seconds...` 
+          text: '✅ Backup restored successfully! Page will refresh in 2 seconds...' 
         });
 
         setTimeout(() => {
@@ -226,9 +181,8 @@ export default function BackupScreen() {
       });
     } finally {
       setRestoring(false);
-      setShowRestoreOptions(false);
+      setShowConfirmRestore(false);
       setSelectedFile(null);
-      setBackupStats(null);
       fetchBackupHistory();
     }
   };
@@ -286,6 +240,7 @@ export default function BackupScreen() {
       case 'restore': return '🔄';
       case 'deleted_product': return '🗑️📦';
       case 'deleted_category': return '🗑️🏷️';
+      case 'deleted_supplier': return '🗑️🏢';
       default: return '📄';
     }
   };
@@ -306,30 +261,6 @@ export default function BackupScreen() {
 📍 **On iOS:** Files app → Browse → On My iPhone/iPad → TindaTrack app → Documents\n
 💡 **Tip:** If you don't see the file, try restarting the app and creating the backup again.`
     });
-  };
-
-  const toggleAllTables = (checked) => {
-    const newTables = {};
-    Object.keys(tablesToRestore).forEach(key => {
-      newTables[key] = checked;
-    });
-    setTablesToRestore(newTables);
-  };
-
-  const toggleTable = (tableName) => {
-    setTablesToRestore(prev => ({
-      ...prev,
-      [tableName]: !prev[tableName]
-    }));
-  };
-
-  const getCurrentDataCount = async (tableName) => {
-    try {
-      const data = await dataService.getAll(tableName);
-      return data.length;
-    } catch {
-      return 0;
-    }
   };
 
   return (
@@ -355,6 +286,7 @@ export default function BackupScreen() {
         )}
       </div>
 
+      {/* Last Download Info */}
       {lastDownloadInfo && (
         <div style={styles.downloadInfo}>
           <div style={styles.downloadInfoHeader}>
@@ -513,10 +445,7 @@ export default function BackupScreen() {
               </label>
               {selectedFile && (
                 <button
-                  onClick={() => {
-                    setSelectedFile(null);
-                    setBackupStats(null);
-                  }}
+                  onClick={() => setSelectedFile(null)}
                   style={styles.clearButton}
                   disabled={restoring}
                 >
@@ -524,27 +453,8 @@ export default function BackupScreen() {
                 </button>
               )}
             </div>
-            
-            {/* Backup File Stats */}
-            {backupStats && (
-              <div style={styles.backupStats}>
-                <div style={styles.statsHeader}>
-                  <span style={styles.statsTitle}>📊 Backup Contents:</span>
-                  <span style={styles.statsTotal}>{backupStats.total_records} records</span>
-                </div>
-                <div style={styles.statsGrid}>
-                  {Object.entries(backupStats.tables).map(([table, count]) => (
-                    <div key={table} style={styles.statItem}>
-                      <span style={styles.statTableName}>{table}</span>
-                      <span style={styles.statTableCount}>{count} records</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-            
             <button
-              onClick={showRestoreDialog}
+              onClick={confirmRestore}
               style={{
                 ...styles.warningButton,
                 opacity: (!selectedFile || restoring) ? 0.6 : 1,
@@ -555,13 +465,14 @@ export default function BackupScreen() {
               {restoring ? (
                 <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                   <div style={styles.spinner}></div>
-                  Preparing...
+                  Restoring...
                 </span>
-              ) : '🔄 Restore Options'}
+              ) : '🔄 Restore Backup'}
             </button>
           </div>
           <p style={styles.warningText}>
-            ⚠️ <strong>Note:</strong> You can choose what to restore and whether to merge or overwrite data.
+            ⚠️ <strong>Warning:</strong> Restoring will overwrite all current data. 
+            Make sure you have a recent backup.
           </p>
         </div>
 
@@ -582,13 +493,19 @@ export default function BackupScreen() {
                 onClick={fetchBackupHistory}
                 style={styles.refreshButton}
                 title="Refresh history"
+                disabled={loadingHistory}
               >
-                🔄 Refresh
+                {loadingHistory ? 'Loading...' : '🔄 Refresh'}
               </button>
             </div>
           </div>
           
-          {backupHistory.length === 0 ? (
+          {loadingHistory ? (
+            <div style={styles.loadingState}>
+              <div style={styles.loadingSpinner}></div>
+              <p>Loading backup history...</p>
+            </div>
+          ) : backupHistory.length === 0 ? (
             <div style={styles.emptyState}>
               <div style={styles.emptyIcon}>📁</div>
               <p style={styles.emptyText}>No backup history found</p>
@@ -646,129 +563,32 @@ export default function BackupScreen() {
         </div>
       </div>
 
-      {/* Restore Options Modal */}
-      {showRestoreOptions && (
+      {/* Restore Confirmation Modal */}
+      {showConfirmRestore && (
         <div style={styles.modalOverlay}>
           <div style={styles.modalContainer}>
-            <h3 style={styles.modalHeader}>🔄 Restore Options</h3>
+            <h3 style={styles.modalHeader}>⚠️ Confirm Restore</h3>
             <div style={styles.modalContent}>
-              
-              {/* Restore Mode Selection */}
-              <div style={styles.optionSection}>
-                <h4 style={styles.optionTitle}>Restore Mode</h4>
-                <div style={styles.optionGrid}>
-                  <label style={styles.optionCard}>
-                    <input
-                      type="radio"
-                      name="restoreOption"
-                      value="merge"
-                      checked={restoreOption === 'merge'}
-                      onChange={(e) => setRestoreOption(e.target.value)}
-                      style={styles.radioInput}
-                    />
-                    <div style={styles.optionContent}>
-                      <div style={styles.optionIcon}>🔄</div>
-                      <div>
-                        <strong>Merge Data</strong>
-                        <p style={styles.optionDescription}>
-                          Add backup data without deleting existing records. Duplicates may be created.
-                        </p>
-                      </div>
-                    </div>
-                  </label>
-                  
-                  <label style={styles.optionCard}>
-                    <input
-                      type="radio"
-                      name="restoreOption"
-                      value="overwrite"
-                      checked={restoreOption === 'overwrite'}
-                      onChange={(e) => setRestoreOption(e.target.value)}
-                      style={styles.radioInput}
-                    />
-                    <div style={styles.optionContent}>
-                      <div style={styles.optionIcon}>⚠️</div>
-                      <div>
-                        <strong>Full Overwrite</strong>
-                        <p style={styles.optionDescription}>
-                          Delete all existing data and replace with backup. This cannot be undone!
-                        </p>
-                      </div>
-                    </div>
-                  </label>
-                </div>
+              <p style={styles.modalText}>
+                Are you sure you want to restore from backup?
+              </p>
+              <div style={styles.modalWarningBox}>
+                <p><strong>This will:</strong></p>
+                <ul style={styles.modalList}>
+                  <li>Overwrite all current data</li>
+                  <li>Replace products, sales, inventory, and suppliers</li>
+                  <li>Clear all existing records</li>
+                  <li>Cannot be undone</li>
+                </ul>
               </div>
-
-              {/* Tables Selection */}
-              <div style={styles.optionSection}>
-                <div style={styles.tablesHeader}>
-                  <h4 style={styles.optionTitle}>Select Tables to Restore</h4>
-                  <div style={styles.tableSelectActions}>
-                    <button 
-                      type="button"
-                      onClick={() => toggleAllTables(true)}
-                      style={styles.smallButton}
-                    >
-                      Select All
-                    </button>
-                    <button 
-                      type="button"
-                      onClick={() => toggleAllTables(false)}
-                      style={styles.smallButton}
-                    >
-                      Deselect All
-                    </button>
-                  </div>
-                </div>
-                
-                <div style={styles.tablesGrid}>
-                  {Object.entries(tablesToRestore).map(([table, isSelected]) => (
-                    <label key={table} style={styles.tableCheckbox}>
-                      <input
-                        type="checkbox"
-                        checked={isSelected}
-                        onChange={() => toggleTable(table)}
-                        style={styles.checkboxInput}
-                      />
-                      <div style={styles.tableCheckboxContent}>
-                        <span style={styles.tableName}>{table}</span>
-                        <span style={styles.tableInfo}>
-                          {backupStats?.tables[table] || 0} in backup
-                        </span>
-                      </div>
-                    </label>
-                  ))}
-                </div>
-              </div>
-
-              {/* Warning Box */}
-              {restoreOption === 'overwrite' && (
-                <div style={styles.modalWarningBox}>
-                  <p><strong>⚠️ WARNING: Full Overwrite Selected</strong></p>
-                  <ul style={styles.modalList}>
-                    <li>All selected tables will be completely cleared</li>
-                    <li>Existing data will be permanently deleted</li>
-                    <li>This action cannot be undone</li>
-                    <li>Make sure you have a current backup</li>
-                  </ul>
-                </div>
-              )}
-
-              {/* File Info */}
-              <div style={styles.modalFileInfo}>
-                <p><strong>File to restore:</strong></p>
-                <p style={styles.fileNameText}>{selectedFile?.name || 'Unknown file'}</p>
-                {backupStats && (
-                  <div style={styles.fileStats}>
-                    <span>📊 {backupStats.total_records} total records</span>
-                    <span>📁 {formatFileSize(backupStats.file_size)}</span>
-                  </div>
-                )}
-              </div>
+              <p style={styles.modalFileInfo}>
+                <strong>File to restore:</strong><br/>
+                {selectedFile?.name || 'Unknown file'}
+              </p>
             </div>
             <div style={styles.modalButtons}>
               <button
-                onClick={() => setShowRestoreOptions(false)}
+                onClick={() => setShowConfirmRestore(false)}
                 style={styles.cancelButton}
                 disabled={restoring}
               >
@@ -776,15 +596,15 @@ export default function BackupScreen() {
               </button>
               <button
                 onClick={handleRestoreBackup}
-                style={restoreOption === 'overwrite' ? styles.dangerButton : styles.primaryButton}
+                style={styles.dangerButton}
                 disabled={restoring}
               >
                 {restoring ? (
                   <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                     <div style={styles.spinner}></div>
-                    {restoreOption === 'overwrite' ? 'Overwriting...' : 'Merging...'}
+                    Restoring...
                   </span>
-                ) : restoreOption === 'overwrite' ? '⚠️ Yes, Overwrite All' : '🔄 Merge Data'}
+                ) : 'Yes, Restore Now'}
               </button>
             </div>
           </div>
@@ -793,7 +613,6 @@ export default function BackupScreen() {
     </div>
   );
 }
-
 
 const styles = {
   container: {
