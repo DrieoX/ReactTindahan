@@ -547,6 +547,21 @@ app.get('/api/health', (req, res) => {
   });
 });
 
+// Server discovery endpoint
+app.get('/api/discover', (req, res) => {
+  const addresses = getNetworkAddresses();
+  const serverInfo = {
+    app: 'inventory-system',
+    server_ip: req.ip.replace('::ffff:', ''),
+    local_ips: addresses.map(addr => addr.address),
+    port: PORT,
+    timestamp: new Date().toISOString()
+  };
+  
+  console.log(`📡 Discovery request from: ${req.ip}`);
+  res.json(serverInfo);
+});
+
 // CRUD endpoints for all tables
 const tables = [
   'users', 'suppliers', 'categories', 'products', 'product_units',
@@ -829,9 +844,14 @@ initDatabase()
       
       console.log(`\n📊 Health Check:`);
       console.log(`   http://localhost:${PORT}/api/health`);
+      console.log(`📡 Discovery Endpoint:`);
+      console.log(`   http://localhost:${PORT}/api/discover`);
       
       if (addresses.length > 0) {
-        console.log(`   or http://${addresses[0].address}:${PORT}/api/health`);
+        console.log(`\n🌐 External Access:`);
+        addresses.forEach((addr, index) => {
+          console.log(`   ${addr.interface}: http://${addr.address}:${PORT}/api/health`);
+        });
       }
     });
   })

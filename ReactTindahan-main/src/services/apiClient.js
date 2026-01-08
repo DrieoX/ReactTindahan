@@ -9,6 +9,8 @@ class ApiClient {
     this.isWeb = !this.isNative;
     this.timeout = 15000; // 15 seconds
     this.initialized = false;
+    this.isDiscovering = false;
+    this.discoveryPromise = null;
     
     // Initialize synchronously
     this.initialize();
@@ -17,20 +19,9 @@ class ApiClient {
   initialize() {
     if (this.initialized) return;
     
-    const savedIP = localStorage.getItem('owner_ip');
-    
-    if (savedIP) {
-      if (savedIP.startsWith('http')) {
-        this.baseURL = savedIP;
-      } else {
-        this.baseURL = `http://${savedIP}:3001`;
-      }
-      console.log(`📡 Using saved URL: ${this.baseURL}`);
-    } else {
-      // Try localhost first for development
-      this.baseURL = 'http://localhost:3001';
-      console.log(`📡 Using default URL: ${this.baseURL}`);
-    }
+    // Always start fresh discovery
+    this.baseURL = null;
+    console.log('📡 Starting fresh connection discovery...');
     
     this.initialized = true;
   }
@@ -41,7 +32,11 @@ class ApiClient {
     }
     
     if (!this.baseURL) {
-      throw new Error('Server address not set. Please connect to owner server first.');
+      // Try to discover server automatically if not connected
+      const connected = await this.discoverServer();
+      if (!connected) {
+        throw new Error('Server address not set. Please connect to owner server first.');
+      }
     }
 
     const { method, url, data, headers = {} } = options;
@@ -180,26 +175,171 @@ class ApiClient {
       if (error.message.includes('Failed to fetch') || 
           error.message.includes('Network request failed') ||
           error.message.includes('Network Error')) {
+        // Try to rediscover server on network error
+        console.log('🔄 Connection lost, attempting rediscovery...');
+        const rediscovered = await this.discoverServer();
+        if (rediscovered) {
+          // Retry the request with new connection
+          return this.request(options);
+        }
         throw new Error(`Cannot connect to server. Please check:
         1. Owner app is running
-        2. Both devices on same WiFi
-        3. Server IP: ${this.baseURL}`);
+        2. Both devices on same WiFi`);
       }
       
       throw error;
     }
   }
 
-  async testConnection(ip = null) {
-    let testURL = this.baseURL;
+  async discoverServer() {
+    // Prevent concurrent discoveries
+    if (this.isDiscovering && this.discoveryPromise) {
+      console.log('🔍 Discovery already in progress, waiting...');
+      return await this.discoveryPromise;
+    }
+
+    // Check current connection first
+    if (this.baseURL && await this.testConnection()) {
+      console.log('✅ Already connected to:', this.baseURL);
+      return true;
+    }
+
+    this.isDiscovering = true;
+    this.discoveryPromise = new Promise(async (resolve) => {
+      try {
+        console.log('🔍 Starting fresh network discovery...');
+        
+        // Try common addresses first
+        const commonIPs = [
+          'localhost',
+          '127.0.0.1'
+        ];
+        
+        for (const ip of commonIPs) {
+          console.log(`🎯 Testing ${ip}...`);
+          if (await this.testConnection(ip)) {
+            this.setBaseURL(`http://${ip}:3001`);
+            console.log(`✅ Connected to ${ip}`);
+            this.isDiscovering = false;
+            resolve(true);
+            return;
+          }
+        }
+        
+        // Full network scan
+        console.log('🌐 Starting full network scan...');
+        
+        const ipRanges = [
+          '192.168.100',
+          '192.168.1',
+          '192.168.0',
+          '10.0.0',
+          '10.0.1',
+          '172.16.0',
+          '172.17.0',
+          '172.18.0',
+          '172.19.0',
+          '172.20.0'
+        ];
+        
+        for (const range of ipRanges) {
+          console.log(`🔍 Scanning ${range}.x network...`);
+          const found = await this.scanIPRange(range);
+          if (found) {
+            this.isDiscovering = false;
+            resolve(true);
+            return;
+          }
+        }
+        
+        console.log('❌ No server found in network discovery');
+        this.isDiscovering = false;
+        resolve(false);
+      } catch (error) {
+        console.error('Discovery error:', error);
+        this.isDiscovering = false;
+        resolve(false);
+      }
+    });
+
+    return await this.discoveryPromise;
+  }
+
+  async scanIPRange(range) {
+    // Create array of IPs to scan
+    const ips = [];
+    for (let i = 1; i <= 254; i++) {
+      ips.push(`${range}.${i}`);
+    }
     
-    if (ip) {
-      if (ip.startsWith('http')) {
-        testURL = ip;
-      } else {
-        testURL = `http://${ip}:3001`;
+    // Process in batches of 20 to avoid overwhelming
+    const batchSize = 20;
+    const timeoutPerIP = 3000; // 3 seconds per IP
+    
+    for (let i = 0; i < ips.length; i += batchSize) {
+      const batch = ips.slice(i, i + batchSize);
+      console.log(`  Batch ${Math.floor(i/batchSize) + 1}/${Math.ceil(ips.length/batchSize)}: Testing ${batch.length} IPs`);
+      
+      // Create and execute promises for this batch
+      const batchPromises = batch.map(ip => 
+        this.testConnectionWithTimeout(ip, timeoutPerIP).then(success => {
+          if (success) return ip;
+          return null;
+        })
+      );
+      
+      // Wait for all promises in this batch to complete
+      const results = await Promise.all(batchPromises);
+      const successfulIP = results.find(ip => ip !== null);
+      
+      if (successfulIP) {
+        console.log(`✅ Found server at ${successfulIP}`);
+        this.setBaseURL(`http://${successfulIP}:3001`);
+        return true;
+      }
+      
+      // Optional: Small delay between batches to be network-friendly
+      if (i + batchSize < ips.length) {
+        await new Promise(resolve => setTimeout(resolve, 100));
       }
     }
+    
+    console.log(`  No server found in ${range}.x network`);
+    return false;
+  }
+
+  async testConnectionWithTimeout(ip, timeout = 3000) {
+    return new Promise((resolve) => {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => {
+        controller.abort();
+        resolve(false);
+      }, timeout);
+      
+      const testURL = `http://${ip}:3001`;
+      
+      fetch(`${testURL}/api/health`, {
+        signal: controller.signal,
+        headers: { 'Accept': 'application/json' }
+      })
+      .then(response => {
+        clearTimeout(timeoutId);
+        if (response.ok) {
+          return response.json().then(data => {
+            resolve(data.app === 'inventory-system');
+          });
+        }
+        resolve(false);
+      })
+      .catch(() => {
+        clearTimeout(timeoutId);
+        resolve(false);
+      });
+    });
+  }
+
+  async testConnection(ip = null) {
+    let testURL = ip ? `http://${ip}:3001` : this.baseURL;
     
     if (!testURL) {
       return false;
@@ -267,11 +407,6 @@ class ApiClient {
     
     this.baseURL = cleanURL;
     
-    const ipMatch = cleanURL.match(/http:\/\/([^:/]+)/);
-    if (ipMatch) {
-      localStorage.setItem('owner_ip', ipMatch[1]);
-    }
-    
     console.log(`✅ Server URL set: ${cleanURL}`);
   }
 
@@ -283,9 +418,9 @@ class ApiClient {
     return {
       baseURL: this.baseURL,
       isNative: this.isNative,
-      savedIP: localStorage.getItem('owner_ip'),
+      isDiscovering: this.isDiscovering,
       protocol: 'HTTP',
-      healthEndpoint: `${this.baseURL}/api/health`
+      healthEndpoint: this.baseURL ? `${this.baseURL}/api/health` : null
     };
   }
 

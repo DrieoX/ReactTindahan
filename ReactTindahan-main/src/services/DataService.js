@@ -18,7 +18,25 @@ class DataService {
 
   async initialize() {
     console.log('🚀 DataService Initializing...');
-    console.log('📱 Mode:', this.userMode, '| Owner:', this.isOwner, '| Client:', this.isClient);
+    
+    // Detect platform
+    const isNative = window.Capacitor?.isNativePlatform || false;
+    console.log('📱 Platform:', isNative ? 'Native Mobile' : 'Web Browser');
+    console.log('📱 Mode from localStorage:', this.userMode, '| Owner:', this.isOwner, '| Client:', this.isClient);
+    
+    // If no mode is saved in localStorage, set appropriate default based on platform
+    if (!localStorage.getItem('userMode')) {
+      if (isNative) {
+        this.userMode = 'server'; // Mobile app defaults to owner
+        console.log('📱 Mobile app: Defaulting to Owner mode');
+      } else {
+        this.userMode = 'client'; // Web browser defaults to client
+        console.log('🌐 Web browser: Defaulting to Client mode');
+      }
+      localStorage.setItem('userMode', this.userMode);
+      this.isOwner = this.userMode === 'server';
+      this.isClient = this.userMode === 'client';
+    }
     
     this.apiClient = apiClient;
     
@@ -45,48 +63,11 @@ class DataService {
   async attemptConnection() {
     this.connectionAttempts++;
     
-    const savedIP = localStorage.getItem('owner_ip');
-    if (savedIP) {
-      console.log(`💾 Trying saved IP: ${savedIP}`);
-      
-      // Check if this is a hardcoded IP from cloned project (like teammate's old IP)
-      const isLikelyOldHardcodedIP = this.isLikelyOldHardcodedIP(savedIP);
-      
-      if (isLikelyOldHardcodedIP) {
-        console.log(`⚠️ Saved IP ${savedIP} appears to be from another device/network.`);
-        console.log(`🔄 Clearing it and attempting fresh discovery...`);
-        localStorage.removeItem('owner_ip');
-      } else if (await this.testSpecificConnection(savedIP)) {
-        console.log('✅ Connected using saved IP');
-        this.serverStatus = 'connected';
-        return true;
-      } else {
-        console.log(`❌ Saved IP ${savedIP} failed to connect.`);
-        console.log(`🔄 Clearing it and attempting discovery...`);
-        localStorage.removeItem('owner_ip');
-      }
-    }
-    
-    console.log('🌐 Scanning local network...');
+    console.log('🌐 Starting fresh discovery...');
     const connected = await this.quickNetworkScan();
     if (connected) {
       this.serverStatus = 'connected';
       return true;
-    }
-    
-    console.log('🎯 Trying localhost and common addresses...');
-    const commonIPs = [
-      'localhost',
-      '127.0.0.1'
-    ];
-    
-    for (const ip of commonIPs) {
-      console.log(`🎯 Testing ${ip}...`);
-      if (await this.testSpecificConnection(ip)) {
-        localStorage.setItem('owner_ip', ip);
-        this.serverStatus = 'connected';
-        return true;
-      }
     }
     
     if (this.connectionAttempts < this.maxAttempts) {
@@ -103,44 +84,21 @@ class DataService {
     return false;
   }
 
-  // Helper to detect if an IP is likely from another device/network
-  isLikelyOldHardcodedIP(ip) {
-    if (!ip) return false;
-    
-    // Check for common hardcoded IP patterns
-    const hardcodedPatterns = [
-      '192.168.100.53',  // Your original IP
-      '192.168.1.100',
-      '192.168.0.100',
-      '10.0.0.100'
-    ];
-    
-    // Also check if IP contains known teammate IP patterns
-    // (You can add more patterns as needed)
-    for (const pattern of hardcodedPatterns) {
-      if (ip.includes(pattern)) {
-        return true;
-      }
-    }
-    
-    return false;
-  }
-
   async quickNetworkScan() {
     const quickIPs = [];
     
     // Generate quick IPs based on common local subnets
-    for (let i = 1; i <= 20; i++) {
+    for (let i = 1; i <= 50; i++) {
+      quickIPs.push(`192.168.100.${i}`);
       quickIPs.push(`192.168.1.${i}`);
       quickIPs.push(`192.168.0.${i}`);
       quickIPs.push(`10.0.0.${i}`);
-      quickIPs.push(`192.168.100.${i}`);
     }
     
     // Add the user's current network IP range if we can detect it
     const userNetworkRange = this.detectUserNetworkRange();
     if (userNetworkRange) {
-      for (let i = 1; i <= 20; i++) {
+      for (let i = 1; i <= 50; i++) {
         quickIPs.push(`${userNetworkRange}.${i}`);
       }
     }
@@ -158,7 +116,6 @@ class DataService {
       if (successfulIndex !== -1) {
         const successfulIP = batch[successfulIndex];
         console.log(`✅ Found server at ${successfulIP}`);
-        localStorage.setItem('owner_ip', successfulIP);
         this.apiClient.setBaseURL(`http://${successfulIP}:3001`);
         return true;
       }
@@ -238,7 +195,6 @@ class DataService {
             const data = await response.json();
             if (data.app === 'inventory-system') {
               this.apiClient.setBaseURL(testURL);
-              localStorage.setItem('owner_ip', ip);
               console.log(`✅ Connected to ${testURL}`);
               return true;
             }
@@ -278,8 +234,8 @@ class DataService {
       console.log(`🔍 Scanning ${range}.x network...`);
       const promises = [];
       
-      // Scan first 50 IPs in each range
-      for (let i = 1; i <= 50; i++) {
+      // Scan all 254 IPs in each range
+      for (let i = 1; i <= 254; i++) {
         const ip = `${range}.${i}`;
         for (const port of ports) {
           promises.push(
@@ -291,7 +247,7 @@ class DataService {
         }
       }
       
-      // Process in smaller batches to avoid overwhelming
+      // Process in batches of 20 to avoid overwhelming
       const batchSize = 20;
       for (let i = 0; i < promises.length; i += batchSize) {
         const batch = promises.slice(i, i + batchSize);
@@ -300,7 +256,6 @@ class DataService {
         
         if (successfulIP) {
           console.log(`✅ Found server at ${successfulIP}`);
-          localStorage.setItem('owner_ip', successfulIP);
           this.apiClient.setBaseURL(`http://${successfulIP}:3001`);
           return successfulIP;
         }
@@ -694,7 +649,6 @@ class DataService {
     if (!this.isClient) return false;
     try { 
       if (await this.testSpecificConnection(ip)) { 
-        localStorage.setItem('owner_ip', ip); 
         this.serverStatus = 'connected'; 
         return true; 
       } 
