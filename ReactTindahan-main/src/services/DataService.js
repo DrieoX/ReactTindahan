@@ -48,10 +48,22 @@ class DataService {
     const savedIP = localStorage.getItem('owner_ip');
     if (savedIP) {
       console.log(`💾 Trying saved IP: ${savedIP}`);
-      if (await this.testSpecificConnection(savedIP)) {
+      
+      // Check if this is a hardcoded IP from cloned project (like teammate's old IP)
+      const isLikelyOldHardcodedIP = this.isLikelyOldHardcodedIP(savedIP);
+      
+      if (isLikelyOldHardcodedIP) {
+        console.log(`⚠️ Saved IP ${savedIP} appears to be from another device/network.`);
+        console.log(`🔄 Clearing it and attempting fresh discovery...`);
+        localStorage.removeItem('owner_ip');
+      } else if (await this.testSpecificConnection(savedIP)) {
         console.log('✅ Connected using saved IP');
         this.serverStatus = 'connected';
         return true;
+      } else {
+        console.log(`❌ Saved IP ${savedIP} failed to connect.`);
+        console.log(`🔄 Clearing it and attempting discovery...`);
+        localStorage.removeItem('owner_ip');
       }
     }
     
@@ -91,28 +103,86 @@ class DataService {
     return false;
   }
 
-  async quickNetworkScan() {
-    const quickIPs = [];
+  // Helper to detect if an IP is likely from another device/network
+  isLikelyOldHardcodedIP(ip) {
+    if (!ip) return false;
     
-    // Generate quick IPs based on local subnet
-    for (let i = 1; i <= 10; i++) {
-      quickIPs.push(`192.168.1.${i}`);
-      quickIPs.push(`192.168.0.${i}`);
-      quickIPs.push(`10.0.0.${i}`);
-    }
+    // Check for common hardcoded IP patterns
+    const hardcodedPatterns = [
+      '192.168.100.53',  // Your original IP
+      '192.168.1.100',
+      '192.168.0.100',
+      '10.0.0.100'
+    ];
     
-    const promises = quickIPs.map(ip => this.testConnectionWithTimeout(ip, 1000));
-    const results = await Promise.all(promises);
-    const successfulIP = quickIPs.find((ip, index) => results[index]);
-    
-    if (successfulIP) {
-      console.log(`✅ Found server at ${successfulIP}`);
-      localStorage.setItem('owner_ip', successfulIP);
-      this.apiClient.setBaseURL(`http://${successfulIP}:3001`);
-      return true;
+    // Also check if IP contains known teammate IP patterns
+    // (You can add more patterns as needed)
+    for (const pattern of hardcodedPatterns) {
+      if (ip.includes(pattern)) {
+        return true;
+      }
     }
     
     return false;
+  }
+
+  async quickNetworkScan() {
+    const quickIPs = [];
+    
+    // Generate quick IPs based on common local subnets
+    for (let i = 1; i <= 20; i++) {
+      quickIPs.push(`192.168.1.${i}`);
+      quickIPs.push(`192.168.0.${i}`);
+      quickIPs.push(`10.0.0.${i}`);
+      quickIPs.push(`192.168.100.${i}`);
+    }
+    
+    // Add the user's current network IP range if we can detect it
+    const userNetworkRange = this.detectUserNetworkRange();
+    if (userNetworkRange) {
+      for (let i = 1; i <= 20; i++) {
+        quickIPs.push(`${userNetworkRange}.${i}`);
+      }
+    }
+    
+    console.log(`🔍 Quick scanning ${quickIPs.length} IPs...`);
+    
+    // Test connections in parallel with small batches to avoid overwhelming
+    const batchSize = 10;
+    for (let i = 0; i < quickIPs.length; i += batchSize) {
+      const batch = quickIPs.slice(i, i + batchSize);
+      const promises = batch.map(ip => this.testConnectionWithTimeout(ip, 1500));
+      const results = await Promise.all(promises);
+      
+      const successfulIndex = results.findIndex(result => result === true);
+      if (successfulIndex !== -1) {
+        const successfulIP = batch[successfulIndex];
+        console.log(`✅ Found server at ${successfulIP}`);
+        localStorage.setItem('owner_ip', successfulIP);
+        this.apiClient.setBaseURL(`http://${successfulIP}:3001`);
+        return true;
+      }
+    }
+    
+    return false;
+  }
+
+  // Try to detect the user's current network range
+  detectUserNetworkRange() {
+    try {
+      // This is a simple approach - in a real app you might use more sophisticated detection
+      const location = window.location;
+      if (location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') {
+        const parts = location.hostname.split('.');
+        if (parts.length === 4) {
+          // Looks like an IP address
+          return `${parts[0]}.${parts[1]}.${parts[2]}`;
+        }
+      }
+    } catch (error) {
+      console.log('Could not detect network range:', error);
+    }
+    return null;
   }
 
   async testConnectionWithTimeout(ip, timeout = 2000) {
@@ -195,13 +265,20 @@ class DataService {
       '192.168.0',
       '10.0.0',
       '10.0.1',
-      '172.16.0'
+      '172.16.0',
+      '172.17.0',
+      '172.18.0',
+      '172.19.0',
+      '172.20.0'
     ];
     
     const ports = [3001];
     
     for (const range of ipRanges) {
+      console.log(`🔍 Scanning ${range}.x network...`);
       const promises = [];
+      
+      // Scan first 50 IPs in each range
       for (let i = 1; i <= 50; i++) {
         const ip = `${range}.${i}`;
         for (const port of ports) {
@@ -214,17 +291,23 @@ class DataService {
         }
       }
       
-      const results = await Promise.all(promises);
-      const successfulIP = results.find(ip => ip !== null);
-      
-      if (successfulIP) {
-        console.log(`✅ Found server at ${successfulIP}`);
-        localStorage.setItem('owner_ip', successfulIP);
-        this.apiClient.setBaseURL(`http://${successfulIP}:3001`);
-        return successfulIP;
+      // Process in smaller batches to avoid overwhelming
+      const batchSize = 20;
+      for (let i = 0; i < promises.length; i += batchSize) {
+        const batch = promises.slice(i, i + batchSize);
+        const results = await Promise.all(batch);
+        const successfulIP = results.find(ip => ip !== null);
+        
+        if (successfulIP) {
+          console.log(`✅ Found server at ${successfulIP}`);
+          localStorage.setItem('owner_ip', successfulIP);
+          this.apiClient.setBaseURL(`http://${successfulIP}:3001`);
+          return successfulIP;
+        }
       }
     }
     
+    console.log('❌ No server found in network discovery');
     return null;
   }
 
