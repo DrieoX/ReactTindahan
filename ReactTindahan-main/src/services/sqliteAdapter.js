@@ -65,25 +65,29 @@ class SQLiteAdapter {
         created_at TEXT DEFAULT CURRENT_TIMESTAMP
       )`,
       
-      // Suppliers - exact match to Dexie schema
+      // Suppliers - UPDATED: added updated_by and updated_at columns
       `CREATE TABLE IF NOT EXISTS suppliers (
         supplier_id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT NOT NULL,
         contact_info TEXT,
         address TEXT,
         created_by INTEGER,
-        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        updated_by INTEGER,
+        updated_at TEXT
       )`,
       
-      // Categories - exact match to Dexie schema
+      // Categories - UPDATED: added updated_by and updated_at columns
       `CREATE TABLE IF NOT EXISTS categories (
         category_id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT NOT NULL,
         created_by INTEGER,
-        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        updated_by INTEGER,
+        updated_at TEXT
       )`,
       
-      // Products - exact match to Dexie schema
+      // Products - UPDATED: added updated_by and updated_at columns
       `CREATE TABLE IF NOT EXISTS products (
         product_id INTEGER PRIMARY KEY AUTOINCREMENT,
         sku TEXT UNIQUE,
@@ -93,10 +97,12 @@ class SQLiteAdapter {
         base_unit TEXT DEFAULT 'pcs',
         category_id INTEGER,
         created_by INTEGER,
-        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        updated_by INTEGER,
+        updated_at TEXT
       )`,
       
-      // Product Units - exact match to Dexie schema
+      // Product Units - UPDATED: added updated_by and updated_at columns
       `CREATE TABLE IF NOT EXISTS product_units (
         unit_id INTEGER PRIMARY KEY AUTOINCREMENT,
         product_id INTEGER NOT NULL,
@@ -104,7 +110,9 @@ class SQLiteAdapter {
         conversion_factor REAL DEFAULT 1,
         price_per_unit REAL,
         created_by INTEGER,
-        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        updated_by INTEGER,
+        updated_at TEXT
       )`,
       
       // Inventory - exact match to Dexie schema (product_id as primary key)
@@ -133,7 +141,7 @@ class SQLiteAdapter {
         created_by TEXT,
         updated_at TEXT,
         updated_by TEXT,
-        transaction_type TEXT DEFAULT 'RESUPPLY',
+        transaction_type TEXT DEFAULT 'RESUPPLY'
       )`,
       
       // Sales - exact match to Dexie schema
@@ -174,20 +182,25 @@ class SQLiteAdapter {
         created_at TEXT DEFAULT CURRENT_TIMESTAMP
       )`,
       
-      // Backup - simplified to match Dexie schema
+      // Backup - for audit logs and backups only (no deleted item functionality)
       `CREATE TABLE IF NOT EXISTS backup (
         backup_id INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id INTEGER,
+        username TEXT,
         backup_name TEXT NOT NULL,
         backup_type TEXT,
         created_at TEXT DEFAULT CURRENT_TIMESTAMP,
         schema_version TEXT,
         file_path TEXT,
+        file_name TEXT,       
+        file_size INTEGER,
         checksum TEXT,
         details TEXT,
+        restored_at TEXT,
+        restored_by INTEGER
       )`,
       
-      // Deleted Items - exact match to Dexie schema
+      // Deleted Items - updated with restored_by and confirmed_by columns
       `CREATE TABLE IF NOT EXISTS deleted_items (
         deleted_id INTEGER PRIMARY KEY AUTOINCREMENT,
         entity_type TEXT NOT NULL,
@@ -196,7 +209,9 @@ class SQLiteAdapter {
         deleted_by INTEGER,
         deleted_at TEXT DEFAULT CURRENT_TIMESTAMP,
         restored_at TEXT,
-        confirmed_at TEXT
+        restored_by INTEGER,
+        confirmed_at TEXT,
+        confirmed_by INTEGER
       )`
     ];
 

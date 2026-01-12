@@ -41,12 +41,12 @@ function generateChecksum(data) {
 }
 
 /**
- * CREATE BACKUP
+ * CREATE BACKUP - FIXED VERSION
  */
-export async function createBackup(userId, username = 'System', backupName = 'Automatic Backup') {
+export async function createBackup(userId, username = 'System', backupName = 'Automatic Backup', isAutoBackup = false) {
   try {
     const backupData = {
-      schema_version: '6', // Your current schema version
+      schema_version: '6',
       created_at: new Date().toISOString(),
       created_by: userId,
       created_by_name: username,
@@ -79,10 +79,13 @@ export async function createBackup(userId, username = 'System', backupName = 'Au
     }
 
     const checksum = generateChecksum(backupData);
-    const fileName = `TindaTrack_Auto_${backupName.replace(/\s+/g, '_')}_${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const fileName = isAutoBackup 
+      ? `TindaTrack_Auto_${backupName.replace(/\s+/g, '_')}_${timestamp}.json`
+      : `TindaTrack_${backupName.replace(/\s+/g, '_')}_${timestamp}.json`;
     const jsonString = JSON.stringify(backupData, null, 2);
 
-    // Log the backup in database
+    // Log the backup in database - FIXED: Store isAutoBackup in details instead of separate column
     try {
       await dataService.add('backup', {
         user_id: userId,
@@ -93,8 +96,11 @@ export async function createBackup(userId, username = 'System', backupName = 'Au
         schema_version: '6',
         file_name: fileName,
         file_size: jsonString.length,
-        checksum,
-        is_auto_backup: false
+        checksum: checksum,
+        details: JSON.stringify({
+          isAutoBackup: isAutoBackup,
+          tablesBackedUp: tables.length
+        })
       });
     } catch (dbError) {
       console.warn('Could not log backup to database:', dbError);
@@ -108,7 +114,7 @@ export async function createBackup(userId, username = 'System', backupName = 'Au
 }
 
 /**
- * RESTORE BACKUP
+ * RESTORE BACKUP - FIXED VERSION
  */
 export async function restoreBackup(file, userId, username) {
   try {
@@ -165,7 +171,7 @@ export async function restoreBackup(file, userId, username) {
     try {
       await dataService.add('backup', {
         user_id: userId,
-        username,
+        username: username || 'System',
         backup_name: `Restore: ${file.name}`,
         backup_type: 'restore',
         created_at: new Date().toISOString(),
@@ -173,7 +179,10 @@ export async function restoreBackup(file, userId, username) {
         file_name: file.name,
         file_size: text.length,
         checksum: generateChecksum(text),
-        details: `Restored ${tableNames.length} tables with data from backup file`
+        details: JSON.stringify({
+          restoredTables: tableNames.length,
+          originalBackupDate: parsed.created_at
+        })
       });
     } catch (logError) {
       console.warn('Could not log restore to database:', logError);
@@ -187,109 +196,144 @@ export async function restoreBackup(file, userId, username) {
 }
 
 /**
- * DOWNLOAD BACKUP FILE
+ * DOWNLOAD BACKUP FILE - FIXED VERSION
  */
 export async function downloadBackupFile(json, fileName) {
+  console.log(`📥 Starting download for: ${fileName}`);
+  console.log(`📱 Platform: ${isCapacitor ? 'Capacitor Mobile' : 'Web'}`);
+  
   try {
-    // For Capacitor (mobile)
-    if (isCapacitor && Filesystem) {
-      try {
-        console.log('Downloading backup to device...');
-        
-        // Try Documents directory first
-        try {
-          const result = await Filesystem.writeFile({
-            path: fileName,
-            data: json,
-            directory: Filesystem.Directory.Documents,
-            recursive: true
-          });
-          
-          console.log(`✅ Backup saved to Documents:`, result.uri);
-          
-          // Try to share the file
-          if (Share) {
-            try {
-              await Share.share({
-                title: 'TindaTrack Backup',
-                text: 'Backup file',
-                url: result.uri,
-                dialogTitle: 'Save or share backup file'
-              });
-            } catch (shareError) {
-              console.log('Share not available:', shareError);
-            }
-          }
-          
-          return { 
-            success: true, 
-            uri: result.uri,
-            location: 'Documents folder',
-            platform: 'capacitor'
-          };
-        } catch (docError) {
-          console.log('Failed to save to Documents:', docError);
-          
-          // Fallback to Data directory
-          try {
-            const result = await Filesystem.writeFile({
-              path: fileName,
-              data: json,
-              directory: Filesystem.Directory.Data,
-              recursive: true
-            });
-            
-            console.log(`✅ Backup saved to Data:`, result.uri);
-            return { 
-              success: true, 
-              uri: result.uri,
-              location: 'App Data folder',
-              platform: 'capacitor'
-            };
-          } catch (dataError) {
-            console.log('Failed to save to Data:', dataError);
-            throw new Error('Could not save to device storage');
-          }
-        }
-      } catch (mobileError) {
-        console.error('Mobile download failed:', mobileError);
-        throw mobileError;
-      }
-    }
+    // ALWAYS use web download method as primary - it works everywhere
+    console.log('🌐 Using web download method...');
+    return await webDownload(json, fileName);
     
-    // For Web (fallback)
-    try {
-      const blob = new Blob([json], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = fileName;
-      link.style.display = 'none';
-      document.body.appendChild(link);
-      
-      link.click();
-      
-      document.body.removeChild(link);
-      setTimeout(() => URL.revokeObjectURL(url), 100);
-      
-      console.log(`✅ Backup downloaded via web: ${fileName}`);
-      return { 
-        success: true, 
-        location: 'Browser downloads folder',
-        platform: 'web'
-      };
-    } catch (webError) {
-      console.error('Web download failed:', webError);
-      throw webError;
-    }
   } catch (error) {
     console.error('Download failed:', error);
     return { 
       success: false, 
-      error: error.message,
-      platform: 'unknown'
+      error: error.message || 'Download failed',
+      platform: 'web'
     };
+  }
+}
+
+/**
+ * Web download method - works on all platforms
+ */
+async function webDownload(json, fileName) {
+  try {
+    const blob = new Blob([json], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = fileName;
+    link.style.display = 'none';
+    document.body.appendChild(link);
+    
+    // Trigger download
+    link.click();
+    
+    // Clean up
+    document.body.removeChild(link);
+    
+    // Revoke the object URL after a delay
+    setTimeout(() => {
+      try {
+        URL.revokeObjectURL(url);
+      } catch (e) {
+        console.log('Error revoking URL:', e);
+      }
+    }, 100);
+    
+    console.log(`✅ Backup downloaded: ${fileName}`);
+    return { 
+      success: true, 
+      location: 'Browser downloads folder',
+      platform: 'web'
+    };
+  } catch (webError) {
+    console.error('Web download failed:', webError);
+    throw new Error('Web download failed: ' + webError.message);
+  }
+}
+
+/**
+ * Optional mobile download method (not used as primary)
+ */
+async function mobileDownload(json, fileName) {
+  try {
+    console.log('📱 Attempting mobile download...');
+    
+    // Check if Filesystem is available
+    if (!Filesystem) {
+      console.log('Filesystem not available, falling back to web');
+      return await webDownload(json, fileName);
+    }
+    
+    // Try Cache directory first (usually has write permissions)
+    try {
+      console.log('Trying Cache directory...');
+      const result = await Filesystem.writeFile({
+        path: fileName,
+        data: json,
+        directory: Filesystem.Directory.Cache,
+        recursive: true
+      });
+      
+      console.log(`✅ Backup saved to Cache:`, result.uri);
+      
+      // Try to share the file
+      if (Share) {
+        try {
+          await Share.share({
+            title: 'TindaTrack Backup',
+            text: `TindaTrack Backup: ${fileName}`,
+            url: result.uri,
+            dialogTitle: 'Save or share backup file'
+          });
+        } catch (shareError) {
+          console.log('Share not available:', shareError);
+        }
+      }
+      
+      return { 
+        success: true, 
+        uri: result.uri,
+        location: 'Cache folder',
+        platform: 'capacitor'
+      };
+    } catch (cacheError) {
+      console.log('Cache failed:', cacheError.message);
+      
+      // Fallback to Documents
+      try {
+        console.log('Trying Documents directory...');
+        const result = await Filesystem.writeFile({
+          path: fileName,
+          data: json,
+          directory: Filesystem.Directory.Documents,
+          recursive: true
+        });
+        
+        console.log(`✅ Backup saved to Documents:`, result.uri);
+        return { 
+          success: true, 
+          uri: result.uri,
+          location: 'Documents folder',
+          platform: 'capacitor'
+        };
+      } catch (docError) {
+        console.log('Documents failed:', docError.message);
+        
+        // Final fallback to web
+        console.log('All mobile methods failed, falling back to web');
+        return await webDownload(json, fileName);
+      }
+    }
+  } catch (mobileError) {
+    console.error('Mobile download failed:', mobileError);
+    throw mobileError;
   }
 }
 

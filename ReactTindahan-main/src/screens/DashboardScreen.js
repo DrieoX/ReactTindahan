@@ -16,7 +16,8 @@ export default function DashboardScreen({ userMode }) {
     totalProducts: 0,
     lowStock: 0,
     expired: 0,
-    totalSales: 0
+    totalSales: 0,
+    inventoryValue: 0
   });
   const [notifications, setNotifications] = useState([]);
   const [recentSales, setRecentSales] = useState([]);
@@ -25,9 +26,11 @@ export default function DashboardScreen({ userMode }) {
   const [showLowStockModal, setShowLowStockModal] = useState(false);
   const [showExpiredModal, setShowExpiredModal] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [costData, setCostData] = useState({});
 
   useEffect(() => {
     fetchDashboardStats();
+    fetchProductCostData();
   }, []);
 
   // ✅ Log audit action
@@ -46,68 +49,215 @@ export default function DashboardScreen({ userMode }) {
     }
   };
 
+  // Helper function to normalize dates for comparison
+  const normalizeDate = (dateInput) => {
+    if (!dateInput) return null;
+    
+    if (dateInput instanceof Date) {
+      return dateInput.toISOString().split('T')[0];
+    }
+    
+    if (typeof dateInput === 'string') {
+      if (dateInput.includes('T')) {
+        return dateInput.split('T')[0];
+      }
+      if (dateInput.match(/^\d{4}-\d{2}-\d{2}$/)) {
+        return dateInput;
+      }
+      try {
+        const date = new Date(dateInput);
+        return date.toISOString().split('T')[0];
+      } catch (e) {
+        console.error('Error parsing date:', dateInput, e);
+        return null;
+      }
+    }
+    
+    return null;
+  };
+
+  // Fetch product cost data for income calculation
+  const fetchProductCostData = async () => {
+    try {
+      const resupplyItems = await dataService.getAll('resupplied_items');
+      const stockCardItems = await dataService.getAll('stock_card');
+      
+      const costMap = {};
+      
+      resupplyItems
+        .filter(item => item && item.resupply_date)
+        .sort((a, b) => new Date(b.resupply_date) - new Date(a.resupply_date))
+        .forEach(item => {
+          if (item.product_id && item.unit_cost) {
+            if (!costMap[item.product_id] || new Date(item.resupply_date) > new Date(costMap[item.product_id].date)) {
+              costMap[item.product_id] = {
+                cost: item.unit_cost,
+                date: item.resupply_date
+              };
+            }
+          }
+        });
+      
+      stockCardItems
+        .filter(item => item && item.transaction_type === 'RESUPPLY')
+        .sort((a, b) => new Date(b.created_at || b.transaction_date) - new Date(a.created_at || a.transaction_date))
+        .forEach(item => {
+          if (item.product_id && item.unit_cost && !costMap[item.product_id]) {
+            costMap[item.product_id] = {
+              cost: item.unit_cost,
+              date: item.created_at || item.transaction_date || new Date().toISOString()
+            };
+          }
+        });
+      
+      setCostData(costMap);
+    } catch (err) {
+      console.error("Error fetching cost data:", err);
+    }
+  };
+
   const fetchDashboardStats = async () => {
     try {
       setLoading(true);
       
-      // ✅ Log dashboard view using backup table for audit
       await logAudit('VIEW_DASHBOARD', {
         page: 'dashboard',
         user_id: user.user_id,
         username: user.username
       });
 
-      // ✅ Get dashboard stats from dataService
-      const dashboardStats = await dataService.getDashboardStats();
-      setStats(dashboardStats);
-
+      // Get all data needed
+      const sales = await dataService.getSales();
+      const products = await dataService.getAll('products');
+      const inventoryRecords = await dataService.getAll('inventory');
       const today = new Date().toISOString().split('T')[0];
 
-      // ✅ Get today's sales
-      const sales = await dataService.getSales(today);
-      let recentSalesData = [];
+      // Calculate inventory value
+      let inventoryValue = 0;
+      let totalProducts = 0;
+      let lowStockCount = 0;
+      let expiredCount = 0;
+      let nearExpiryCount = 0;
 
-      // ✅ Process sales to get details
-      for (let sale of sales) {
-        const items = await dataService.getSaleItems(sale.sales_id);
-        const totalSale = items.reduce((sum, i) => sum + i.total_amount, 0);
+      // Process inventory for stats
+      const inventoryDetails = products.map((p) => {
+        const invRecord = inventoryRecords.find(inv => inv.product_id === p.product_id);
+        const invQuantity = invRecord ? invRecord.quantity : 0;
+        const threshold = invRecord?.threshold || p.threshold || 5;
+        
+        // Calculate inventory value
+        inventoryValue += (p.unit_price || 0) * invQuantity;
+        totalProducts++;
+        
+        // Check low stock
+        if (invQuantity <= threshold) {
+          lowStockCount++;
+        }
+        
+        // Check expiry (if applicable)
+        const expiration_date = invRecord?.expiration_date || p.expiration_date;
+        if (expiration_date) {
+          const expDate = new Date(expiration_date);
+          const todayDate = new Date();
+          todayDate.setHours(0, 0, 0, 0);
+          
+          if (expDate < todayDate) {
+            expiredCount++;
+          } else if (expDate <= new Date(todayDate.getTime() + 7 * 24 * 60 * 60 * 1000)) {
+            nearExpiryCount++;
+          }
+        }
+        
+        return {
+          ...p,
+          quantity: invQuantity,
+          threshold: threshold,
+          expiration_date: expiration_date
+        };
+      });
 
-        const productDetails = await Promise.all(
-          items.map(async (item) => {
-            try {
-              const product = await dataService.getById('products', item.product_id);
-              return product?.name || 'Unknown Product';
-            } catch (error) {
-              return 'Unknown Product';
-            }
-          })
-        );
+      // Filter today's sales
+      const todaySales = sales.filter(sale => {
+        if (!sale.sales_date) return false;
+        const saleDateNormalized = normalizeDate(sale.sales_date);
+        return saleDateNormalized === today;
+      });
 
-        recentSalesData.push({
-          id: sale.sales_id,
-          date: sale.sales_date,
-          amount: totalSale,
-          items: items.length,
-          productNames: productDetails,
-          user_id: sale.user_id
-        });
+      // Process today's sales with income calculation (similar to ReportsScreen)
+      const recentSalesData = [];
+      let totalSalesToday = 0;
+      let totalCostToday = 0;
+      let totalIncomeToday = 0;
+
+      for (let sale of todaySales) {
+        try {
+          const items = await dataService.getSaleItems(sale.sales_id);
+          const products = await dataService.getAll('products');
+          
+          // Calculate sale totals with cost data
+          let saleTotal = 0;
+          let saleCost = 0;
+          const saleItems = [];
+          
+          items.forEach(item => {
+            const product = products.find(p => p.product_id === item.product_id);
+            const productName = product?.name || 'Unknown Product';
+            const sellingPrice = item.unit_price || item.amount || product?.unit_price || 0;
+            const costPrice = costData[item.product_id]?.cost || 0;
+            const quantity = item.quantity || 0;
+            const revenue = sellingPrice * quantity;
+            const cost = costPrice * quantity;
+            const income = revenue - cost;
+            
+            saleTotal += revenue;
+            saleCost += cost;
+            
+            saleItems.push({
+              name: productName,
+              quantity: quantity,
+              unit_price: sellingPrice,
+              unit_cost: costPrice,
+              income: income
+            });
+          });
+          
+          const saleIncome = saleTotal - saleCost;
+          totalSalesToday += saleTotal;
+          totalCostToday += saleCost;
+          totalIncomeToday += saleIncome;
+          
+          recentSalesData.push({
+            id: sale.sales_id,
+            date: sale.sales_date,
+            time: sale.created_at || sale.sales_date,
+            amount: saleTotal,
+            cost: saleCost,
+            income: saleIncome,
+            items: items.length,
+            productNames: saleItems.map(item => item.name),
+            saleItems: saleItems,
+            user_id: sale.user_id,
+            created_by: sale.created_by || 'Unknown'
+          });
+        } catch (error) {
+          console.error('Error processing sale:', error);
+        }
       }
 
-      // ✅ Get inventory with details for low stock and expired items
-      const inventoryDetails = await dataService.getInventoryWithDetails();
-      
-      // ✅ Filter low stock items
+      // Get low stock items for notifications
       const lowStockItemsData = inventoryDetails
         .filter(i => i.quantity <= i.threshold)
         .map(i => ({
-          name: i.product_name || 'Unknown Product',
+          id: i.product_id,
+          name: i.name || 'Unknown Product',
           quantity: i.quantity,
           threshold: i.threshold,
           updated_at: i.updated_at
         }));
 
-      // ✅ Filter expired and near-expiry items
+      // Get expired and near-expiry items for notifications
       const todayDate = new Date();
+      todayDate.setHours(0, 0, 0, 0);
       const nearExpiryThreshold = new Date();
       nearExpiryThreshold.setDate(todayDate.getDate() + 7);
       
@@ -115,34 +265,46 @@ export default function DashboardScreen({ userMode }) {
       
       for (let i of inventoryDetails) {
         if (!i.expiration_date) continue;
-        const expDate = new Date(i.expiration_date);
         
-        if (expDate < todayDate) {
-          expiredItemsData.push({
-            ...i,
-            name: i.product_name || 'Unknown Product',
-            type: 'expired',
-            updated_at: i.updated_at
-          });
-        } else if (expDate <= nearExpiryThreshold) {
-          expiredItemsData.push({
-            ...i,
-            name: i.product_name || 'Unknown Product',
-            type: 'near-expiry',
-            updated_at: i.updated_at
-          });
+        try {
+          const expDate = new Date(i.expiration_date);
+          expDate.setHours(0, 0, 0, 0);
+          
+          if (expDate < todayDate) {
+            expiredItemsData.push({
+              id: i.product_id,
+              name: i.name || 'Unknown Product',
+              expiration_date: i.expiration_date,
+              quantity: i.quantity,
+              type: 'expired',
+              updated_at: i.updated_at
+            });
+          } else if (expDate <= nearExpiryThreshold) {
+            expiredItemsData.push({
+              id: i.product_id,
+              name: i.name || 'Unknown Product',
+              expiration_date: i.expiration_date,
+              quantity: i.quantity,
+              type: 'near-expiry',
+              updated_at: i.updated_at
+            });
+          }
+        } catch (error) {
+          console.error('Error parsing expiration date:', i.expiration_date, error);
         }
       }
 
-      const expiredCount = expiredItemsData.filter(e => e.type === 'expired').length;
+      // Update stats
+      setStats({
+        salesToday: totalSalesToday,
+        totalProducts: totalProducts,
+        lowStock: lowStockCount,
+        expired: expiredCount + nearExpiryCount,
+        totalSales: todaySales.length,
+        inventoryValue: inventoryValue
+      });
 
-      // ✅ Update stats with accurate expired count
-      setStats(prev => ({
-        ...prev,
-        expired: expiredCount
-      }));
-
-      // ✅ Set notifications
+      // Set notifications
       const expAlerts = expiredItemsData.map(item => ({
         ...item,
         type: item.type,
@@ -155,7 +317,7 @@ export default function DashboardScreen({ userMode }) {
       }));
 
       setNotifications([...expAlerts, ...lowAlerts]);
-      setRecentSales(recentSalesData.slice(0, 5));
+      setRecentSales(recentSalesData.sort((a, b) => new Date(b.time) - new Date(a.time)).slice(0, 5));
       setLowStockItems(lowStockItemsData);
       setExpiredItems(expiredItemsData);
       
@@ -170,7 +332,6 @@ export default function DashboardScreen({ userMode }) {
         console.error('Fallback stats fetch failed:', fallbackError);
       }
       
-      // ✅ Log error in backup table for audit
       await logAudit('DASHBOARD_ERROR', {
         error: err.message,
         user_id: user.user_id
@@ -181,19 +342,16 @@ export default function DashboardScreen({ userMode }) {
   };
 
   const handleTotalProductsClick = async () => {
-    // ✅ Log "View All Inventory" click using backup table
     await logAudit('CLICK_VIEW_INVENTORY', {
       action: 'view_all_inventory',
       user_id: user.user_id,
       username: user.username
     });
     
-    // Acts as "clear filter" button – just reloads stats
     fetchDashboardStats();
   };
 
   const handleLowStockClick = async () => {
-    // ✅ Log low stock modal view using backup table
     await logAudit('VIEW_LOW_STOCK', {
       action: 'open_low_stock_modal',
       low_stock_count: stats.lowStock,
@@ -203,7 +361,6 @@ export default function DashboardScreen({ userMode }) {
   };
 
   const handleExpiredClick = async () => {
-    // ✅ Log expired items modal view using backup table
     await logAudit('VIEW_EXPIRED_ITEMS', {
       action: 'open_expired_items_modal',
       expired_count: stats.expired,
@@ -213,7 +370,6 @@ export default function DashboardScreen({ userMode }) {
   };
 
   const handleCloseLowStockModal = async () => {
-    // ✅ Log low stock modal close using backup table
     await logAudit('CLOSE_LOW_STOCK_MODAL', {
       action: 'close_low_stock_modal',
       user_id: user.user_id
@@ -222,12 +378,23 @@ export default function DashboardScreen({ userMode }) {
   };
 
   const handleCloseExpiredModal = async () => {
-    // ✅ Log expired items modal close using backup table
     await logAudit('CLOSE_EXPIRED_MODAL', {
       action: 'close_expired_items_modal',
       user_id: user.user_id
     });
     setShowExpiredModal(false);
+  };
+
+  // Format currency
+  const formatCurrency = (amount) => {
+    return `₱${parseFloat(amount).toFixed(2)}`;
+  };
+
+  // Get profit margin color
+  const getProfitMarginColor = (income, revenue) => {
+    if (revenue === 0) return '#6b7280';
+    const margin = (income / revenue) * 100;
+    return margin >= 20 ? '#10b981' : margin >= 10 ? '#f59e0b' : '#ef4444';
   };
 
   return (
@@ -271,8 +438,8 @@ export default function DashboardScreen({ userMode }) {
               <div style={styles.statCardWrapper}>
                 <StatCard
                   label="Today's Sales"
-                  value={`₱${stats.salesToday.toFixed(2)}`}
-                  change="View daily report"
+                  value={formatCurrency(stats.salesToday)}
+                  change={`${stats.totalSales} transactions`}
                   bg="#4f46e5"
                   text="#ffffff"
                 />
@@ -299,47 +466,121 @@ export default function DashboardScreen({ userMode }) {
 
             {/* Transactions + Alerts */}
             <div style={styles.dashboardGrid}>
-              {/* Recent Transactions */}
+              {/* Today's Transactions - Enhanced with Income Calculation */}
               <div style={styles.recentTransactions}>
                 <div style={styles.sectionHeader}>
-                  <h3 style={styles.sectionTitle}>Recent Transactions</h3>
-                  <button style={styles.viewAllButton}>View all transactions</button>
+                  <h3 style={styles.sectionTitle}>Today's Transactions with Income</h3>
+                  <button style={styles.viewAllButton} onClick={fetchDashboardStats}>
+                    Refresh
+                  </button>
                 </div>
 
                 {recentSales.length === 0 ? (
-                  <p style={styles.noDataText}>No recent transactions</p>
+                  <p style={styles.noDataText}>No transactions today</p>
                 ) : (
                   <div style={styles.transactionsList}>
-                    {recentSales.map((sale, index) => (
-                      <div key={index} style={styles.transactionCard}>
-                        <div style={styles.transactionHeader}>
-                          <div style={styles.transactionHeaderLeft}>
-                            <span style={styles.transactionStatus}>Sale Completed</span>
-                            <span style={styles.transactionTime}>
-                              {sale.items} items • {sale.date}
+                    {recentSales.map((sale, index) => {
+                      const profitMargin = sale.amount > 0 ? (sale.income / sale.amount) * 100 : 0;
+                      const marginColor = getProfitMarginColor(sale.income, sale.amount);
+                      
+                      return (
+                        <div key={index} style={styles.transactionCard}>
+                          <div style={styles.transactionHeader}>
+                            <div style={styles.transactionHeaderLeft}>
+                              <span style={styles.transactionStatus}>Sale Completed</span>
+                              <span style={styles.transactionTime}>
+                                {sale.items} items • {new Date(sale.time).toLocaleTimeString()}
+                              </span>
+                              <span style={styles.transactionCreator}>
+                                By: {sale.created_by}
+                              </span>
+                            </div>
+                            <div style={styles.transactionAmounts}>
+                              <span style={styles.transactionAmount}>{formatCurrency(sale.amount)}</span>
+                              <span style={{...styles.transactionIncome, color: sale.income >= 0 ? '#10b981' : '#ef4444'}}>
+                                {sale.income >= 0 ? '+' : ''}{formatCurrency(sale.income)}
+                              </span>
+                              <span style={{...styles.transactionMargin, color: marginColor}}>
+                                ({profitMargin.toFixed(1)}%)
+                              </span>
+                            </div>
+                          </div>
+                          
+                          <div style={styles.transactionProducts}>
+                            {sale.saleItems?.slice(0, 3).map((item, i) => (
+                              <div key={i} style={styles.productDetail}>
+                                <span style={styles.productName}>{item.name}</span>
+                                <span style={styles.productInfo}>
+                                  {item.quantity} × {formatCurrency(item.unit_price)}
+                                </span>
+                                <span style={{
+                                  ...styles.productIncome,
+                                  color: item.income >= 0 ? '#10b981' : '#ef4444'
+                                }}>
+                                  {item.income >= 0 ? '+' : ''}{formatCurrency(item.income)}
+                                </span>
+                              </div>
+                            ))}
+                            {sale.saleItems?.length > 3 && (
+                              <div style={styles.moreItemsContainer}>
+                                <span style={styles.moreItems}>
+                                  +{sale.saleItems.length - 3} more items
+                                </span>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                    
+                    {/* Today's Summary */}
+                    {recentSales.length > 0 && (
+                      <div style={styles.dailySummary}>
+                        <div style={styles.summaryHeader}>
+                          <span style={styles.summaryTitle}>Today's Summary</span>
+                          <span style={styles.summaryCount}>{recentSales.length} transactions</span>
+                        </div>
+                        <div style={styles.summaryStats}>
+                          <div style={styles.summaryStat}>
+                            <span style={styles.summaryLabel}>Total Revenue:</span>
+                            <span style={styles.summaryValue}>{formatCurrency(recentSales.reduce((sum, s) => sum + s.amount, 0))}</span>
+                          </div>
+                          <div style={styles.summaryStat}>
+                            <span style={styles.summaryLabel}>Total Cost:</span>
+                            <span style={{...styles.summaryValue, color: '#ef4444'}}>
+                              {formatCurrency(recentSales.reduce((sum, s) => sum + s.cost, 0))}
                             </span>
                           </div>
-                          <span style={styles.transactionAmount}>₱{sale.amount.toFixed(2)}</span>
-                        </div>
-                        <div style={styles.transactionProducts}>
-                          {sale.productNames.slice(0, 2).map((name, i) => (
-                            <span key={i} style={styles.productName}>{name}</span>
-                          ))}
-                          {sale.productNames.length > 2 && (
-                            <span style={styles.moreItems}>+{sale.productNames.length - 2} more</span>
-                          )}
+                          <div style={styles.summaryStat}>
+                            <span style={styles.summaryLabel}>Net Income:</span>
+                            <span style={{
+                              ...styles.summaryValue,
+                              color: recentSales.reduce((sum, s) => sum + s.income, 0) >= 0 ? '#10b981' : '#ef4444'
+                            }}>
+                              {formatCurrency(recentSales.reduce((sum, s) => sum + s.income, 0))}
+                            </span>
+                          </div>
                         </div>
                       </div>
-                    ))}
+                    )}
                   </div>
                 )}
               </div>
 
-              {/* Alerts */}
+              {/* Alerts & Notifications */}
               <div style={styles.alertsSection}>
-                <h3 style={styles.sectionTitle}>Alerts & Notifications</h3>
+                <div style={styles.sectionHeader}>
+                  <h3 style={styles.sectionTitle}>Alerts & Notifications</h3>
+                  {notifications.length > 0 && (
+                    <span style={styles.alertCountBadge}>{notifications.length}</span>
+                  )}
+                </div>
                 {notifications.length === 0 ? (
-                  <p style={styles.noDataText}>No alerts right now.</p>
+                  <div style={styles.noAlertsContainer}>
+                    <div style={styles.noAlertsIcon}>✅</div>
+                    <p style={styles.noAlertsText}>No alerts right now.</p>
+                    <p style={styles.noAlertsSubtext}>Everything is running smoothly!</p>
+                  </div>
                 ) : (
                   <div style={styles.alertsList}>
                     {notifications.map((item, index) => (
@@ -361,6 +602,11 @@ export default function DashboardScreen({ userMode }) {
                               : '#f59e0b'
                           }`,
                         }}
+                        onClick={() => {
+                          if (item.type === 'low' || item.type === 'expired' || item.type === 'near-expiry') {
+                            item.type === 'low' ? handleLowStockClick() : handleExpiredClick();
+                          }
+                        }}
                       >
                         <div style={styles.alertHeader}>
                           <span
@@ -381,25 +627,49 @@ export default function DashboardScreen({ userMode }) {
                               : '📉'}
                           </span>
                           <div style={styles.alertContent}>
-                            <p style={styles.alertTitle}>
-                              {item.type === 'expired'
-                                ? 'Product Expired'
-                                : item.type === 'near-expiry'
-                                ? 'Near Expiry Alert'
-                                : 'Low Stock Alert'}
-                            </p>
+                            <div style={styles.alertTitleRow}>
+                              <p style={styles.alertTitle}>
+                                {item.type === 'expired'
+                                  ? 'Product Expired'
+                                  : item.type === 'near-expiry'
+                                  ? 'Near Expiry Alert'
+                                  : 'Low Stock Alert'}
+                              </p>
+                              <span style={styles.alertTime}>
+                                {item.updated_at ? new Date(item.updated_at).toLocaleDateString() : 'Today'}
+                              </span>
+                            </div>
                             <p style={styles.alertProduct}>{item.name}</p>
                             <p style={styles.alertDescription}>
                               {item.type === 'expired'
-                                ? `Expired on ${item.expiration_date}`
+                                ? `Expired on ${item.expiration_date} • ${item.quantity} units in stock`
                                 : item.type === 'near-expiry'
-                                ? `Expiring soon on ${item.expiration_date}`
+                                ? `Expiring on ${item.expiration_date} • ${item.quantity} units in stock`
                                 : `Only ${item.quantity} left in stock (Threshold: ${item.threshold})`}
                             </p>
+                            <div style={styles.alertAction}>
+                              <span style={styles.alertActionText}>
+                                Click to view details →
+                              </span>
+                            </div>
                           </div>
                         </div>
                       </div>
                     ))}
+                    
+                    {/* Inventory Value Summary */}
+                    <div style={styles.inventoryValueCard}>
+                      <div style={styles.inventoryValueHeader}>
+                        <span style={styles.inventoryValueIcon}>💰</span>
+                        <div>
+                          <p style={styles.inventoryValueTitle}>Inventory Value</p>
+                          <p style={styles.inventoryValueAmount}>{formatCurrency(stats.inventoryValue)}</p>
+                        </div>
+                      </div>
+                      <p style={styles.inventoryValueSubtext}>
+                        Total value of {stats.totalProducts} products in stock
+                      </p>
+                    </div>
                   </div>
                 )}
               </div>
@@ -412,28 +682,50 @@ export default function DashboardScreen({ userMode }) {
       {showLowStockModal && (
         <div style={styles.modalOverlay}>
           <div style={styles.modalContainer}>
-            <h2 style={styles.modalHeader}>Low Stock Items</h2>
+            <div style={styles.modalHeaderRow}>
+              <h2 style={styles.modalHeader}>Low Stock Items</h2>
+              <span style={styles.modalBadge}>{lowStockItems.length} items</span>
+            </div>
             {lowStockItems.length === 0 ? (
-              <p style={styles.noDataText}>No items are low in stock.</p>
+              <div style={styles.emptyModalContent}>
+                <div style={styles.emptyModalIcon}>✅</div>
+                <p style={styles.noDataText}>No items are low in stock.</p>
+                <p style={styles.emptyModalSubtext}>All products have sufficient stock levels.</p>
+              </div>
             ) : (
               <div style={styles.tableContainer}>
                 <table style={styles.table}>
                   <thead>
                     <tr style={styles.tableHeader}>
                       <th style={styles.tableCell}>Product</th>
-                      <th style={styles.tableCell}>Quantity</th>
+                      <th style={styles.tableCell}>Current Stock</th>
                       <th style={styles.tableCell}>Threshold</th>
-                      <th style={styles.tableCell}>Last Updated</th>
+                      <th style={styles.tableCell}>Status</th>
                     </tr>
                   </thead>
                   <tbody>
                     {lowStockItems.map((item, i) => (
                       <tr key={i} style={styles.tableRow}>
-                        <td style={styles.tableCell}>{item.name}</td>
-                        <td style={styles.tableCell}>{item.quantity}</td>
+                        <td style={styles.tableCell}>
+                          <strong>{item.name}</strong>
+                        </td>
+                        <td style={{
+                          ...styles.tableCell,
+                          color: item.quantity === 0 ? '#ef4444' : '#f59e0b',
+                          fontWeight: '600'
+                        }}>
+                          {item.quantity}
+                        </td>
                         <td style={styles.tableCell}>{item.threshold}</td>
                         <td style={styles.tableCell}>
-                          {item.updated_at ? new Date(item.updated_at).toLocaleDateString() : 'N/A'}
+                          <span style={{
+                            ...styles.statusBadge,
+                            backgroundColor: item.quantity === 0 ? '#fef2f2' : '#fffbeb',
+                            color: item.quantity === 0 ? '#dc2626' : '#d97706',
+                            borderColor: item.quantity === 0 ? '#fecaca' : '#fde68a'
+                          }}>
+                            {item.quantity === 0 ? 'Out of Stock' : 'Low Stock'}
+                          </span>
                         </td>
                       </tr>
                     ))}
@@ -454,9 +746,16 @@ export default function DashboardScreen({ userMode }) {
       {showExpiredModal && (
         <div style={styles.modalOverlay}>
           <div style={styles.modalContainer}>
-            <h2 style={styles.modalHeader}>Expiring / Expired Items</h2>
+            <div style={styles.modalHeaderRow}>
+              <h2 style={styles.modalHeader}>Expiring / Expired Items</h2>
+              <span style={styles.modalBadge}>{expiredItems.length} items</span>
+            </div>
             {expiredItems.length === 0 ? (
-              <p style={styles.noDataText}>No expired or near expiry items.</p>
+              <div style={styles.emptyModalContent}>
+                <div style={styles.emptyModalIcon}>✅</div>
+                <p style={styles.noDataText}>No expired or near expiry items.</p>
+                <p style={styles.emptyModalSubtext}>All products have valid expiry dates.</p>
+              </div>
             ) : (
               <div style={styles.tableContainer}>
                 <table style={styles.table}>
@@ -465,20 +764,30 @@ export default function DashboardScreen({ userMode }) {
                       <th style={styles.tableCell}>Product</th>
                       <th style={styles.tableCell}>Status</th>
                       <th style={styles.tableCell}>Expiry Date</th>
-                      <th style={styles.tableCell}>Last Updated</th>
+                      <th style={styles.tableCell}>Stock</th>
                     </tr>
                   </thead>
                   <tbody>
                     {expiredItems.map((item, i) => (
-                      <tr key={i} style={styles.tableRow}>
-                        <td style={styles.tableCell}>{item.name}</td>
+                      <tr key={i} style={{
+                        ...styles.tableRow,
+                        backgroundColor: item.type === 'expired' ? '#fef2f2' : '#fff7ed'
+                      }}>
                         <td style={styles.tableCell}>
-                          {item.type === 'expired' ? 'Expired' : 'Near Expiry'}
+                          <strong>{item.name}</strong>
+                        </td>
+                        <td style={styles.tableCell}>
+                          <span style={{
+                            ...styles.statusBadge,
+                            backgroundColor: item.type === 'expired' ? '#fef2f2' : '#fff7ed',
+                            color: item.type === 'expired' ? '#dc2626' : '#ea580c',
+                            borderColor: item.type === 'expired' ? '#fecaca' : '#fed7aa'
+                          }}>
+                            {item.type === 'expired' ? 'Expired' : 'Near Expiry'}
+                          </span>
                         </td>
                         <td style={styles.tableCell}>{item.expiration_date}</td>
-                        <td style={styles.tableCell}>
-                          {item.updated_at ? new Date(item.updated_at).toLocaleDateString() : 'N/A'}
-                        </td>
+                        <td style={styles.tableCell}>{item.quantity} units</td>
                       </tr>
                     ))}
                   </tbody>

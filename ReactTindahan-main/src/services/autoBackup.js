@@ -34,12 +34,12 @@ function generateChecksum(data) {
 }
 
 /**
- * CREATE BACKUP (local function for autoBackup)
+ * CREATE BACKUP (local function for autoBackup) - FIXED VERSION
  */
 async function createBackup(userId, username = 'System', backupName = 'Automatic Backup') {
   try {
     const backupData = {
-      schema_version: '6', // Your current schema version
+      schema_version: '6',
       created_at: new Date().toISOString(),
       created_by: userId,
       created_by_name: username,
@@ -72,10 +72,11 @@ async function createBackup(userId, username = 'System', backupName = 'Automatic
     }
 
     const checksum = generateChecksum(backupData);
-    const fileName = `TindaTrack_Auto_${backupName.replace(/\s+/g, '_')}_${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const fileName = `TindaTrack_Auto_${backupName.replace(/\s+/g, '_')}_${timestamp}.json`;
     const jsonString = JSON.stringify(backupData, null, 2);
 
-    // Log the backup in database
+    // Log the backup in database - FIXED: Store isAutoBackup in details
     try {
       await dataService.add('backup', {
         user_id: userId,
@@ -86,8 +87,11 @@ async function createBackup(userId, username = 'System', backupName = 'Automatic
         schema_version: '6',
         file_name: fileName,
         file_size: jsonString.length,
-        checksum,
-        is_auto_backup: true
+        checksum: checksum,
+        details: JSON.stringify({
+          isAutoBackup: true,
+          tablesBackedUp: tables.length
+        })
       });
     } catch (dbError) {
       console.warn('Could not log backup to database:', dbError);
@@ -101,78 +105,54 @@ async function createBackup(userId, username = 'System', backupName = 'Automatic
 }
 
 /**
- * Download backup file for auto backup - FIXED VERSION
+ * Download backup file for auto backup - SIMPLIFIED VERSION
  */
 async function downloadBackupFile(json, fileName) {
+  console.log(`📥 Auto backup - Starting download: ${fileName}`);
+  
   try {
-    // For Capacitor (mobile)
-    if (isCapacitor && Filesystem) {
-      try {
-        console.log('Auto backup - Attempting to save to device...');
-        
-        // Try different directories in sequence
-        const directories = [
-          Filesystem.Directory.Documents,
-          Filesystem.Directory.Data,
-          Filesystem.Directory.Cache,
-          Filesystem.Directory.ExternalStorage
-        ];
-        
-        for (const directory of directories) {
-          try {
-            console.log(`Trying to save to ${directory}...`);
-            const result = await Filesystem.writeFile({
-              path: fileName,
-              data: json,
-              directory,
-              recursive: true
-            });
-            
-            console.log(`✅ Auto backup saved to ${directory}:`, result.uri);
-            return { 
-              success: true, 
-              uri: result.uri,
-              location: `${directory} folder`
-            };
-          } catch (dirError) {
-            console.log(`Failed to save to ${directory}:`, dirError.message);
-            // Try next directory
-          }
-        }
-        
-        console.log('All mobile directories failed, falling back to web...');
-      } catch (mobileError) {
-        console.error('Mobile auto backup failed:', mobileError);
-      }
-    }
-    
-    // For Web (fallback) - This always works
-    try {
-      const blob = new Blob([json], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = fileName;
-      link.style.display = 'none';
-      document.body.appendChild(link);
-      
-      // Trigger download
-      link.click();
-      
-      // Clean up
-      document.body.removeChild(link);
-      setTimeout(() => URL.revokeObjectURL(url), 100);
-      
-      console.log(`✅ Auto backup downloaded via web: ${fileName}`);
-      return { success: true, location: 'Browser downloads folder' };
-    } catch (webError) {
-      console.error('Web download failed:', webError);
-      return { success: false, error: webError.message };
-    }
+    // ALWAYS use web method for auto backup
+    return await webDownload(json, fileName);
   } catch (error) {
     console.error('Auto backup download failed:', error);
     return { success: false, error: error.message };
+  }
+}
+
+/**
+ * Web download method - works on all platforms
+ */
+async function webDownload(json, fileName) {
+  try {
+    const blob = new Blob([json], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = fileName;
+    link.style.display = 'none';
+    document.body.appendChild(link);
+    
+    // Trigger download
+    link.click();
+    
+    // Clean up
+    document.body.removeChild(link);
+    
+    // Revoke the object URL after a delay
+    setTimeout(() => {
+      try {
+        URL.revokeObjectURL(url);
+      } catch (e) {
+        console.log('Error revoking URL:', e);
+      }
+    }, 100);
+    
+    console.log(`✅ Auto backup downloaded: ${fileName}`);
+    return { success: true, location: 'Browser downloads folder' };
+  } catch (webError) {
+    console.error('Web download failed:', webError);
+    throw new Error('Web download failed: ' + webError.message);
   }
 }
 
@@ -223,7 +203,7 @@ export async function runDailyBackup() {
     );
 
     if (result.success) {
-      // Download the file
+      // Download the file using web method
       const downloadResult = await downloadBackupFile(result.json, result.fileName);
       
       if (downloadResult.success) {
@@ -344,7 +324,7 @@ export function setAutoBackupEnabled(enabled) {
  */
 export function getAutoBackupStatus() {
   try {
-    const enabled = localStorage.getItem('autoBackupEnabled') !== 'false'; // Default to true
+    const enabled = localStorage.getItem('autoBackupEnabled') !== 'false';
     const lastBackup = localStorage.getItem('lastBackupDate') || 'Never';
     
     return { 
@@ -401,17 +381,26 @@ export async function triggerManualBackup() {
     );
 
     if (result.success) {
-      const downloadResult = await downloadBackupFile(result.json, result.fileName);
-      if (downloadResult.success) {
-        // Update last backup date
-        localStorage.setItem('lastBackupDate', new Date().toISOString().split('T')[0]);
-        
-        alert(`✅ Backup created successfully!\n\nFile: ${result.fileName}\nLocation: ${downloadResult.location}`);
-        return true;
-      } else {
-        alert(`⚠️ Backup created but download failed:\n${downloadResult.error}`);
-        return false;
-      }
+      // Always use web download for manual backup too
+      const blob = new Blob([result.json], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = result.fileName;
+      link.style.display = 'none';
+      document.body.appendChild(link);
+      
+      link.click();
+      
+      document.body.removeChild(link);
+      setTimeout(() => URL.revokeObjectURL(url), 100);
+      
+      // Update last backup date
+      localStorage.setItem('lastBackupDate', new Date().toISOString().split('T')[0]);
+      
+      alert(`✅ Backup created successfully!\n\nFile: ${result.fileName}\n\nDownload should start automatically. If not, check your browser settings.`);
+      return true;
     } else {
       alert(`❌ Backup failed:\n${result.error?.message || 'Unknown error'}`);
       return false;
@@ -448,14 +437,23 @@ export async function forceBackupNow() {
     );
 
     if (result.success) {
-      const downloadResult = await downloadBackupFile(result.json, result.fileName);
-      if (downloadResult.success) {
-        // Don't update lastBackupDate for forced backups (so daily still runs)
-        console.log(`✅ Emergency backup created: ${result.fileName}`);
-        return { success: true, fileName: result.fileName, location: downloadResult.location };
-      } else {
-        throw new Error(`Download failed: ${downloadResult.error}`);
-      }
+      // Use web download
+      const blob = new Blob([result.json], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = result.fileName;
+      link.style.display = 'none';
+      document.body.appendChild(link);
+      
+      link.click();
+      
+      document.body.removeChild(link);
+      setTimeout(() => URL.revokeObjectURL(url), 100);
+      
+      console.log(`✅ Emergency backup created: ${result.fileName}`);
+      return { success: true, fileName: result.fileName, location: 'Browser downloads' };
     } else {
       throw new Error(result.error?.message || 'Backup creation failed');
     }

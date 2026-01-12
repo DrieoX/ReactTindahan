@@ -57,25 +57,33 @@ const createTables = () => {
         created_at TEXT DEFAULT CURRENT_TIMESTAMP
       )`,
       
-      // Suppliers - matches Dexie schema
+      // Suppliers - UPDATED: added updated_by and updated_at columns
       `CREATE TABLE IF NOT EXISTS suppliers (
         supplier_id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT NOT NULL,
         contact_info TEXT,
         address TEXT,
         created_by INTEGER,
-        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        updated_by INTEGER,
+        updated_at TEXT,
+        FOREIGN KEY (created_by) REFERENCES users(user_id),
+        FOREIGN KEY (updated_by) REFERENCES users(user_id)
       )`,
       
-      // Categories - matches Dexie schema
+      // Categories - UPDATED: added updated_by and updated_at columns
       `CREATE TABLE IF NOT EXISTS categories (
         category_id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT NOT NULL,
         created_by INTEGER,
-        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        updated_by INTEGER,
+        updated_at TEXT,
+        FOREIGN KEY (created_by) REFERENCES users(user_id),
+        FOREIGN KEY (updated_by) REFERENCES users(user_id)
       )`,
       
-      // Products - matches Dexie schema
+      // Products - UPDATED: added updated_by and updated_at columns
       `CREATE TABLE IF NOT EXISTS products (
         product_id INTEGER PRIMARY KEY AUTOINCREMENT,
         sku TEXT UNIQUE,
@@ -86,11 +94,15 @@ const createTables = () => {
         category_id INTEGER,
         created_by INTEGER,
         created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        updated_by INTEGER,
+        updated_at TEXT,
         FOREIGN KEY (supplier_id) REFERENCES suppliers(supplier_id),
-        FOREIGN KEY (category_id) REFERENCES categories(category_id)
+        FOREIGN KEY (category_id) REFERENCES categories(category_id),
+        FOREIGN KEY (created_by) REFERENCES users(user_id),
+        FOREIGN KEY (updated_by) REFERENCES users(user_id)
       )`,
       
-      // Product Units - matches Dexie schema
+      // Product Units - UPDATED: added updated_by and updated_at columns
       `CREATE TABLE IF NOT EXISTS product_units (
         unit_id INTEGER PRIMARY KEY AUTOINCREMENT,
         product_id INTEGER NOT NULL,
@@ -99,10 +111,14 @@ const createTables = () => {
         price_per_unit REAL,
         created_by INTEGER,
         created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (product_id) REFERENCES products(product_id)
+        updated_by INTEGER,
+        updated_at TEXT,
+        FOREIGN KEY (product_id) REFERENCES products(product_id),
+        FOREIGN KEY (created_by) REFERENCES users(user_id),
+        FOREIGN KEY (updated_by) REFERENCES users(user_id)
       )`,
       
-      // Inventory - matches Dexie schema (product_id as primary key)
+      // Inventory - exact match to Dexie schema (product_id as primary key)
       `CREATE TABLE IF NOT EXISTS inventory (
         product_id INTEGER PRIMARY KEY,
         supplier_id INTEGER,
@@ -112,7 +128,8 @@ const createTables = () => {
         updated_by INTEGER,
         updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (product_id) REFERENCES products(product_id),
-        FOREIGN KEY (supplier_id) REFERENCES suppliers(supplier_id)
+        FOREIGN KEY (supplier_id) REFERENCES suppliers(supplier_id),
+        FOREIGN KEY (updated_by) REFERENCES users(user_id)
       )`,
       
       // Resupplied Items - matches Dexie schema
@@ -182,21 +199,27 @@ const createTables = () => {
         FOREIGN KEY (sale_items_id) REFERENCES sale_items(sales_items_id)
       )`,
       
-      // Backup - simplified to match Dexie schema
+      // Backup - simplified for audit logs and backups only
       `CREATE TABLE IF NOT EXISTS backup (
         backup_id INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id INTEGER,
+        username TEXT,
         backup_name TEXT NOT NULL,
         backup_type TEXT,
         created_at TEXT DEFAULT CURRENT_TIMESTAMP,
         schema_version TEXT,
         file_path TEXT,
+        file_name TEXT,        
+        file_size INTEGER,
         checksum TEXT,
         details TEXT,
-        FOREIGN KEY (user_id) REFERENCES users(user_id)
+        restored_at TEXT,
+        restored_by INTEGER,
+        FOREIGN KEY (user_id) REFERENCES users(user_id),
+        FOREIGN KEY (restored_by) REFERENCES users(user_id)
       )`,
       
-      // Deleted Items - matches Dexie schema
+      // Deleted Items - updated schema with restored_by and confirmed_by columns
       `CREATE TABLE IF NOT EXISTS deleted_items (
         deleted_id INTEGER PRIMARY KEY AUTOINCREMENT,
         entity_type TEXT NOT NULL,
@@ -205,8 +228,12 @@ const createTables = () => {
         deleted_by INTEGER,
         deleted_at TEXT DEFAULT CURRENT_TIMESTAMP,
         restored_at TEXT,
+        restored_by INTEGER,
         confirmed_at TEXT,
-        FOREIGN KEY (deleted_by) REFERENCES users(user_id)
+        confirmed_by INTEGER,
+        FOREIGN KEY (deleted_by) REFERENCES users(user_id),
+        FOREIGN KEY (restored_by) REFERENCES users(user_id),
+        FOREIGN KEY (confirmed_by) REFERENCES users(user_id)
       )`
     ];
 

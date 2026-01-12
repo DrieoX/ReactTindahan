@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { loginUser } from '../services/UserService';
 
-export default function LoginScreen({ setUserMode }) {
+export default function LoginScreen({ setUserMode, setIsAuthenticated }) {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -36,6 +36,7 @@ export default function LoginScreen({ setUserMode }) {
       }
       
       setUserMode(mode);
+      setIsAuthenticated(true);
       navigate('/dashboard', { replace: true, state: { user: result.user, userMode: mode } });
     } else {
       alert(result.error || 'Login failed. Please try again.');

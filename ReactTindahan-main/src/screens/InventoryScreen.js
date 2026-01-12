@@ -128,7 +128,7 @@ export default function InventoryScreen({ userMode }) {
       
       // Sort by date and limit
       const sortedLogs = logs
-        .sort((a, b) => new Date(b.transaction_date || b.created_at) - new Date(a.transaction_date || a.created_at))
+        .sort((a, b) => new Date(b.transaction_date || b.created_at) - new Date(b.transaction_date || b.created_at))
         .slice(0, 20);
       
       // Format as audit logs
@@ -149,31 +149,31 @@ export default function InventoryScreen({ userMode }) {
     }
   };
 
-  // Fetch deleted items for recycle bin
+  // Fetch deleted items for recycle bin - UPDATED to use deleted_items table
   const fetchDeletedItems = async () => {
     try {
       setDeletedItemsLoading(true);
       
-      // Fetch all backup records
-      const allBackups = await dataService.getAll('backup');
+      // Fetch all deleted items from deleted_items table
+      const allDeletedItems = await dataService.getAll('deleted_items');
       
       // Filter deleted products
-      const deletedProductsData = allBackups
+      const deletedProductsData = allDeletedItems
         .filter(item => 
-          item.backup_type === 'deleted_product' && 
+          item.entity_type === 'product' && 
           !item.restored_at && 
           !item.confirmed_at
         )
-        .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+        .sort((a, b) => new Date(b.deleted_at) - new Date(a.deleted_at));
       
       // Filter deleted categories
-      const deletedCategoriesData = allBackups
+      const deletedCategoriesData = allDeletedItems
         .filter(item => 
-          item.backup_type === 'deleted_category' && 
+          item.entity_type === 'category' && 
           !item.restored_at && 
           !item.confirmed_at
         )
-        .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+        .sort((a, b) => new Date(b.deleted_at) - new Date(a.deleted_at));
       
       setDeletedProducts(deletedProductsData);
       setDeletedCategories(deletedCategoriesData);
@@ -183,13 +183,20 @@ export default function InventoryScreen({ userMode }) {
       sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
       
       const newDeletedCount = [...deletedProductsData, ...deletedCategoriesData]
-        .filter(item => new Date(item.created_at) > sevenDaysAgo)
+        .filter(item => new Date(item.deleted_at) > sevenDaysAgo)
         .length;
       
       setNewDeletedItems(newDeletedCount);
       
     } catch (error) {
       console.error('Error fetching deleted items:', error);
+      // If deleted_items table doesn't exist yet, initialize empty arrays
+      if (error.message.includes('no such table')) {
+        console.log('deleted_items table not found, using empty arrays');
+        setDeletedProducts([]);
+        setDeletedCategories([]);
+        setNewDeletedItems(0);
+      }
     } finally {
       setDeletedItemsLoading(false);
     }
@@ -502,80 +509,103 @@ export default function InventoryScreen({ userMode }) {
     }
   };
 
-  // Soft delete product (move to recycle bin)
+  // Soft delete product (move to recycle bin) - UPDATED to use deleted_items table
   const handleDeleteItem = async () => {
-    if (!editingItem) return;
-    if (!window.confirm(`Are you sure you want to delete "${editingItem.name}"? This item will be moved to recycle bin.`)) return;
+  if (!editingItem) return;
+  if (!window.confirm(`Are you sure you want to delete "${editingItem.name}"? This item will be moved to recycle bin.`)) return;
 
-    try {
-      const productId = editingItem.product_id;
-      const productName = editingItem.name;
-      
-      // Store the deleted product in backup table for recycle bin
-      await dataService.add('backup', {
-        user_id: user?.user_id,
-        username: user?.username,
-        backup_name: `DELETED_PRODUCT_${productName}`,
-        backup_type: 'deleted_product',
-        created_at: new Date().toISOString(),
-        schema_version: '6',
-        details: JSON.stringify(editingItem),
-        restored_at: null,
-        confirmed_at: null,
-        original_id: productId
-      });
-      
-      // Now delete from original tables
-      await dataService.delete('products', productId);
-      
-      // Delete related inventory record
-      const inventoryRecords = await dataService.getAll('inventory', { 
-        where: { product_id: productId } 
-      });
-      for (const record of inventoryRecords) {
-        await dataService.delete('inventory', record.inventory_id || record.id);
+  try {
+    const productId = editingItem.product_id;
+    const productName = editingItem.name;
+    
+    // Store the deleted product in deleted_items table for recycle bin
+    await dataService.add('deleted_items', {
+      entity_type: 'product',
+      entity_id: productId,
+      original_data: JSON.stringify(editingItem),
+      deleted_by: user?.user_id,
+      deleted_at: new Date().toISOString(),
+      restored_at: null,
+      restored_by: null,
+      confirmed_at: null,
+      confirmed_by: null
+    });
+    
+    // Now delete from original tables
+    await dataService.delete('products', productId);
+    
+    // Delete related inventory record - FIXED: Handle different ID field names
+    const inventoryRecords = await dataService.getAll('inventory', { 
+      where: { product_id: productId } 
+    });
+    for (const record of inventoryRecords) {
+      // FIX: Try multiple possible ID field names
+      const recordId = record.inventory_id || record.id || record._id;
+      if (recordId) {
+        await dataService.delete('inventory', recordId);
+      } else {
+        console.warn('Could not find inventory record ID for product:', productId, record);
       }
-      
-      // Delete related records from other tables
-      const tables = ['resupplied_items', 'stock_card', 'sale_items'];
-      for (const table of tables) {
-        const records = await dataService.getAll(table, { where: { product_id: productId } });
-        for (const record of records) {
-          const recordId = record[`${table.slice(0, -1)}_id`] || record.id;
+    }
+    
+    // Delete related records from other tables - FIXED: Handle different ID field names
+    const tables = ['resupplied_items', 'stock_card', 'sale_items'];
+    for (const table of tables) {
+      const records = await dataService.getAll(table, { where: { product_id: productId } });
+      for (const record of records) {
+        // FIX: Try multiple possible ID field names
+        let recordId;
+        
+        if (table === 'resupplied_items') {
+          recordId = record.resupplied_item_id || record.id || record._id;
+        } else if (table === 'stock_card') {
+          recordId = record.stock_card_id || record.id || record._id;
+        } else if (table === 'sale_items') {
+          recordId = record.sale_item_id || record.id || record._id;
+        } else {
+          // Generic fallback
+          const fieldName = `${table.slice(0, -1)}_id`;
+          recordId = record[fieldName] || record.id || record._id;
+        }
+        
+        if (recordId) {
           await dataService.delete(table, recordId);
+        } else {
+          console.warn(`Could not find ${table} record ID for product:`, productId, record);
         }
       }
-
-      // ✅ FIXED: Just log to console
-      console.log(`[AUDIT] DELETE_PRODUCT_TO_RECYCLE`, {
-        product_id: productId,
-        product_name: productName,
-        sku: editingItem.sku,
-        user_id: user?.user_id,
-        username: user?.username,
-        timestamp: new Date().toISOString()
-      });
-
-      setShowEditModal(false);
-      setEditingItem(null);
-      fetchInventory();
-      
-      // Refresh deleted items count for owner
-      if (user?.role === 'Owner') {
-        fetchDeletedItems();
-      }
-      
-      alert(`Product "${productName}" moved to recycle bin. Only owner can restore or permanently delete.`);
-    } catch (err) {
-      console.error('Error deleting product:', err);
-      // ✅ FIXED: Just log to console
-      console.error(`[AUDIT] DELETE_PRODUCT_ERROR`, {
-        error: err.message,
-        product_id: editingItem.product_id,
-        user_id: user?.user_id
-      });
     }
-  };
+
+    // ✅ FIXED: Just log to console
+    console.log(`[AUDIT] DELETE_PRODUCT_TO_RECYCLE`, {
+      product_id: productId,
+      product_name: productName,
+      sku: editingItem.sku,
+      user_id: user?.user_id,
+      username: user?.username,
+      timestamp: new Date().toISOString()
+    });
+
+    setShowEditModal(false);
+    setEditingItem(null);
+    fetchInventory();
+    
+    // Refresh deleted items count for owner
+    if (user?.role === 'Owner') {
+      fetchDeletedItems();
+    }
+    
+    alert(`Product "${productName}" moved to recycle bin. Only owner can restore or permanently delete.`);
+  } catch (err) {
+    console.error('Error deleting product:', err);
+    // ✅ FIXED: Just log to console
+    console.error(`[AUDIT] DELETE_PRODUCT_ERROR`, {
+      error: err.message,
+      product_id: editingItem.product_id,
+      user_id: user?.user_id
+    });
+  }
+};
 
   const handleSupplierDetails = async (item) => {
     try {
@@ -744,7 +774,7 @@ export default function InventoryScreen({ userMode }) {
     }
   };
 
-  // Soft delete category (move to recycle bin)
+  // Soft delete category (move to recycle bin) - UPDATED to use deleted_items table
   const handleDeleteCategory = async (category) => {
     if (!window.confirm(`Are you sure you want to delete category "${category.name}"? This will be moved to recycle bin.`)) return;
     
@@ -759,18 +789,17 @@ export default function InventoryScreen({ userMode }) {
         }
       }
       
-      // Store deleted category in backup table
-      await dataService.add('backup', {
-        user_id: user?.user_id,
-        username: user?.username,
-        backup_name: `DELETED_CATEGORY_${category.name}`,
-        backup_type: 'deleted_category',
-        created_at: new Date().toISOString(),
-        schema_version: '6',
-        details: JSON.stringify(category),
+      // Store deleted category in deleted_items table
+      await dataService.add('deleted_items', {
+        entity_type: 'category',
+        entity_id: category.category_id,
+        original_data: JSON.stringify(category),
+        deleted_by: user?.user_id,
+        deleted_at: new Date().toISOString(),
         restored_at: null,
+        restored_by: null,
         confirmed_at: null,
-        original_id: category.category_id
+        confirmed_by: null
       });
       
       // Delete category
@@ -853,81 +882,101 @@ export default function InventoryScreen({ userMode }) {
     setShowRecycleBinModal(true);
   };
 
-  // Handle restoring deleted item (owner only)
+  // Handle restoring deleted item (owner only) - UPDATED to use deleted_items table
   const handleRestoreItem = async (deletedItem) => {
-    const itemName = deletedItem.backup_name.replace('DELETED_', '').replace('PRODUCT_', '').replace('CATEGORY_', '');
-    
-    if (!window.confirm(`Are you sure you want to restore "${itemName}"?`)) return;
-    
-    try {
-      const details = JSON.parse(deletedItem.details);
+  const itemName = deletedItem.entity_type === 'product' ? 'Product' : 'Category';
+  const originalData = JSON.parse(deletedItem.original_data);
+  
+  if (!window.confirm(`Are you sure you want to restore "${originalData.name || originalData.backup_name?.replace('DELETED_', '').replace('PRODUCT_', '').replace('CATEGORY_', '')}"?`)) return;
+  
+  try {
+    if (deletedItem.entity_type === 'product') {
+      // Extract fields that belong to products table vs inventory table
+      const { 
+        quantity, 
+        threshold, 
+        suppliers, 
+        created_by, 
+        created_at, 
+        product_id, 
+        // Extract product fields
+        ...productFields 
+      } = originalData;
       
-      if (deletedItem.backup_type === 'deleted_product') {
-        // Restore product
-        const productResult = await dataService.add('products', {
-          ...details,
-          created_at: new Date().toISOString(),
-          created_by: `${deletedItem.username} (restored)`
-        });
-        
-        const productId = productResult?.product_id || productResult?.id;
-        
-        // Restore inventory entry
-        await dataService.add('inventory', {
-          product_id: productId,
-          supplier_id: null,
-          quantity: 0,
-          threshold: details.threshold || 5,
-          updated_by: user?.username,
-          updated_at: new Date().toISOString()
-        });
-        
-        // Update backup record
-        await dataService.update('backup', deletedItem.backup_id || deletedItem.id, {
-          restored_at: new Date().toISOString(),
-          restored_by: user?.username
-        });
-        
-        fetchInventory();
-        
-      } else if (deletedItem.backup_type === 'deleted_category') {
-        // Restore category
-        await dataService.add('categories', {
-          ...details,
-          created_at: new Date().toISOString(),
-          created_by: `${deletedItem.username} (restored)`
-        });
-        
-        // Update backup record
-        await dataService.update('backup', deletedItem.backup_id || deletedItem.id, {
-          restored_at: new Date().toISOString(),
-          restored_by: user?.username
-        });
-        
-        fetchCategories();
-      }
+      // Clean product data - only include fields that exist in products table
+      const cleanProductData = {
+        name: productFields.name,
+        sku: productFields.sku,
+        unit_price: productFields.unit_price,
+        base_unit: productFields.base_unit,
+        category_id: productFields.category_id,
+        // Use new created_at and created_by for restored item
+        created_at: new Date().toISOString(),
+        created_by: `${originalData.created_by || 'System'} (restored)`
+      };
       
-      // Refresh deleted items
-      fetchDeletedItems();
-      alert('Item restored successfully!');
+      // Restore product
+      const productResult = await dataService.add('products', cleanProductData);
       
-    } catch (error) {
-      console.error('Error restoring item:', error);
-      alert('Error restoring item: ' + error.message);
+      const productId = productResult?.product_id || productResult?.id;
+      
+      // Restore inventory entry with inventory-specific fields
+      await dataService.add('inventory', {
+        product_id: productId,
+        supplier_id: null,
+        quantity: quantity || 0,
+        threshold: threshold || 5,
+        updated_by: user?.username,
+        updated_at: new Date().toISOString()
+      });
+      
+      // Update deleted_items record
+      await dataService.update('deleted_items', deletedItem.deleted_id || deletedItem.id, {
+        restored_at: new Date().toISOString(),
+        restored_by: user?.user_id
+      });
+      
+      fetchInventory();
+      
+    } else if (deletedItem.entity_type === 'category') {
+      // Restore category
+      await dataService.add('categories', {
+        ...originalData,
+        created_at: new Date().toISOString(),
+        created_by: `${originalData.created_by || 'System'} (restored)`
+      });
+      
+      // Update deleted_items record
+      await dataService.update('deleted_items', deletedItem.deleted_id || deletedItem.id, {
+        restored_at: new Date().toISOString(),
+        restored_by: user?.user_id
+      });
+      
+      fetchCategories();
     }
-  };
+    
+    // Refresh deleted items
+    fetchDeletedItems();
+    alert('Item restored successfully!');
+    
+  } catch (error) {
+    console.error('Error restoring item:', error);
+    alert('Error restoring item: ' + error.message);
+  }
+};
 
-  // Handle permanent deletion (owner only)
+  // Handle permanent deletion (owner only) - UPDATED to use deleted_items table
   const handlePermanentDelete = async (deletedItem) => {
-    const itemName = deletedItem.backup_name.replace('DELETED_', '').replace('PRODUCT_', '').replace('CATEGORY_', '');
+    const originalData = JSON.parse(deletedItem.original_data);
+    const itemName = originalData.name || originalData.backup_name?.replace('DELETED_', '').replace('PRODUCT_', '').replace('CATEGORY_', '');
     
     if (!window.confirm(`Are you sure you want to permanently delete "${itemName}"? This action cannot be undone.`)) return;
     
     try {
-      // Mark as confirmed deletion
-      await dataService.update('backup', deletedItem.backup_id || deletedItem.id, {
+      // Mark as confirmed deletion in deleted_items table
+      await dataService.update('deleted_items', deletedItem.deleted_id || deletedItem.id, {
         confirmed_at: new Date().toISOString(),
-        confirmed_by: user?.username
+        confirmed_by: user?.user_id
       });
       
       // Refresh deleted items
@@ -1426,31 +1475,32 @@ export default function InventoryScreen({ userMode }) {
                       </thead>
                       <tbody>
                         {deletedProducts.map((item) => {
-                          const details = JSON.parse(item.details || '{}');
-                          const isNew = new Date(item.created_at) > new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+                          const originalData = JSON.parse(item.original_data || '{}');
+                          const isNew = new Date(item.deleted_at) > new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
                           const isPending = !item.restored_at && !item.confirmed_at;
                           
                           return (
-                            <tr key={item.backup_id || item.id} style={{
+                            <tr key={item.deleted_id || item.id} style={{
                               ...styles.tableRow,
                               backgroundColor: isNew ? '#fffbeb' : 'transparent',
                               borderLeft: isNew ? '4px solid #f59e0b' : 'none'
                             }}>
                               <td style={styles.tableCell}>
                                 <div>
-                                  <strong>{details.name || 'Unknown Product'}</strong>
+                                  <strong>{originalData.name || 'Unknown Product'}</strong>
                                   <div style={{ fontSize: '12px', color: '#64748b' }}>
-                                    SKU: {details.sku || 'N/A'} | 
-                                    Price: ₱{details.unit_price || '0.00'}
+                                    SKU: {originalData.sku || 'N/A'} | 
+                                    Price: ₱{originalData.unit_price || '0.00'}
                                   </div>
                                 </div>
                               </td>
                               <td style={styles.tableCell}>
-                                {item.username}<br/>
-                                <small style={{ color: '#94a3b8' }}>ID: {item.user_id}</small>
+                                {/* Need to fetch username by user_id if we want to display it */}
+                                User ID: {item.deleted_by}<br/>
+                                <small style={{ color: '#94a3b8' }}>Deleted At: {formatRecycleDate(item.deleted_at)}</small>
                               </td>
                               <td style={styles.tableCell}>
-                                {formatRecycleDate(item.created_at)}
+                                {formatRecycleDate(item.deleted_at)}
                                 {isNew && <span style={styles.newBadge}>NEW</span>}
                               </td>
                               <td style={styles.tableCell}>
@@ -1529,25 +1579,25 @@ export default function InventoryScreen({ userMode }) {
                       </thead>
                       <tbody>
                         {deletedCategories.map((item) => {
-                          const details = JSON.parse(item.details || '{}');
-                          const isNew = new Date(item.created_at) > new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+                          const originalData = JSON.parse(item.original_data || '{}');
+                          const isNew = new Date(item.deleted_at) > new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
                           const isPending = !item.restored_at && !item.confirmed_at;
                           
                           return (
-                            <tr key={item.backup_id || item.id} style={{
+                            <tr key={item.deleted_id || item.id} style={{
                               ...styles.tableRow,
                               backgroundColor: isNew ? '#fffbeb' : 'transparent',
                               borderLeft: isNew ? '4px solid #f59e0b' : 'none'
                             }}>
                               <td style={styles.tableCell}>
-                                <strong>{details.name || 'Unknown Category'}</strong>
+                                <strong>{originalData.name || 'Unknown Category'}</strong>
                               </td>
                               <td style={styles.tableCell}>
-                                {item.username}<br/>
-                                <small style={{ color: '#94a3b8' }}>ID: {item.user_id}</small>
+                                User ID: {item.deleted_by}<br/>
+                                <small style={{ color: '#94a3b8' }}>Deleted At: {formatRecycleDate(item.deleted_at)}</small>
                               </td>
                               <td style={styles.tableCell}>
-                                {formatRecycleDate(item.created_at)}
+                                {formatRecycleDate(item.deleted_at)}
                                 {isNew && <span style={styles.newBadge}>NEW</span>}
                               </td>
                               <td style={styles.tableCell}>

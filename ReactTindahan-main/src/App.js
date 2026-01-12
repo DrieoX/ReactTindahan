@@ -32,8 +32,12 @@ if (isCapacitor) {
 }
 
 // 🔒 Protected Route Middleware
-function ProtectedRoute({ element, userMode, allowedRoles = [] }) {
+function ProtectedRoute({ element, isAuthenticated, userMode, allowedRoles = [] }) {
   const user = JSON.parse(localStorage.getItem('user') || '{}');
+  
+  if (!isAuthenticated) {
+    return <Navigate to="/" replace />;
+  }
   
   if (!userMode) {
     return <Navigate to="/" replace />;
@@ -84,10 +88,10 @@ function ServerStack({ handleLogout, userMode }) {
 }
 
 // 🔹 Auth stack
-function AuthStack({ setUserMode }) {
+function AuthStack({ setUserMode, setIsAuthenticated }) {
   return (
     <Routes>
-      <Route path="/" element={<LoginScreen setUserMode={setUserMode} />} />
+      <Route path="/" element={<LoginScreen setUserMode={setUserMode} setIsAuthenticated={setIsAuthenticated} />} />
       <Route path="/signup" element={<SignupScreen />} />
       <Route path="*" element={<Navigate to="/" />} />
     </Routes>
@@ -96,6 +100,7 @@ function AuthStack({ setUserMode }) {
 
 export default function App() {
   const [userMode, setUserMode] = useState(null);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [loading, setLoading] = useState(true);
   const [initializationError, setInitializationError] = useState(null);
 
@@ -135,13 +140,29 @@ export default function App() {
           console.log('🌐 Running in web mode (no Capacitor permissions needed)');
         }
 
-        // Restore user mode from localStorage
+        // Check for stored user and user mode
+        const storedUser = JSON.parse(localStorage.getItem('user') || 'null');
         const savedMode = localStorage.getItem('userMode');
-        if (savedMode && (savedMode === 'client' || savedMode === 'server')) {
-          console.log(`📱 Restoring user mode: ${savedMode}`);
+        
+        console.log('🔍 Checking authentication state...');
+        console.log('Stored user:', storedUser ? 'Exists' : 'None');
+        console.log('Saved mode:', savedMode || 'None');
+        
+        // Only set authenticated if we have BOTH a valid user and a mode
+        if (storedUser && storedUser.user_id && savedMode && (savedMode === 'client' || savedMode === 'server')) {
+          console.log(`✅ Valid session found. Mode: ${savedMode}, User: ${storedUser.username}`);
           setUserMode(savedMode);
+          setIsAuthenticated(true);
         } else {
-          console.log('📱 No saved user mode found');
+          console.log('❌ No valid session found. Showing login screen.');
+          // Clear any invalid data
+          if (!storedUser || !storedUser.user_id) {
+            localStorage.removeItem('user');
+          }
+          if (!savedMode || (savedMode !== 'client' && savedMode !== 'server')) {
+            localStorage.removeItem('userMode');
+          }
+          setIsAuthenticated(false);
         }
 
         console.log('✅ App initialization completed');
@@ -175,6 +196,7 @@ export default function App() {
   const handleLogout = () => {
     console.log('🚪 User logging out...');
     setUserMode(null);
+    setIsAuthenticated(false);
     localStorage.removeItem('user');
     localStorage.removeItem('userMode');
     sessionStorage.clear();
@@ -257,13 +279,14 @@ export default function App() {
   return (
     <Router>
       <Routes>
-        {!userMode ? (
-          <Route path="/*" element={<AuthStack setUserMode={setUserMode} />} />
+        {!isAuthenticated ? (
+          <Route path="/*" element={<AuthStack setUserMode={setUserMode} setIsAuthenticated={setIsAuthenticated} />} />
         ) : userMode === 'server' ? (
           <Route
             path="/*"
             element={
               <ProtectedRoute 
+                isAuthenticated={isAuthenticated}
                 userMode={userMode} 
                 element={<ServerStack handleLogout={handleLogout} userMode={userMode} />} 
               />
@@ -274,6 +297,7 @@ export default function App() {
             path="/*"
             element={
               <ProtectedRoute 
+                isAuthenticated={isAuthenticated}
                 userMode={userMode} 
                 element={<ClientStack handleLogout={handleLogout} userMode={userMode} />} 
               />

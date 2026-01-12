@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { createBackup, restoreBackup, downloadBackupFile, logAudit } from '../services/backupService';
+import { createBackup, restoreBackup, downloadBackupFile } from '../services/backupService';
 import { runDailyBackup } from '../services/autoBackup';
 import { dataService } from '../services/DataService';
 
@@ -44,11 +44,30 @@ export default function BackupScreen() {
       // Fetch backup history using dataService
       const allBackups = await dataService.getAll('backup');
       
-      // Filter only actual backups (not audit logs)
+      // Filter only actual backups (not audit logs) and parse details
       const filteredBackups = allBackups
         .filter(backup => 
           backup && backup.backup_type && 
-          backup.backup_type !== 'audit' && 
+          backup.backup_type !== 'audit'
+        )
+        .map(backup => {
+          // Parse details to get auto backup info
+          let isAutoBackup = false;
+          try {
+            if (backup.details) {
+              const details = JSON.parse(backup.details);
+              isAutoBackup = details.isAutoBackup || false;
+            }
+          } catch (e) {
+            // If can't parse, it's not auto backup
+          }
+          
+          return {
+            ...backup,
+            is_auto_backup: isAutoBackup
+          };
+        })
+        .filter(backup => 
           ['full', 'restore', 'deleted_product', 'deleted_category', 'deleted_supplier'].includes(backup.backup_type)
         )
         .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
@@ -76,7 +95,8 @@ export default function BackupScreen() {
     setMessage({ type: '', text: '' });
 
     try {
-      const result = await createBackup(user.user_id, user.username, backupName);
+      // Pass false for isAutoBackup since this is manual backup
+      const result = await createBackup(user.user_id, user.username, backupName, false);
       
       if (result.success) {
         const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
@@ -90,26 +110,23 @@ export default function BackupScreen() {
           successMessage += `📦 Size: ${formatFileSize(result.json.length)}\n\n`;
           
           if (capAvailable) {
-            successMessage += `📍 **Saved to:** ${downloadResult.location || 'Documents folder'}\n`;
-            successMessage += `📱 **Find it in:** Files app → Documents folder\n`;
-            successMessage += `🔍 **Tip:** Look for files starting with "TindaTrack_"`;
-            
-            setLastDownloadInfo({
-              fileName: betterFileName,
-              location: downloadResult.location || 'Documents folder',
-              timestamp: new Date().toLocaleString(),
-              size: formatFileSize(result.json.length)
-            });
-          } else if (isMobile) {
-            successMessage += `📱 Check your Downloads folder\n`;
-            successMessage += `🔍 Enable "Show hidden files" in file manager`;
+            successMessage += `📍 **Saved to:** ${downloadResult.location || 'Browser downloads'}\n`;
+            successMessage += `📱 **Find it in:** Files app → Downloads folder\n`;
           } else {
-            successMessage += `💾 File downloaded to your default download folder`;
+            successMessage += `💾 File downloaded to your default download folder\n`;
+            successMessage += `🔍 **Tip:** Check browser download settings if file doesn't appear`;
           }
           
           setMessage({ 
             type: 'success', 
             text: successMessage 
+          });
+          
+          setLastDownloadInfo({
+            fileName: betterFileName,
+            location: downloadResult.location || 'Downloads folder',
+            timestamp: new Date().toLocaleString(),
+            size: formatFileSize(result.json.length)
           });
           
           fetchBackupHistory();
@@ -124,7 +141,7 @@ export default function BackupScreen() {
       console.error('Backup error:', error);
       setMessage({ 
         type: 'error', 
-        text: `❌ Backup failed: ${error.message}\n\nTry using a different file name or check storage permissions.`
+        text: `❌ Backup failed: ${error.message}\n\nTry using a different file name or check browser settings.`
       });
     } finally {
       setCreatingBackup(false);
@@ -194,13 +211,13 @@ export default function BackupScreen() {
       if (success) {
         setMessage({ 
           type: 'success', 
-          text: '✅ Automatic backup completed!\nCheck your Documents folder for the file.' 
+          text: '✅ Automatic backup completed!\nCheck your downloads folder for the file.' 
         });
         fetchBackupHistory();
       } else {
         setMessage({ 
           type: 'error', 
-          text: '⚠️ Automatic backup skipped or failed.\nMake sure:\n1. You are logged in as Owner\n2. Not already backed up today\n3. Storage permissions are granted' 
+          text: '⚠️ Automatic backup skipped or failed.\nMake sure:\n1. You are logged in as Owner\n2. Not already backed up today\n3. Browser allows downloads' 
         });
       }
     } catch (error) {
@@ -234,9 +251,10 @@ export default function BackupScreen() {
     return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
   };
 
-  const getFileIcon = (backupType) => {
+  const getFileIcon = (backupType, isAutoBackup = false) => {
     switch (backupType) {
-      case 'full': return '📦';
+      case 'full': 
+        return isAutoBackup ? '⚡📦' : '📦';
       case 'restore': return '🔄';
       case 'deleted_product': return '🗑️📦';
       case 'deleted_category': return '🗑️🏷️';
@@ -252,14 +270,15 @@ export default function BackupScreen() {
   const showDownloadHelp = () => {
     setMessage({
       type: 'info',
-      text: `📱 **Finding Downloaded Backups on Mobile:**\n
-1. Open your **Files** or **File Manager** app
-2. Navigate to **Documents** folder (NOT Downloads)
-3. Look for files starting with **"TindaTrack_"**
-4. Files are named like: TindaTrack_Monthly_Backup_2024-01-15T10-30-00Z.json\n
-📍 **On Android:** Files app → Browse → Documents
-📍 **On iOS:** Files app → Browse → On My iPhone/iPad → TindaTrack app → Documents\n
-💡 **Tip:** If you don't see the file, try restarting the app and creating the backup again.`
+      text: `💡 **Download Help:**\n
+1. Backups use standard browser download\n
+2. Check your browser's download folder\n
+3. On mobile, check the Downloads app\n
+4. If download doesn't start:\n
+   • Check browser popup blockers\n
+   • Allow downloads from this site\n
+   • Try a different browser\n
+5. Files are named: TindaTrack_[Name]_[Timestamp].json`
     });
   };
 
@@ -268,17 +287,15 @@ export default function BackupScreen() {
       <div style={styles.headerSection}>
         <h1 style={styles.header}>Backup & Restore</h1>
         <p style={styles.subheader}>
-          {capAvailable 
-            ? 'Backup to device storage or share'
-            : 'Download backups to your computer'}
+          Create and restore backups of your data
         </p>
         {capAvailable && (
           <div style={styles.mobileNotice}>
-            📱 Mobile mode: Backups saved to Documents folder
+            📱 Mobile mode: Using browser download
             <button 
               onClick={showDownloadHelp}
               style={styles.helpButton}
-              title="How to find downloaded files"
+              title="Download help"
             >
               ?
             </button>
@@ -408,13 +425,11 @@ export default function BackupScreen() {
                   <div style={styles.spinner}></div>
                   Creating...
                 </span>
-              ) : capAvailable ? '💾 Create & Save to Device' : '💾 Create & Download Backup'}
+              ) : '💾 Create & Download Backup'}
             </button>
           </div>
           <p style={styles.helpText}>
-            {capAvailable 
-              ? 'Backup will be saved to Documents folder. Files are named: TindaTrack_[Name]_[Timestamp].json'
-              : 'Backup will be downloaded as a JSON file. Save it in a safe location.'}
+            Backup will be downloaded as a JSON file. Save it in a safe location.
           </p>
         </div>
 
@@ -532,7 +547,8 @@ export default function BackupScreen() {
                       >
                         <td style={styles.tableCell}>
                           <span style={styles.typeBadge}>
-                            {getFileIcon(backup.backup_type)} {backup.backup_type}
+                            {getFileIcon(backup.backup_type, backup.is_auto_backup)} {backup.backup_type}
+                            {backup.is_auto_backup && <span style={{marginLeft: '4px', color: '#f59e0b'}}>(Auto)</span>}
                           </span>
                         </td>
                         <td style={styles.tableCell}>
@@ -618,418 +634,335 @@ const styles = {
   container: {
     padding: '20px',
     maxWidth: '1200px',
-    margin: '0 auto',
-    fontFamily: 'Arial, sans-serif',
-    width: '100%',
-    boxSizing: 'border-box',
-    overflowX: 'hidden'
+    margin: '0 auto'
   },
   headerSection: {
-    textAlign: 'center',
-    marginBottom: '30px',
-    width: '100%',
-    boxSizing: 'border-box'
+    marginBottom: '24px',
+    textAlign: 'center'
   },
   header: {
-    fontSize: '32px',
-    color: '#2c3e50',
-    marginBottom: '10px',
-    '@media (max-width: 768px)': {
-      fontSize: '24px'
-    }
+    fontSize: '28px',
+    fontWeight: 'bold',
+    marginBottom: '8px',
+    color: '#1f2937'
   },
   subheader: {
     fontSize: '16px',
-    color: '#7f8c8d',
-    marginBottom: '10px',
-    '@media (max-width: 768px)': {
-      fontSize: '14px'
-    }
+    color: '#6b7280',
+    marginBottom: '12px'
   },
   mobileNotice: {
-    backgroundColor: '#e3f2fd',
-    padding: '10px 15px',
-    borderRadius: '8px',
     display: 'inline-flex',
     alignItems: 'center',
-    gap: '10px',
-    marginTop: '10px',
-    boxSizing: 'border-box',
-    width: '100%',
-    maxWidth: '100%'
+    gap: '8px',
+    padding: '8px 16px',
+    backgroundColor: '#dbeafe',
+    color: '#1e40af',
+    borderRadius: '8px',
+    fontSize: '14px'
   },
   helpButton: {
-    backgroundColor: '#2196f3',
-    color: 'white',
-    border: 'none',
-    borderRadius: '50%',
     width: '24px',
     height: '24px',
+    borderRadius: '50%',
+    backgroundColor: '#3b82f6',
+    color: 'white',
+    border: 'none',
     cursor: 'pointer',
     fontSize: '14px',
     display: 'flex',
     alignItems: 'center',
-    justifyContent: 'center',
-    flexShrink: 0
+    justifyContent: 'center'
   },
   downloadInfo: {
-    backgroundColor: '#e8f5e9',
-    border: '1px solid #4caf50',
+    backgroundColor: '#f0f9ff',
+    border: '1px solid #bae6fd',
     borderRadius: '8px',
-    padding: '15px',
-    marginBottom: '20px',
-    width: '100%',
-    boxSizing: 'border-box'
+    padding: '16px',
+    marginBottom: '20px'
   },
   downloadInfoHeader: {
     display: 'flex',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: '10px',
-    width: '100%'
-  },
-  downloadInfoContent: {
-    fontSize: '14px'
+    marginBottom: '12px',
+    fontWeight: 'bold',
+    color: '#0369a1'
   },
   closeInfoButton: {
-    backgroundColor: 'transparent',
+    background: 'none',
     border: 'none',
-    fontSize: '16px',
+    color: '#64748b',
     cursor: 'pointer',
-    color: '#666'
+    fontSize: '18px',
+    padding: '0'
+  },
+  downloadInfoContent: {
+    fontSize: '14px',
+    color: '#334155'
   },
   statsContainer: {
     display: 'grid',
     gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
-    gap: '20px',
-    marginBottom: '30px',
-    width: '100%',
-    boxSizing: 'border-box',
-    '@media (max-width: 768px)': {
-      gridTemplateColumns: 'repeat(2, 1fr)',
-      gap: '15px'
-    },
-    '@media (max-width: 480px)': {
-      gridTemplateColumns: '1fr'
-    }
+    gap: '16px',
+    marginBottom: '24px'
   },
   statCard: {
     backgroundColor: 'white',
-    border: '1px solid #e0e0e0',
-    borderRadius: '10px',
+    border: '1px solid #e5e7eb',
+    borderRadius: '8px',
     padding: '20px',
     display: 'flex',
     alignItems: 'center',
-    gap: '15px',
-    boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
-    boxSizing: 'border-box',
-    width: '100%',
-    overflow: 'hidden',
-    '@media (max-width: 768px)': {
-      padding: '15px',
-      gap: '12px'
-    }
+    gap: '16px',
+    boxShadow: '0 1px 3px rgba(0,0,0,0.1)'
   },
   statIcon: {
-    fontSize: '32px',
-    flexShrink: 0,
-    '@media (max-width: 768px)': {
-      fontSize: '28px'
-    }
+    fontSize: '32px'
   },
   statValue: {
     fontSize: '24px',
     fontWeight: 'bold',
-    margin: 0,
-    color: '#2c3e50',
-    '@media (max-width: 768px)': {
-      fontSize: '20px'
-    }
+    margin: '0',
+    color: '#111827'
   },
   statLabel: {
     fontSize: '14px',
-    color: '#7f8c8d',
-    margin: 0,
-    '@media (max-width: 768px)': {
-      fontSize: '13px'
-    }
+    color: '#6b7280',
+    margin: '4px 0 0 0'
   },
   message: {
-    padding: '15px',
+    padding: '16px',
     borderRadius: '8px',
-    marginBottom: '20px',
+    marginBottom: '24px',
     border: '1px solid',
-    cursor: 'pointer',
-    width: '100%',
-    boxSizing: 'border-box'
+    cursor: 'pointer'
   },
   contentContainer: {
-    backgroundColor: 'white',
-    borderRadius: '12px',
-    padding: '30px',
-    boxShadow: '0 4px 6px rgba(0,0,0,0.1)',
-    width: '100%',
-    boxSizing: 'border-box',
-    overflow: 'hidden',
-    '@media (max-width: 768px)': {
-      padding: '20px'
-    }
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '32px'
   },
   section: {
-    marginBottom: '40px',
-    width: '100%',
-    boxSizing: 'border-box',
-    '@media (max-width: 768px)': {
-      marginBottom: '30px'
-    }
+    backgroundColor: 'white',
+    border: '1px solid #e5e7eb',
+    borderRadius: '12px',
+    padding: '24px',
+    boxShadow: '0 1px 3px rgba(0,0,0,0.1)'
   },
   sectionHeader: {
     fontSize: '20px',
-    color: '#2c3e50',
+    fontWeight: '600',
     marginBottom: '20px',
-    paddingBottom: '10px',
-    borderBottom: '2px solid #f0f0f0',
-    '@media (max-width: 768px)': {
-      fontSize: '18px',
-      marginBottom: '15px'
-    }
+    color: '#1f2937'
   },
   backupForm: {
     display: 'flex',
-    gap: '10px',
-    marginBottom: '10px',
-    width: '100%',
-    boxSizing: 'border-box',
-    '@media (max-width: 768px)': {
-      flexDirection: 'column',
-      gap: '15px'
-    }
+    gap: '12px',
+    marginBottom: '12px',
+    alignItems: 'center'
   },
   input: {
     flex: 1,
-    padding: '12px 15px',
-    border: '1px solid #ddd',
-    borderRadius: '6px',
+    padding: '12px 16px',
+    border: '1px solid #d1d5db',
+    borderRadius: '8px',
     fontSize: '16px',
-    width: '100%',
-    boxSizing: 'border-box',
-    '@media (max-width: 768px)': {
-      fontSize: '16px', // Prevent iOS zoom
-      width: '100%'
-    }
+    outline: 'none',
+    transition: 'border-color 0.2s'
   },
   primaryButton: {
-    backgroundColor: '#2196f3',
+    padding: '12px 24px',
+    backgroundColor: '#3b82f6',
     color: 'white',
     border: 'none',
-    borderRadius: '6px',
-    padding: '12px 24px',
+    borderRadius: '8px',
     fontSize: '16px',
-    fontWeight: 'bold',
+    fontWeight: '600',
     cursor: 'pointer',
-    transition: 'background-color 0.3s',
-    whiteSpace: 'nowrap',
-    flexShrink: 0,
-    '@media (max-width: 768px)': {
-      width: '100%',
-      padding: '14px 20px',
-      fontSize: '16px'
-    }
-  },
-  spinner: {
-    width: '16px',
-    height: '16px',
-    border: '2px solid #ffffff',
-    borderTop: '2px solid transparent',
-    borderRadius: '50%',
-    animation: 'spin 1s linear infinite'
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    minWidth: '200px'
   },
   helpText: {
     fontSize: '14px',
-    color: '#666',
-    marginTop: '5px',
-    width: '100%',
-    boxSizing: 'border-box'
+    color: '#6b7280',
+    margin: '0'
   },
   restoreForm: {
     display: 'flex',
     flexDirection: 'column',
-    gap: '15px',
-    width: '100%',
-    boxSizing: 'border-box'
+    gap: '16px',
+    marginBottom: '16px'
   },
   fileUpload: {
-    position: 'relative',
     display: 'flex',
     alignItems: 'center',
-    width: '100%',
-    boxSizing: 'border-box'
+    gap: '12px'
   },
   fileInput: {
     display: 'none'
   },
   fileLabel: {
     flex: 1,
-    padding: '12px 15px',
-    border: '2px dashed #ddd',
-    borderRadius: '6px',
-    textAlign: 'center',
-    cursor: 'pointer',
-    backgroundColor: '#f9f9f9',
-    transition: 'all 0.3s',
-    width: '100%',
-    boxSizing: 'border-box'
+    padding: '12px 16px',
+    border: '2px dashed #d1d5db',
+    borderRadius: '8px',
+    fontSize: '16px',
+    color: '#6b7280',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px'
   },
   clearButton: {
-    position: 'absolute',
-    right: '10px',
-    backgroundColor: '#ff4444',
-    color: 'white',
-    border: 'none',
-    borderRadius: '50%',
-    width: '24px',
-    height: '24px',
+    padding: '8px 12px',
+    backgroundColor: '#f3f4f6',
+    color: '#6b7280',
+    border: '1px solid #d1d5db',
+    borderRadius: '6px',
     cursor: 'pointer',
-    fontSize: '12px'
+    fontSize: '14px'
   },
   warningButton: {
-    backgroundColor: '#ff9800',
+    padding: '12px 24px',
+    backgroundColor: '#f59e0b',
     color: 'white',
     border: 'none',
-    borderRadius: '6px',
-    padding: '12px 24px',
+    borderRadius: '8px',
     fontSize: '16px',
-    fontWeight: 'bold',
+    fontWeight: '600',
     cursor: 'pointer',
-    width: '100%',
-    boxSizing: 'border-box',
-    '@media (max-width: 768px)': {
-      width: '100%',
-      padding: '14px 20px'
-    }
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center'
   },
   warningText: {
-    backgroundColor: '#fff3cd',
-    border: '1px solid #ffecb5',
-    color: '#856404',
+    fontSize: '14px',
+    color: '#92400e',
+    backgroundColor: '#fef3c7',
     padding: '12px',
     borderRadius: '6px',
-    fontSize: '14px',
-    marginTop: '15px',
-    width: '100%',
-    boxSizing: 'border-box'
+    margin: '0'
   },
   secondaryButton: {
-    backgroundColor: '#6c757d',
-    color: 'white',
-    border: 'none',
-    borderRadius: '6px',
     padding: '8px 16px',
-    fontSize: '14px',
+    backgroundColor: '#f3f4f6',
+    color: '#374151',
+    border: '1px solid #d1d5db',
+    borderRadius: '6px',
     cursor: 'pointer',
-    whiteSpace: 'nowrap',
-    '@media (max-width: 768px)': {
-      width: '100%',
-      padding: '10px 20px',
-      fontSize: '15px'
-    }
+    fontSize: '14px'
   },
   refreshButton: {
-    backgroundColor: '#17a2b8',
+    padding: '8px 16px',
+    backgroundColor: '#10b981',
     color: 'white',
     border: 'none',
     borderRadius: '6px',
-    padding: '8px 16px',
-    fontSize: '14px',
     cursor: 'pointer',
-    whiteSpace: 'nowrap',
-    '@media (max-width: 768px)': {
-      width: '100%',
-      padding: '10px 20px',
-      fontSize: '15px'
-    }
+    fontSize: '14px'
+  },
+  loadingState: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: '40px',
+    color: '#6b7280'
+  },
+  loadingSpinner: {
+    width: '40px',
+    height: '40px',
+    border: '4px solid #f3f3f3',
+    borderTop: '4px solid #3b82f6',
+    borderRadius: '50%',
+    animation: 'spin 1s linear infinite',
+    marginBottom: '16px'
   },
   emptyState: {
-    textAlign: 'center',
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
     padding: '40px',
-    color: '#7f8c8d',
-    width: '100%',
-    boxSizing: 'border-box'
+    color: '#9ca3af',
+    textAlign: 'center'
   },
   emptyIcon: {
     fontSize: '48px',
-    marginBottom: '10px'
+    marginBottom: '16px'
   },
   emptyText: {
     fontSize: '18px',
-    marginBottom: '5px'
+    fontWeight: '500',
+    marginBottom: '8px',
+    color: '#6b7280'
   },
   emptySubtext: {
-    fontSize: '14px'
+    fontSize: '14px',
+    color: '#9ca3af'
   },
   tableContainer: {
-    overflowX: 'auto',
-    width: '100%',
-    maxWidth: '100%',
-    WebkitOverflowScrolling: 'touch',
-    msOverflowStyle: '-ms-autohiding-scrollbar'
+    overflowX: 'auto'
   },
   tableWrapper: {
-    minWidth: '800px',
-    width: '100%'
+    minWidth: '600px'
   },
   table: {
     width: '100%',
     borderCollapse: 'collapse'
   },
   tableHeader: {
-    backgroundColor: '#f8f9fa',
-    borderBottom: '2px solid #dee2e6'
+    backgroundColor: '#f9fafb',
+    borderBottom: '2px solid #e5e7eb'
   },
   tableHeaderCell: {
-    padding: '12px',
+    padding: '12px 16px',
     textAlign: 'left',
-    fontWeight: 'bold',
-    color: '#495057',
-    whiteSpace: 'nowrap',
-    '@media (max-width: 768px)': {
-      padding: '10px',
-      fontSize: '13px'
-    }
+    fontWeight: '600',
+    color: '#374151',
+    fontSize: '14px'
   },
   tableRowEven: {
-    backgroundColor: '#f8f9fa'
-  },
-  tableRowOdd: {
     backgroundColor: 'white'
   },
+  tableRowOdd: {
+    backgroundColor: '#f9fafb'
+  },
   tableCell: {
-    padding: '12px',
-    borderBottom: '1px solid #dee2e6',
-    '@media (max-width: 768px)': {
-      padding: '10px',
-      fontSize: '13px'
-    }
+    padding: '12px 16px',
+    borderBottom: '1px solid #e5e7eb',
+    fontSize: '14px',
+    color: '#4b5563'
   },
   typeBadge: {
-    display: 'inline-block',
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '4px',
     padding: '4px 8px',
-    backgroundColor: '#e9ecef',
+    backgroundColor: '#eff6ff',
+    color: '#1d4ed8',
     borderRadius: '4px',
-    fontSize: '12px',
-    whiteSpace: 'nowrap'
+    fontSize: '12px'
   },
   fileName: {
     fontSize: '12px',
-    color: '#666',
-    marginTop: '4px',
-    wordBreak: 'break-all'
+    color: '#6b7280',
+    marginTop: '4px'
   },
   userId: {
     fontSize: '12px',
-    color: '#999',
-    marginTop: '2px',
-    wordBreak: 'break-all'
+    color: '#9ca3af',
+    marginTop: '2px'
+  },
+  spinner: {
+    width: '16px',
+    height: '16px',
+    border: '2px solid rgba(255,255,255,0.3)',
+    borderTop: '2px solid white',
+    borderRadius: '50%',
+    animation: 'spin 1s linear infinite'
   },
   modalOverlay: {
     position: 'fixed',
@@ -1042,120 +975,84 @@ const styles = {
     alignItems: 'center',
     justifyContent: 'center',
     zIndex: 1000,
-    padding: '16px',
-    boxSizing: 'border-box'
+    padding: '20px'
   },
   modalContainer: {
     backgroundColor: 'white',
     borderRadius: '12px',
-    padding: '30px',
+    padding: '24px',
     maxWidth: '500px',
-    width: '90%',
-    boxSizing: 'border-box',
-    '@media (max-width: 768px)': {
-      padding: '20px',
-      width: '95%'
-    }
+    width: '100%',
+    boxShadow: '0 10px 25px rgba(0,0,0,0.1)'
   },
   modalHeader: {
     fontSize: '20px',
-    color: '#dc3545',
-    marginBottom: '20px',
-    '@media (max-width: 768px)': {
-      fontSize: '18px'
-    }
+    fontWeight: '600',
+    marginBottom: '16px',
+    color: '#dc2626'
   },
   modalContent: {
-    marginBottom: '30px',
-    width: '100%',
-    boxSizing: 'border-box'
+    marginBottom: '24px'
   },
   modalText: {
     fontSize: '16px',
-    marginBottom: '20px',
-    '@media (max-width: 768px)': {
-      fontSize: '15px'
-    }
+    color: '#4b5563',
+    marginBottom: '16px'
   },
   modalWarningBox: {
-    backgroundColor: '#fff3cd',
-    border: '1px solid #ffecb5',
-    borderRadius: '6px',
-    padding: '15px',
-    marginBottom: '20px',
-    width: '100%',
-    boxSizing: 'border-box'
+    backgroundColor: '#fef2f2',
+    border: '1px solid #fecaca',
+    borderRadius: '8px',
+    padding: '16px',
+    marginBottom: '16px'
   },
   modalList: {
-    margin: '10px 0',
-    paddingLeft: '20px',
-    width: '100%',
-    boxSizing: 'border-box'
+    margin: '8px 0 0 20px',
+    color: '#991b1b',
+    fontSize: '14px'
   },
   modalFileInfo: {
-    backgroundColor: '#f8f9fa',
-    padding: '10px',
-    borderRadius: '6px',
     fontSize: '14px',
-    width: '100%',
-    boxSizing: 'border-box',
-    wordBreak: 'break-all'
+    color: '#6b7280',
+    backgroundColor: '#f3f4f6',
+    padding: '12px',
+    borderRadius: '6px',
+    margin: '0'
   },
   modalButtons: {
     display: 'flex',
-    gap: '10px',
-    justifyContent: 'flex-end',
-    width: '100%',
-    boxSizing: 'border-box',
-    '@media (max-width: 768px)': {
-      flexDirection: 'column'
-    }
+    gap: '12px',
+    justifyContent: 'flex-end'
   },
   cancelButton: {
-    backgroundColor: '#6c757d',
-    color: 'white',
-    border: 'none',
-    borderRadius: '6px',
     padding: '10px 20px',
+    backgroundColor: '#f3f4f6',
+    color: '#374151',
+    border: '1px solid #d1d5db',
+    borderRadius: '6px',
     cursor: 'pointer',
-    '@media (max-width: 768px)': {
-      width: '100%',
-      padding: '12px 20px'
-    }
+    fontSize: '14px'
   },
   dangerButton: {
-    backgroundColor: '#dc3545',
+    padding: '10px 20px',
+    backgroundColor: '#dc2626',
     color: 'white',
     border: 'none',
     borderRadius: '6px',
-    padding: '10px 20px',
     cursor: 'pointer',
-    '@media (max-width: 768px)': {
-      width: '100%',
-      padding: '12px 20px'
-    }
+    fontSize: '14px',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px'
   }
 };
 
-// Add CSS animation for spinner
+// Add CSS animation
 const styleSheet = document.createElement('style');
 styleSheet.textContent = `
   @keyframes spin {
     0% { transform: rotate(0deg); }
     100% { transform: rotate(360deg); }
-  }
-  
-  @media (max-width: 768px) {
-    /* Prevent horizontal scrolling */
-    body {
-      overflow-x: hidden;
-      max-width: 100vw;
-    }
-    
-    /* Improve button touch targets */
-    button {
-      min-height: 44px;
-    }
   }
 `;
 document.head.appendChild(styleSheet);

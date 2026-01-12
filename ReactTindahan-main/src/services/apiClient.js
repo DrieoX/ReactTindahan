@@ -209,32 +209,52 @@ class ApiClient {
       try {
         console.log('🔍 Starting fresh network discovery...');
         
-        // Try common addresses first
-        const commonIPs = [
+        // Try specific IPs first - HIGHEST PRIORITY
+        const specificIPs = [
+          '192.168.100.53',  // Your specific IP
+          '10.111.132.237',  // Your other specific IP
           'localhost',
           '127.0.0.1'
         ];
         
-        for (const ip of commonIPs) {
-          console.log(`🎯 Testing ${ip}...`);
+        console.log('🎯 Testing specific IPs first...');
+        for (const ip of specificIPs) {
+          console.log(`  Testing ${ip}...`);
           if (await this.testConnection(ip)) {
             this.setBaseURL(`http://${ip}:3001`);
-            console.log(`✅ Connected to ${ip}`);
+            console.log(`✅ Connected to specific IP: ${ip}`);
             this.isDiscovering = false;
             resolve(true);
             return;
           }
         }
         
-        // Full network scan
-        console.log('🌐 Starting full network scan...');
+        // Try prioritized IP ranges - HIGH PRIORITY
+        const prioritizedRanges = [
+          '192.168.100',  // Your prioritized range
+          '10.111.132',   // Your other prioritized range
+        ];
         
-        const ipRanges = [
-          '192.168.100',
+        console.log('🎯 Scanning prioritized IP ranges...');
+        for (const range of prioritizedRanges) {
+          console.log(`  Scanning ${range}.x (priority range)...`);
+          const found = await this.scanIPRange(range, true); // true = priority scan
+          if (found) {
+            this.isDiscovering = false;
+            resolve(true);
+            return;
+          }
+        }
+        
+        // Full network scan for other common ranges - STANDARD PRIORITY
+        console.log('🌐 Starting standard network scan...');
+        
+        const standardRanges = [
           '192.168.1',
           '192.168.0',
           '10.0.0',
           '10.0.1',
+          '10.0.2',
           '172.16.0',
           '172.17.0',
           '172.18.0',
@@ -242,9 +262,9 @@ class ApiClient {
           '172.20.0'
         ];
         
-        for (const range of ipRanges) {
+        for (const range of standardRanges) {
           console.log(`🔍 Scanning ${range}.x network...`);
-          const found = await this.scanIPRange(range);
+          const found = await this.scanIPRange(range, false); // false = standard scan
           if (found) {
             this.isDiscovering = false;
             resolve(true);
@@ -265,20 +285,61 @@ class ApiClient {
     return await this.discoveryPromise;
   }
 
-  async scanIPRange(range) {
+   async scanIPRange(range, isPriority = false) {
     // Create array of IPs to scan
     const ips = [];
-    for (let i = 1; i <= 254; i++) {
-      ips.push(`${range}.${i}`);
+    let likelyIPs = []; // Declare likelyIPs here so it's available in the outer scope
+    
+    if (isPriority) {
+      // For priority ranges, scan common server ports and specific IPs
+      console.log(`  ⚡ Priority scan for ${range}.x`);
+      
+      // First, try the most likely server IPs in priority ranges
+      likelyIPs = [
+        `${range}.1`,   // Gateway/router
+        `${range}.2`,   // Common server IP
+        `${range}.10`,  // Common server IP
+        `${range}.50`,  // Mid-range server IP
+        `${range}.53`,  // Your specific IP pattern
+        `${range}.100`, // Common server IP
+        `${range}.150`, // Common server IP
+        `${range}.200`, // Common server IP
+        `${range}.237`, // Your specific IP pattern
+        `${range}.254`  // Last IP in range
+      ];
+      
+      // Add likely IPs first
+      ips.push(...likelyIPs);
+      
+      // Then add the rest of the range
+      for (let i = 1; i <= 254; i++) {
+        const ip = `${range}.${i}`;
+        if (!likelyIPs.includes(ip)) {
+          ips.push(ip);
+        }
+      }
+    } else {
+      // For standard ranges, scan sequentially
+      console.log(`  🔍 Standard scan for ${range}.x`);
+      for (let i = 1; i <= 254; i++) {
+        ips.push(`${range}.${i}`);
+      }
     }
     
-    // Process in batches of 20 to avoid overwhelming
-    const batchSize = 20;
-    const timeoutPerIP = 3000; // 3 seconds per IP
+    // Process in batches
+    const batchSize = isPriority ? 10 : 20; // Smaller batches for priority
+    const timeoutPerIP = isPriority ? 2000 : 3000; // Faster timeout for priority
     
     for (let i = 0; i < ips.length; i += batchSize) {
       const batch = ips.slice(i, i + batchSize);
-      console.log(`  Batch ${Math.floor(i/batchSize) + 1}/${Math.ceil(ips.length/batchSize)}: Testing ${batch.length} IPs`);
+      const batchNumber = Math.floor(i/batchSize) + 1;
+      const totalBatches = Math.ceil(ips.length/batchSize);
+      
+      if (isPriority && i < likelyIPs.length) {
+        console.log(`    Priority batch ${batchNumber}/${totalBatches}: Testing ${batch.length} likely server IPs`);
+      } else {
+        console.log(`    Batch ${batchNumber}/${totalBatches}: Testing ${batch.length} IPs`);
+      }
       
       // Create and execute promises for this batch
       const batchPromises = batch.map(ip => 
@@ -298,9 +359,10 @@ class ApiClient {
         return true;
       }
       
-      // Optional: Small delay between batches to be network-friendly
+      // Optional: Smaller delay for priority scans
+      const delay = isPriority ? 50 : 100;
       if (i + batchSize < ips.length) {
-        await new Promise(resolve => setTimeout(resolve, 100));
+        await new Promise(resolve => setTimeout(resolve, delay));
       }
     }
     

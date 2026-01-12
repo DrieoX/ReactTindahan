@@ -4,9 +4,9 @@ import { apiClient } from './apiClient';
 
 class DataService {
   constructor() {
-    this.userMode = localStorage.getItem('userMode') || 'server';
-    this.isOwner = this.userMode === 'server';
-    this.isClient = this.userMode === 'client';
+    this.userMode = 'client'; // Always default to client mode
+    this.isOwner = false; // Default to not owner
+    this.isClient = true; // Default to client
     this.serverStatus = 'unknown';
     this.connectionAttempts = 0;
     this.maxAttempts = 3;
@@ -22,21 +22,14 @@ class DataService {
     // Detect platform
     const isNative = window.Capacitor?.isNativePlatform || false;
     console.log('📱 Platform:', isNative ? 'Native Mobile' : 'Web Browser');
-    console.log('📱 Mode from localStorage:', this.userMode, '| Owner:', this.isOwner, '| Client:', this.isClient);
     
-    // If no mode is saved in localStorage, set appropriate default based on platform
-    if (!localStorage.getItem('userMode')) {
-      if (isNative) {
-        this.userMode = 'server'; // Mobile app defaults to owner
-        console.log('📱 Mobile app: Defaulting to Owner mode');
-      } else {
-        this.userMode = 'client'; // Web browser defaults to client
-        console.log('🌐 Web browser: Defaulting to Client mode');
-      }
-      localStorage.setItem('userMode', this.userMode);
-      this.isOwner = this.userMode === 'server';
-      this.isClient = this.userMode === 'client';
-    }
+    // Always use client mode for both web and native
+    // No localStorage check for userMode
+    this.userMode = 'client';
+    this.isOwner = this.userMode === 'server';
+    this.isClient = this.userMode === 'client';
+    
+    console.log('📱 Mode:', this.userMode, '| Owner:', this.isOwner, '| Client:', this.isClient);
     
     this.apiClient = apiClient;
     
@@ -63,207 +56,63 @@ class DataService {
   async attemptConnection() {
     this.connectionAttempts++;
     
-    console.log('🌐 Starting fresh discovery...');
-    const connected = await this.quickNetworkScan();
-    if (connected) {
-      this.serverStatus = 'connected';
-      return true;
-    }
+    console.log('🌐 Attempting connection via apiClient...');
     
-    if (this.connectionAttempts < this.maxAttempts) {
-      console.log(`🔄 Attempt ${this.connectionAttempts}/${this.maxAttempts}: Full scan...`);
-      const discoveredIP = await this.discoverServer();
-      if (discoveredIP) {
-        this.serverStatus = 'connected';
-        return true;
-      }
-    }
-    
-    console.log('❌ All connection attempts failed');
-    this.serverStatus = 'disconnected';
-    return false;
-  }
-
-  async quickNetworkScan() {
-    const quickIPs = [];
-    
-    // Generate quick IPs based on common local subnets
-    for (let i = 1; i <= 50; i++) {
-      quickIPs.push(`192.168.100.${i}`);
-      quickIPs.push(`192.168.1.${i}`);
-      quickIPs.push(`192.168.0.${i}`);
-      quickIPs.push(`10.0.0.${i}`);
-    }
-    
-    // Add the user's current network IP range if we can detect it
-    const userNetworkRange = this.detectUserNetworkRange();
-    if (userNetworkRange) {
-      for (let i = 1; i <= 50; i++) {
-        quickIPs.push(`${userNetworkRange}.${i}`);
-      }
-    }
-    
-    console.log(`🔍 Quick scanning ${quickIPs.length} IPs...`);
-    
-    // Test connections in parallel with small batches to avoid overwhelming
-    const batchSize = 10;
-    for (let i = 0; i < quickIPs.length; i += batchSize) {
-      const batch = quickIPs.slice(i, i + batchSize);
-      const promises = batch.map(ip => this.testConnectionWithTimeout(ip, 1500));
-      const results = await Promise.all(promises);
-      
-      const successfulIndex = results.findIndex(result => result === true);
-      if (successfulIndex !== -1) {
-        const successfulIP = batch[successfulIndex];
-        console.log(`✅ Found server at ${successfulIP}`);
-        this.apiClient.setBaseURL(`http://${successfulIP}:3001`);
-        return true;
-      }
-    }
-    
-    return false;
-  }
-
-  // Try to detect the user's current network range
-  detectUserNetworkRange() {
     try {
-      // This is a simple approach - in a real app you might use more sophisticated detection
-      const location = window.location;
-      if (location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') {
-        const parts = location.hostname.split('.');
-        if (parts.length === 4) {
-          // Looks like an IP address
-          return `${parts[0]}.${parts[1]}.${parts[2]}`;
-        }
-      }
-    } catch (error) {
-      console.log('Could not detect network range:', error);
-    }
-    return null;
-  }
-
-  async testConnectionWithTimeout(ip, timeout = 2000) {
-    return new Promise((resolve) => {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => {
-        controller.abort();
-        resolve(false);
-      }, timeout);
+      // Use apiClient's discovery mechanism
+      const connected = await this.apiClient.discoverServer();
       
-      fetch(`http://${ip}:3001/api/health`, {
-        signal: controller.signal,
-        headers: { 'Accept': 'application/json' }
-      })
-      .then(response => {
-        clearTimeout(timeoutId);
-        if (response.ok) {
-          return response.json().then(data => {
-            resolve(data.app === 'inventory-system');
-          });
-        }
-        resolve(false);
-      })
-      .catch(() => {
-        clearTimeout(timeoutId);
-        resolve(false);
-      });
-    });
+      if (connected) {
+        this.serverStatus = 'connected';
+        console.log('✅ Connected to server via apiClient');
+        return true;
+      }
+      
+      if (this.connectionAttempts < this.maxAttempts) {
+        console.log(`🔄 Attempt ${this.connectionAttempts}/${this.maxAttempts} failed, retrying...`);
+        // Wait a bit before retrying
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        return await this.attemptConnection();
+      }
+      
+      console.log('❌ All connection attempts failed');
+      this.serverStatus = 'disconnected';
+      return false;
+      
+    } catch (error) {
+      console.error('Connection attempt error:', error);
+      
+      if (this.connectionAttempts < this.maxAttempts) {
+        console.log(`🔄 Attempt ${this.connectionAttempts}/${this.maxAttempts} errored, retrying...`);
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        return await this.attemptConnection();
+      }
+      
+      console.log('❌ All connection attempts failed');
+      this.serverStatus = 'disconnected';
+      return false;
+    }
   }
 
   async testSpecificConnection(ip) {
     try {
       console.log(`🔗 Testing ${ip}...`);
       
-      const testURLs = [
-        `http://${ip}:3001`,
-        `http://${ip}`
-      ];
+      // Use apiClient to test the connection
+      const testURL = `http://${ip}:3001`;
+      const connected = await this.apiClient.testConnection(ip);
       
-      for (const testURL of testURLs) {
-        try {
-          const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), 3000);
-          
-          const response = await fetch(`${testURL}/api/health`, {
-            signal: controller.signal,
-            headers: { 'Accept': 'application/json' }
-          });
-          
-          clearTimeout(timeoutId);
-          
-          if (response.ok) {
-            const data = await response.json();
-            if (data.app === 'inventory-system') {
-              this.apiClient.setBaseURL(testURL);
-              console.log(`✅ Connected to ${testURL}`);
-              return true;
-            }
-          }
-        } catch (error) {
-          continue;
-        }
+      if (connected) {
+        this.apiClient.setBaseURL(testURL);
+        console.log(`✅ Connected to ${testURL}`);
+        return true;
       }
+      
       return false;
     } catch (error) {
       console.error('Connection test failed:', error);
       return false;
     }
-  }
-
-  async discoverServer() {
-    if (!this.isClient) return null;
-    
-    console.log('🔍 Full network discovery...');
-    
-    const ipRanges = [
-      '192.168.100',
-      '192.168.1',
-      '192.168.0',
-      '10.0.0',
-      '10.0.1',
-      '172.16.0',
-      '172.17.0',
-      '172.18.0',
-      '172.19.0',
-      '172.20.0'
-    ];
-    
-    const ports = [3001];
-    
-    for (const range of ipRanges) {
-      console.log(`🔍 Scanning ${range}.x network...`);
-      const promises = [];
-      
-      // Scan all 254 IPs in each range
-      for (let i = 1; i <= 254; i++) {
-        const ip = `${range}.${i}`;
-        for (const port of ports) {
-          promises.push(
-            this.testConnectionWithTimeout(ip, 1500).then(success => {
-              if (success) return ip;
-              return null;
-            })
-          );
-        }
-      }
-      
-      // Process in batches of 20 to avoid overwhelming
-      const batchSize = 20;
-      for (let i = 0; i < promises.length; i += batchSize) {
-        const batch = promises.slice(i, i + batchSize);
-        const results = await Promise.all(batch);
-        const successfulIP = results.find(ip => ip !== null);
-        
-        if (successfulIP) {
-          console.log(`✅ Found server at ${successfulIP}`);
-          this.apiClient.setBaseURL(`http://${successfulIP}:3001`);
-          return successfulIP;
-        }
-      }
-    }
-    
-    console.log('❌ No server found in network discovery');
-    return null;
   }
 
   serializeFilters(filters) {
@@ -625,18 +474,20 @@ class DataService {
     this.userMode = mode; 
     this.isOwner = mode === 'server'; 
     this.isClient = mode === 'client'; 
-    localStorage.setItem('userMode', mode); 
+    // No localStorage for userMode - removed
     this.initialize(); 
   }
 
   getServerStatus() { 
+    const serverInfo = this.apiClient.getServerInfo();
     return { 
       status: this.serverStatus, 
       isConnected: this.serverStatus === 'connected', 
       mode: this.userMode, 
-      serverUrl: this.apiClient ? this.apiClient.baseURL : null, 
-      protocol: this.apiClient && this.apiClient.baseURL ? 
-        (this.apiClient.baseURL.startsWith('https') ? 'HTTPS' : 'HTTP') : 'Unknown', 
+      serverUrl: serverInfo.baseURL, 
+      protocol: serverInfo.protocol, 
+      isOwner: this.isOwner, 
+      isClient: this.isClient, 
       attempts: this.connectionAttempts 
     }; 
   }
@@ -680,8 +531,3 @@ class DataService {
 }
 
 export const dataService = new DataService();
-
-const savedMode = localStorage.getItem('userMode');
-if (savedMode) {
-  dataService.setUserMode(savedMode);
-}

@@ -18,6 +18,8 @@ export default function ReportsScreen({ userMode }) {
   const [costData, setCostData] = useState({});
   const [loading, setLoading] = useState(false);
   const [resupplyLoading, setResupplyLoading] = useState(false);
+  const [isInitialized, setIsInitialized] = useState(false);
+  const [costDataLoaded, setCostDataLoaded] = useState(false);
 
   useEffect(() => {
     const today = new Date().toISOString().split('T')[0];
@@ -45,62 +47,153 @@ export default function ReportsScreen({ userMode }) {
         page: 'reports'
       })
     }).catch(console.error);
+    
+    setIsInitialized(true);
   }, []);
 
   useEffect(() => {
-    fetchProductCostData();
-  }, []);
+    if (isInitialized) {
+      fetchProductCostData();
+    }
+  }, [isInitialized]);
 
   useEffect(() => {
-    if (startDate && endDate) {
+    if (isInitialized && startDate && endDate && costDataLoaded) {
+      console.log('✅ Cost data loaded, fetching reports...');
       fetchReport();
       fetchResupplyReport();
     }
-  }, [timeFilter, startDate, endDate, costData]);
+  }, [timeFilter, startDate, endDate, isInitialized, costDataLoaded]);
 
   const fetchProductCostData = async () => {
     try {
-      const resupplyItems = await dataService.getAll('resupplied_items');
-      const stockCardItems = await dataService.getAll('stock_card');
+      console.log('🔍 Starting to fetch product cost data...');
       
-      const costMap = {};
+      // FIRST: Try to get cost data from resupplied_items table
+      let costMap = {};
       
-      // Sort by date descending and get latest cost for each product
-      resupplyItems
-        .filter(item => item && item.resupply_date)
-        .sort((a, b) => new Date(b.resupply_date) - new Date(a.resupply_date))
-        .forEach(item => {
-          if (item.product_id && item.unit_cost) {
-            if (!costMap[item.product_id] || new Date(item.resupply_date) > new Date(costMap[item.product_id].date)) {
-              costMap[item.product_id] = {
-                cost: item.unit_cost,
-                date: item.resupply_date
-              };
+      try {
+        console.log('📊 Attempting to fetch from resupplied_items...');
+        const resuppliedItems = await dataService.getAll('resupplied_items');
+        
+        console.log('📊 Raw resupplied_items data:', resuppliedItems);
+        console.log('📊 Number of resupplied items:', resuppliedItems?.length || 0);
+        
+        if (resuppliedItems && Array.isArray(resuppliedItems)) {
+          // Filter items with unit_cost and sort by date (newest first)
+          const validItems = resuppliedItems
+            .filter(item => item && item.product_id && item.unit_cost != null)
+            .sort((a, b) => {
+              const dateA = new Date(a.resupply_date || a.created_at || 0);
+              const dateB = new Date(b.resupply_date || b.created_at || 0);
+              return dateB - dateA; // Descending (newest first)
+            });
+          
+          console.log('📊 Valid resupplied items with cost:', validItems.length);
+          
+          // Get latest cost for each product
+          validItems.forEach(item => {
+            const productId = item.product_id;
+            const unitCost = parseFloat(item.unit_cost);
+            
+            if (productId && !isNaN(unitCost)) {
+              const itemDate = new Date(item.resupply_date || item.created_at || new Date());
+              const existingDate = costMap[productId] ? new Date(costMap[productId].date) : null;
+              
+              if (!costMap[productId] || itemDate > existingDate) {
+                costMap[productId] = {
+                  cost: unitCost,
+                  date: item.resupply_date || item.created_at || new Date().toISOString(),
+                  source: 'resupplied_items'
+                };
+              }
             }
-          }
-        });
+          });
+          
+          console.log('📊 Cost map after resupplied_items:', costMap);
+        }
+      } catch (err) {
+        console.error('❌ Error fetching from resupplied_items:', err);
+      }
       
-      // Fallback to stock card if no resupply data
-      stockCardItems
-        .filter(item => item && item.transaction_type === 'RESUPPLY')
-        .sort((a, b) => new Date(b.created_at || b.transaction_date) - new Date(a.created_at || a.transaction_date))
-        .forEach(item => {
-          if (item.product_id && item.unit_cost && !costMap[item.product_id]) {
-            costMap[item.product_id] = {
-              cost: item.unit_cost,
-              date: item.created_at || item.transaction_date || new Date().toISOString()
-            };
+      // SECOND: If no data found, try stock_card as fallback
+      if (Object.keys(costMap).length === 0) {
+        try {
+          console.log('📊 No data in resupplied_items, trying stock_card...');
+          const stockCardItems = await dataService.getAll('stock_card');
+          
+          console.log('📊 Raw stock_card data:', stockCardItems);
+          
+          if (stockCardItems && Array.isArray(stockCardItems)) {
+            const resupplyItems = stockCardItems
+              .filter(item => item && item.transaction_type === 'RESUPPLY' && item.unit_cost != null)
+              .sort((a, b) => {
+                const dateA = new Date(a.created_at || a.transaction_date || 0);
+                const dateB = new Date(b.created_at || b.transaction_date || 0);
+                return dateB - dateA; // Descending (newest first)
+              });
+            
+            console.log('📊 Valid stock_card resupply items:', resupplyItems.length);
+            
+            resupplyItems.forEach(item => {
+              const productId = item.product_id;
+              const unitCost = parseFloat(item.unit_cost);
+              
+              if (productId && !isNaN(unitCost)) {
+                const itemDate = new Date(item.created_at || item.transaction_date || new Date());
+                const existingDate = costMap[productId] ? new Date(costMap[productId].date) : null;
+                
+                if (!costMap[productId] || itemDate > existingDate) {
+                  costMap[productId] = {
+                    cost: unitCost,
+                    date: item.created_at || item.transaction_date || new Date().toISOString(),
+                    source: 'stock_card'
+                  };
+                }
+              }
+            });
           }
-        });
+        } catch (err) {
+          console.error('❌ Error fetching from stock_card:', err);
+        }
+      }
+      
+      // THIRD: Try direct query to products table
+      if (Object.keys(costMap).length === 0) {
+        try {
+          console.log('📊 Trying to get cost from products table...');
+          const products = await dataService.getProducts();
+          
+          products.forEach(product => {
+            if (product.product_id && product.unit_cost != null) {
+              const unitCost = parseFloat(product.unit_cost);
+              if (!isNaN(unitCost)) {
+                costMap[product.product_id] = {
+                  cost: unitCost,
+                  date: new Date().toISOString(),
+                  source: 'products_table'
+                };
+              }
+            }
+          });
+        } catch (err) {
+          console.error('❌ Error fetching from products:', err);
+        }
+      }
+      
+      console.log('✅ FINAL COST DATA:', {
+        totalProductsWithCost: Object.keys(costMap).length,
+        costMap: costMap,
+        productIds: Object.keys(costMap),
+        sampleCosts: Object.entries(costMap).slice(0, 5).map(([id, data]) => ({ 
+          product_id: id, 
+          cost: data.cost, 
+          source: data.source 
+        }))
+      });
       
       setCostData(costMap);
-      
-      console.log(`[AUDIT] FETCH_COST_DATA`, {
-        products_with_cost: Object.keys(costMap).length,
-        user_id: user?.user_id,
-        username: user?.username,
-        timestamp: new Date().toISOString()
-      });
+      setCostDataLoaded(true);
       
       // Log audit
       dataService.add('backup', {
@@ -112,11 +205,12 @@ export default function ReportsScreen({ userMode }) {
         details: JSON.stringify({
           action: 'FETCH_COST_DATA',
           products_with_cost: Object.keys(costMap).length,
+          sample_products: Object.entries(costMap).slice(0, 3).map(([id, data]) => ({ id, cost: data.cost })),
           user_id: user?.user_id
         })
       }).catch(console.error);
     } catch (err) {
-      console.error("Error fetching cost data:", err);
+      console.error("❌ Error fetching cost data:", err);
       console.error(`[AUDIT] FETCH_COST_DATA_ERROR`, {
         error: err.message,
         user_id: user?.user_id,
@@ -126,82 +220,84 @@ export default function ReportsScreen({ userMode }) {
     }
   };
 
-  const isToday = (dateStr) => {
-    if (!dateStr) return false;
-    try {
-      const date = new Date(dateStr.split('T')[0]);
-      const today = new Date();
-      return (
-        date.getDate() === today.getDate() &&
-        date.getMonth() === today.getMonth() &&
-        date.getFullYear() === today.getFullYear()
-      );
-    } catch {
-      return false;
+  // Helper function to normalize dates for comparison
+  const normalizeDate = (dateInput) => {
+    if (!dateInput) return null;
+    
+    // If it's already a Date object
+    if (dateInput instanceof Date) {
+      return dateInput.toISOString().split('T')[0];
     }
-  };
-
-  const isThisWeek = (dateStr) => {
-    try {
-      const date = new Date(dateStr.split('T')[0]);
-      const now = new Date();
-      const firstDay = new Date(now.setDate(now.getDate() - now.getDay()));
-      const lastDay = new Date(now.setDate(now.getDate() - now.getDay() + 6));
-      return date >= firstDay && date <= lastDay;
-    } catch {
-      return false;
+    
+    // If it's a string
+    if (typeof dateInput === 'string') {
+      // If it contains 'T' (ISO format), split it
+      if (dateInput.includes('T')) {
+        return dateInput.split('T')[0];
+      }
+      // If it's already YYYY-MM-DD format
+      if (dateInput.match(/^\d{4}-\d{2}-\d{2}$/)) {
+        return dateInput;
+      }
+      // Try to parse other formats
+      try {
+        const date = new Date(dateInput);
+        return date.toISOString().split('T')[0];
+      } catch (e) {
+        console.error('Error parsing date:', dateInput, e);
+        return null;
+      }
     }
-  };
-
-  const isThisMonth = (dateStr) => {
-    try {
-      const date = new Date(dateStr.split('T')[0]);
-      const now = new Date();
-      return date.getMonth() === now.getMonth() && date.getFullYear() === now.getFullYear();
-    } catch {
-      return false;
-    }
-  };
-
-  const isThisYear = (dateStr) => {
-    try {
-      const date = new Date(dateStr.split('T')[0]);
-      const now = new Date();
-      return date.getFullYear() === now.getFullYear();
-    } catch {
-      return false;
-    }
-  };
-
-  const isInDateRange = (dateStr) => {
-    if (!startDate || !endDate) return false;
-    try {
-      const date = new Date(dateStr.split('T')[0]);
-      const start = new Date(startDate);
-      const end = new Date(endDate);
-      end.setHours(23, 59, 59, 999);
-      return date >= start && date <= end;
-    } catch {
-      return false;
-    }
+    
+    return null;
   };
 
   const matchesFilter = (dateStr) => {
     if (!dateStr) return false;
     
-    if (timeFilter === 'custom' && startDate && endDate) {
-      return isInDateRange(dateStr);
-    }
-    
-    switch (timeFilter) {
-      case 'weekly':
-        return isThisWeek(dateStr);
-      case 'monthly':
-        return isThisMonth(dateStr);
-      case 'yearly':
-        return isThisYear(dateStr);
-      default:
-        return isToday(dateStr);
+    try {
+      // Normalize the date string
+      const normalizedDate = normalizeDate(dateStr);
+      
+      if (!normalizedDate) {
+        console.log('DEBUG: Could not normalize date:', dateStr);
+        return false;
+      }
+      
+      const date = new Date(normalizedDate);
+      const today = new Date();
+      const todayNormalized = today.toISOString().split('T')[0];
+      
+      if (timeFilter === 'custom' && startDate && endDate) {
+        const start = new Date(startDate);
+        const end = new Date(endDate);
+        end.setHours(23, 59, 59, 999);
+        return date >= start && date <= end;
+      }
+      
+      switch (timeFilter) {
+        case 'weekly':
+          const weekStart = new Date(today);
+          weekStart.setDate(today.getDate() - today.getDay());
+          weekStart.setHours(0, 0, 0, 0);
+          const weekEnd = new Date(weekStart);
+          weekEnd.setDate(weekStart.getDate() + 6);
+          weekEnd.setHours(23, 59, 59, 999);
+          return date >= weekStart && date <= weekEnd;
+        
+        case 'monthly':
+          return date.getMonth() === today.getMonth() && 
+                 date.getFullYear() === today.getFullYear();
+        
+        case 'yearly':
+          return date.getFullYear() === today.getFullYear();
+        
+        default: // daily
+          return normalizedDate === todayNormalized;
+      }
+    } catch (err) {
+      console.error('Error in matchesFilter:', err, dateStr);
+      return false;
     }
   };
 
@@ -251,6 +347,13 @@ export default function ReportsScreen({ userMode }) {
       timestamp: new Date().toISOString()
     });
     
+    // Reset to today for non-custom filters
+    if (newFilter !== 'custom') {
+      const today = new Date().toISOString().split('T')[0];
+      setStartDate(today);
+      setEndDate(today);
+    }
+    
     setTimeFilter(newFilter);
     
     // Log audit
@@ -276,17 +379,30 @@ export default function ReportsScreen({ userMode }) {
       }
       return `${new Date(startDate).toLocaleDateString()} - ${new Date(endDate).toLocaleDateString()}`;
     }
-    return new Date().toLocaleDateString();
+    
+    const today = new Date();
+    
+    switch(timeFilter) {
+      case 'weekly':
+        const weekStart = new Date(today);
+        weekStart.setDate(today.getDate() - today.getDay());
+        const weekEnd = new Date(weekStart);
+        weekEnd.setDate(weekStart.getDate() + 6);
+        return `${weekStart.toLocaleDateString()} - ${weekEnd.toLocaleDateString()}`;
+      
+      case 'monthly':
+        return today.toLocaleDateString('default', { month: 'long', year: 'numeric' });
+      
+      case 'yearly':
+        return today.getFullYear().toString();
+      
+      default:
+        return new Date().toLocaleDateString();
+    }
   };
 
   const getDateRangeForExport = () => {
-    if (timeFilter === 'custom' && startDate && endDate) {
-      if (startDate === endDate) {
-        return `${new Date(startDate).toLocaleDateString()}`;
-      }
-      return `${new Date(startDate).toLocaleDateString()} to ${new Date(endDate).toLocaleDateString()}`;
-    }
-    return `${new Date().toLocaleDateString()}`;
+    return getDateRangeLabel();
   };
 
   const downloadCSV = async () => {
@@ -339,7 +455,6 @@ export default function ReportsScreen({ userMode }) {
     const headers = ['Date', 'Created By', 'Created At', 'Product', 'Quantity', 'Selling Price', 'Cost Price', 'Income', 'Total Sale', 'Total Cost', 'Total Income'];
     
     const csvData = report.flatMap(sale => {
-      const totalItemsInSale = sale.items.reduce((sum, item) => sum + item.quantity, 0);
       const saleTotal = sale.totalAmount || 0;
       const saleCost = sale.totalCost || 0;
       const saleIncome = saleTotal - saleCost;
@@ -481,8 +596,8 @@ export default function ReportsScreen({ userMode }) {
           .income-negative { color: #c62828; font-weight: bold; }
           .total-row { background-color: #e8f5e8; font-weight: bold; }
           .cost-row { background-color: #fff5f5; }
-          .income-row { background-color: #f0f9ff; }
-          .footer { margin-top: 30px; text-align: center; color: #7f8c8d; font-size: 12px; }
+          .income-row { background-color: '#f0f9ff'; }
+          .footer { margin-top: 30px; text-align: center; color: '#7f8c8d'; font-size: 12px; }
           @media print {
             body { margin: 0; }
             .no-print { display: none; }
@@ -546,7 +661,6 @@ export default function ReportsScreen({ userMode }) {
           </thead>
           <tbody>
             ${report.map(sale => {
-              const totalItemsInSale = sale.items.reduce((sum, item) => sum + item.quantity, 0);
               const saleTotal = sale.totalAmount || 0;
               const saleCost = sale.totalCost || 0;
               const saleIncome = saleTotal - saleCost;
@@ -623,8 +737,22 @@ export default function ReportsScreen({ userMode }) {
       // Get all sales
       const sales = await dataService.getSales();
       
-      // Filter sales by date
-      const filteredSales = sales.filter(s => matchesFilter(s.sales_date));
+      console.log('DEBUG REPORTS: Total sales:', sales.length);
+      console.log('DEBUG REPORTS: Sample sale:', sales[0]);
+
+      // Filter sales by date using improved matchesFilter
+      const filteredSales = sales.filter(s => {
+        if (!s.sales_date) {
+          console.log('DEBUG REPORTS: Sale missing date:', s);
+          return false;
+        }
+        
+        const matches = matchesFilter(s.sales_date);
+        
+        return matches;
+      });
+
+      console.log('DEBUG REPORTS: Filtered sales:', filteredSales.length);
 
       if (filteredSales.length === 0) {
         setReport([]);
@@ -635,12 +763,19 @@ export default function ReportsScreen({ userMode }) {
       // Get sale items for filtered sales
       const saleItems = [];
       for (const sale of filteredSales) {
-        const items = await dataService.getSaleItems(sale.sales_id);
-        saleItems.push(...items.map(item => ({ ...item, sales_id: sale.sales_id })));
+        try {
+          const items = await dataService.getSaleItems(sale.sales_id);
+          console.log(`DEBUG: Sale ${sale.sales_id} items:`, items);
+          saleItems.push(...items.map(item => ({ ...item, sales_id: sale.sales_id })));
+        } catch (err) {
+          console.error(`Error fetching items for sale ${sale.sales_id}:`, err);
+        }
       }
 
       // Get all products for lookup
       const products = await dataService.getProducts();
+      console.log('DEBUG: Total products:', products.length);
+      console.log('DEBUG: Sample product:', products[0]);
 
       // Group sale items by sales_id
       const groupedSales = {};
@@ -648,6 +783,10 @@ export default function ReportsScreen({ userMode }) {
         if (!groupedSales[item.sales_id]) groupedSales[item.sales_id] = [];
         groupedSales[item.sales_id].push(item);
       }
+
+      console.log('DEBUG: Cost data available:', costData);
+      console.log('DEBUG: Looking for product 4 in costData:', costData[4]);
+      console.log('DEBUG: All cost data keys:', Object.keys(costData));
 
       // Enrich sales data with cost calculations
       const enriched = Object.entries(groupedSales).map(([sales_id, items]) => {
@@ -661,11 +800,28 @@ export default function ReportsScreen({ userMode }) {
           const product = products.find(p => p.product_id === i.product_id);
           const productName = product?.name || 'Unknown Product';
           const sellingPrice = i.unit_price || i.amount || product?.unit_price || 0;
-          const costPrice = costData[i.product_id]?.cost || 0;
+          
+          // Get cost price from costData
+          const productCostData = costData[i.product_id];
+          const costPrice = productCostData?.cost || 0;
           const quantity = i.quantity || 0;
           const revenue = (sellingPrice * quantity) || 0;
           const cost = (costPrice * quantity) || 0;
           const income = revenue - cost;
+          
+          console.log('DEBUG ITEM COST:', {
+            productId: i.product_id,
+            productName: productName,
+            sellingPrice: sellingPrice,
+            costPrice: costPrice,
+            quantity: quantity,
+            revenue: revenue,
+            cost: cost,
+            income: income,
+            costDataExists: !!productCostData,
+            costData: productCostData,
+            allCostData: costData
+          });
           
           if (!combinedItems[productName]) {
             combinedItems[productName] = {
@@ -693,7 +849,8 @@ export default function ReportsScreen({ userMode }) {
         return {
           sales_id: parseInt(sales_id),
           sales_date: sale?.sales_date,
-          created_by: sale?.created_by || 'Unknown',
+          // Use username field from sale data
+          created_by: sale?.username || sale?.created_by || 'Unknown',
           created_at: sale?.created_at || '',
           items: productDetails,
           totalAmount: saleTotal,
@@ -702,6 +859,15 @@ export default function ReportsScreen({ userMode }) {
         };
       }).sort((a, b) => new Date(b.sales_date) - new Date(a.sales_date));
 
+      console.log('DEBUG ENRICHED REPORT:', {
+        totalSales: enriched.length,
+        sampleSale: enriched.length > 0 ? enriched[0] : null,
+        costDataSummary: {
+          totalProductsWithCost: Object.keys(costData).length,
+          sampleCosts: Object.entries(costData).slice(0, 3).map(([id, data]) => ({ id, cost: data.cost, source: data.source }))
+        }
+      });
+      
       setReport(enriched);
       
       // Log audit
@@ -717,6 +883,7 @@ export default function ReportsScreen({ userMode }) {
           start_date: startDate,
           end_date: endDate,
           total_sales: filteredSales.length,
+          total_items: saleItems.length,
           user_id: user?.user_id
         })
       }).catch(console.error);
@@ -765,7 +932,7 @@ export default function ReportsScreen({ userMode }) {
       // Group resupply items by date
       const groupedResupplies = {};
       for (const item of filteredResupplies) {
-        const key = item.resupply_date.split('T')[0]; // Use date part only
+        const key = normalizeDate(item.resupply_date) || item.resupply_date.split('T')[0];
         if (!groupedResupplies[key]) groupedResupplies[key] = [];
         groupedResupplies[key].push(item);
       }
@@ -835,6 +1002,12 @@ export default function ReportsScreen({ userMode }) {
     } finally {
       setResupplyLoading(false);
     }
+  };
+
+  const refreshCostData = async () => {
+    console.log('🔄 Refreshing cost data...');
+    setCostDataLoaded(false);
+    await fetchProductCostData();
   };
 
   const totalItemsSold = report.reduce((sum, sale) => 
@@ -908,6 +1081,13 @@ export default function ReportsScreen({ userMode }) {
             >
               📥 PDF
             </button>
+            <button 
+              onClick={refreshCostData}
+              style={{...styles.downloadButton, backgroundColor: '#10B981'}}
+              disabled={loading}
+            >
+              🔄 Refresh Cost Data
+            </button>
           </div>
         </div>
       </div>
@@ -953,6 +1133,17 @@ export default function ReportsScreen({ userMode }) {
           </p>
         </div>
       </div>
+
+      {!costDataLoaded && (
+        <div style={styles.warningCard}>
+          <p style={styles.warningText}>
+            ⚠️ Cost data is still loading. If costs show as zero, please wait or click "Refresh Cost Data" above.
+          </p>
+          <p style={styles.warningSubText}>
+            Current cost data status: {Object.keys(costData).length} products with cost data loaded.
+          </p>
+        </div>
+      )}
 
       <div style={styles.contentContainer}>
         <div style={styles.mainSection}>

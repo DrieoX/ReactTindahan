@@ -55,21 +55,39 @@ export default function SuppliersScreen({ userMode }) {
     }
   }, []);
 
-  // Fetch deleted suppliers for recycle bin
+  // Fetch deleted suppliers for recycle bin - FIXED to use deleted_items table
   const fetchDeletedSuppliers = async () => {
     try {
       setDeletedItemsLoading(true);
       
-      // Get deleted items from backup table
-      const deletedItems = await dataService.getAll('backup');
+      // ✅ FIXED: Get deleted items from deleted_items table instead of backup table
+      const deletedItems = await dataService.getAll('deleted_items', {
+        where: { entity_type: 'supplier' }
+      });
       
-      // Filter for deleted suppliers
+      // Create a map of user IDs to usernames
+      const userIds = [...new Set(deletedItems.map(item => item.deleted_by).filter(Boolean))];
+      const userPromises = userIds.map(id => dataService.getById('users', id));
+      const users = await Promise.all(userPromises);
+      
+      const userMap = {};
+      users.forEach(user => {
+        if (user) {
+          userMap[user.user_id] = user.username;
+        }
+      });
+      
+      // Filter for pending deletion and add usernames
       const deletedSuppliersData = deletedItems
         .filter(item => 
-          item.backup_type === 'deleted_supplier' && 
+          item.entity_type === 'supplier' && 
           !item.restored_at && 
           !item.confirmed_at
         )
+        .map(item => ({
+          ...item,
+          username: item.deleted_by ? (userMap[item.deleted_by] || 'Unknown') : 'Unknown'
+        }))
         .reverse();
       
       setDeletedSuppliers(deletedSuppliersData);
@@ -79,7 +97,7 @@ export default function SuppliersScreen({ userMode }) {
       sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
       
       const newDeletedCount = deletedSuppliersData
-        .filter(item => new Date(item.created_at) > sevenDaysAgo)
+        .filter(item => new Date(item.deleted_at) > sevenDaysAgo)
         .length;
       
       setNewDeletedItems(newDeletedCount);
@@ -237,24 +255,21 @@ export default function SuppliersScreen({ userMode }) {
         }
       }
       
-      // Store deleted supplier in backup table
-      await dataService.add('backup', {
-        user_id: user?.user_id,
-        username: user?.username,
-        backup_name: `DELETED_SUPPLIER_${supplier.name}`,
-        backup_type: 'deleted_supplier',
-        created_at: new Date().toISOString(),
-        schema_version: '6',
-        details: JSON.stringify(supplier),
+      // ✅ FIXED: Store deleted supplier in deleted_items table instead of backup
+      await dataService.add('deleted_items', {
+        entity_type: 'supplier',
+        entity_id: id,
+        original_data: JSON.stringify(supplier),
+        deleted_by: user?.user_id,
+        deleted_at: new Date().toISOString(),
         restored_at: null,
-        confirmed_at: null,
-        original_id: id
+        confirmed_at: null
       });
       
       // Now delete from original table
       await dataService.delete('suppliers', id);
       
-      // ✅ Log to backup table
+      // ✅ Log to backup table for audit
       await logAudit('DELETE_SUPPLIER_TO_RECYCLE', {
         supplier_id: id,
         supplier_name: supplier.name,
@@ -293,7 +308,7 @@ export default function SuppliersScreen({ userMode }) {
 
   // Handle restoring deleted supplier (owner only)
   const handleRestoreSupplier = async (deletedItem) => {
-    const details = JSON.parse(deletedItem.details || '{}');
+    const details = JSON.parse(deletedItem.original_data || '{}');
     
     if (!window.confirm(`Are you sure you want to restore supplier "${details.name}"?`)) return;
     
@@ -302,7 +317,7 @@ export default function SuppliersScreen({ userMode }) {
       const supplierData = {
         ...details,
         created_at: new Date().toISOString(),
-        created_by: `${deletedItem.username} (restored)`
+        created_by: `${user?.username} (restored)`
       };
       
       // Remove the deleted fields before restoring
@@ -312,15 +327,15 @@ export default function SuppliersScreen({ userMode }) {
       
       const result = await dataService.add('suppliers', supplierData);
       
-      // Update backup record
-      await dataService.update('backup', deletedItem.backup_id, {
+      // Update deleted_items record
+      await dataService.update('deleted_items', deletedItem.deleted_id, {
         restored_at: new Date().toISOString(),
         restored_by: user?.username
       });
       
-      // ✅ Log to backup table
+      // ✅ Log to backup table for audit
       await logAudit('RESTORE_SUPPLIER', {
-        backup_id: deletedItem.backup_id,
+        deleted_id: deletedItem.deleted_id,
         supplier_name: details.name,
         user_id: user?.user_id,
         username: user?.username
@@ -340,20 +355,19 @@ export default function SuppliersScreen({ userMode }) {
 
   // Handle permanent deletion of supplier (owner only)
   const handlePermanentDeleteSupplier = async (deletedItem) => {
-    const details = JSON.parse(deletedItem.details || '{}');
+    const details = JSON.parse(deletedItem.original_data || '{}');
     
     if (!window.confirm(`Are you sure you want to permanently delete supplier "${details.name}"? This action cannot be undone.`)) return;
     
     try {
-      // Mark as confirmed deletion
-      await dataService.update('backup', deletedItem.backup_id, {
-        confirmed_at: new Date().toISOString(),
-        confirmed_by: user?.username
+      // Mark as confirmed deletion in deleted_items table
+      await dataService.update('deleted_items', deletedItem.deleted_id, {
+        confirmed_at: new Date().toISOString()
       });
       
-      // ✅ Log to backup table
+      // ✅ Log to backup table for audit
       await logAudit('PERMANENT_DELETE_SUPPLIER', {
-        backup_id: deletedItem.backup_id,
+        deleted_id: deletedItem.deleted_id,
         supplier_name: details.name,
         user_id: user?.user_id,
         username: user?.username
@@ -714,16 +728,16 @@ export default function SuppliersScreen({ userMode }) {
                         {deletedSuppliers.map((item) => {
                           let details = {};
                           try {
-                            details = JSON.parse(item.details || '{}');
+                            details = JSON.parse(item.original_data || '{}');
                           } catch {
                             details = { name: 'Unknown Supplier' };
                           }
                           
-                          const isNew = new Date(item.created_at) > new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+                          const isNew = new Date(item.deleted_at) > new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
                           const isPending = !item.restored_at && !item.confirmed_at;
                           
                           return (
-                            <tr key={item.backup_id} style={{
+                            <tr key={item.deleted_id} style={{
                               ...styles.tableRow,
                               backgroundColor: isNew ? '#fffbeb' : 'transparent',
                               borderLeft: isNew ? '4px solid #f59e0b' : 'none'
@@ -741,10 +755,10 @@ export default function SuppliersScreen({ userMode }) {
                               </td>
                               <td style={styles.tableCell}>
                                 {item.username || 'Unknown'}<br/>
-                                <small style={{ color: '#94a3b8' }}>ID: {item.user_id || 'N/A'}</small>
+                                <small style={{ color: '#94a3b8' }}>ID: {item.deleted_by || 'N/A'}</small>
                               </td>
                               <td style={styles.tableCell}>
-                                {formatRecycleDate(item.created_at)}
+                                {formatRecycleDate(item.deleted_at)}
                                 {isNew && <span style={styles.newBadge}>NEW</span>}
                               </td>
                               <td style={styles.tableCell}>
